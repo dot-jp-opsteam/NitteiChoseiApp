@@ -1,0 +1,1652 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OPS日調アプリ（デモ）</title>
+<style>
+  :root{
+    --bg:#f2f7f5; --panel:#ffffff; --line:#e0e9e5; --line2:#eef3f1;
+    --ink:#16302a; --sub:#5f7169; --mut:#93a49c;
+    --brand:#0ea678; --brand-d:#0b8a63; --brand-soft:#e2f5ec; --brand-lite:#34d399;
+    --ok:#16a34a; --ok-soft:#e7f6ec; --warn:#d97706; --warn-soft:#fdf1e0;
+    --bad:#dc2626; --bad-soft:#fdecec; --info:#0891b2;
+    --iv:#7c3aed; --iv-soft:#f0eafe; /* 面談カレンダー用 */
+    --radius:12px; --shadow:0 1px 2px rgba(16,40,32,.06),0 1px 3px rgba(16,40,32,.08);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif;
+    color:var(--ink); background:var(--bg); font-size:15px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit}
+  a{color:var(--brand);text-decoration:none}
+  .hidden{display:none !important}
+
+  /* ---------- App shell ---------- */
+  #app{min-height:100vh;display:flex;flex-direction:column;max-width:960px;margin:0 auto;background:var(--bg)}
+  header.topbar{
+    position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:10px;padding:10px 14px;
+  }
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.02em}
+  .logo .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--brand),var(--brand-lite));
+    display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800}
+  .logo small{font-weight:600;color:var(--sub);font-size:11px;display:block;line-height:1.1}
+  .topbar .spacer{flex:1}
+
+  /* role/user chip */
+  .userchip{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
+    border-radius:999px;padding:4px 6px 4px 10px;font-size:13px;cursor:pointer}
+  .userchip .av{width:24px;height:24px;border-radius:50%;background:var(--brand-soft);color:var(--brand-d);
+    display:grid;place-items:center;font-weight:700;font-size:12px}
+  .rolebadge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+  .role-intern{background:var(--brand-soft);color:var(--brand-d)}
+  .role-staff{background:var(--ok-soft);color:#0f7a37}
+  .role-admin{background:#efeafe;color:#6d28d9}
+
+  main{flex:1;padding:16px 14px 92px}
+  .view{animation:fade .18s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  h1.page{font-size:20px;margin:2px 0 2px}
+  .page-sub{color:var(--sub);font-size:13px;margin:0 0 16px}
+
+  /* ---------- Cards ---------- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .card+.card{margin-top:12px}
+  .card .ch{padding:14px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:10px}
+  .card .ch h3{margin:0;font-size:15px}
+  .card .cb{padding:14px 16px}
+  .card.click{cursor:pointer;transition:border-color .15s,transform .05s}
+  .card.click:hover{border-color:#cdd7e3}
+  .card.click:active{transform:scale(.997)}
+
+  .home-tile .cb{display:flex;align-items:center;gap:14px}
+  .tile-ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:20px;flex:none}
+  .tile-t{font-weight:700}
+  .tile-d{color:var(--sub);font-size:13px}
+  .tile-arrow{margin-left:auto;color:var(--mut);font-size:20px}
+
+  /* ---------- Buttons ---------- */
+  .btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    border-radius:10px;padding:11px 16px;min-height:44px;font-size:14px;font-weight:600;cursor:pointer;
+    display:inline-flex;align-items:center;gap:7px;justify-content:center;transition:.12s}
+  .btn:hover{border-color:#cdd7e3}
+  .btn:active{transform:scale(.98)}
+  .btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.pri:hover{background:var(--brand-d);border-color:var(--brand-d)}
+  .btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+  .btn.bad{background:#fff;border-color:#f2b8b8;color:var(--bad)}
+  .btn.bad:hover{background:var(--bad-soft)}
+  .btn.ghost{background:transparent;border-color:transparent;color:var(--brand);padding-left:6px;padding-right:6px}
+  .btn.sm{padding:8px 12px;min-height:38px;font-size:13px;border-radius:8px}
+  .btn.block{width:100%}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ---------- Forms ---------- */
+  label.fl{display:block;font-size:13px;font-weight:600;color:var(--sub);margin:14px 0 5px}
+  label.fl .req{color:var(--bad);font-weight:700;margin-left:3px}
+  input,select,textarea{
+    width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;
+    background:#fff;color:var(--ink);font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+  textarea{resize:vertical;min-height:96px;line-height:1.6}
+  .field-err{color:var(--bad);font-size:12px;margin-top:5px;display:none}
+  .field-err.show{display:block}
+  .seg{display:flex;gap:8px;flex-wrap:wrap}
+  .seg label{flex:1;min-width:120px;position:relative}
+  .seg input{position:absolute;opacity:0;pointer-events:none}
+  .seg .segb{display:block;text-align:center;padding:11px;border:1px solid var(--line);border-radius:10px;
+    cursor:pointer;font-weight:600;color:var(--sub);transition:.12s;background:#fff}
+  .seg input:checked + .segb{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+
+  /* ---------- Status pills ---------- */
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.9}
+  .st-none{background:#eef2f6;color:#64748b}
+  .st-applied{background:var(--warn-soft);color:var(--warn)}
+  .st-fixed{background:var(--ok-soft);color:#0f7a37}
+  .st-failed{background:var(--bad-soft);color:var(--bad)}
+
+  /* ---------- List rows ---------- */
+  .rowlist{display:flex;flex-direction:column}
+  .rowlist .row{padding:13px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;cursor:pointer;transition:background .1s}
+  .rowlist .row:last-child{border-bottom:0}
+  .rowlist .row:hover{background:#fafbfc}
+  .row .av{width:36px;height:36px;border-radius:50%;background:var(--brand-soft);color:var(--brand-d);display:grid;place-items:center;font-weight:700;flex:none}
+  .row .rmain{flex:1;min-width:0}
+  .row .rt{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .rs{font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--sub);margin:2px 0}
+  .meta b{color:var(--ink);font-weight:600}
+  .kv{display:grid;grid-template-columns:96px 1fr;gap:8px 12px;font-size:14px}
+  .kv dt{color:var(--sub);font-size:13px}
+  .kv dd{margin:0;font-weight:600}
+
+  .choice-list{display:flex;flex-direction:column;gap:8px}
+  .choice{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:10px}
+  .choice .cn{width:22px;height:22px;border-radius:6px;background:var(--brand-soft);color:var(--brand-d);display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
+  .choice.sel{border-color:var(--ok);background:var(--ok-soft)}
+  .choice .pick{margin-left:auto}
+
+  .empty{text-align:center;color:var(--mut);padding:40px 16px}
+  .empty .ei{font-size:34px;opacity:.5}
+
+  .divider{height:1px;background:var(--line2);margin:16px 0}
+  .hint{background:var(--brand-soft);border:1px solid #bfe8d5;color:#0b5e45;border-radius:10px;padding:10px 12px;font-size:13px;display:flex;gap:8px}
+  .hint.mock{background:#fff8e6;border-color:#f3e2b0;color:#7a5b13}
+
+  /* event vote bars */
+  .votebar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:#eef2f6;margin:8px 0}
+  .votebar i{display:block}
+  .vb-ok{background:var(--ok)} .vb-may{background:var(--warn)} .vb-no{background:var(--bad)}
+  .votekeys{display:flex;gap:14px;font-size:12px;color:var(--sub)}
+  .votekeys b{color:var(--ink)}
+  .vote3{display:flex;gap:8px}
+  .vote3 .v{flex:1;text-align:center;padding:12px 6px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-weight:700}
+  .vote3 .v .em{font-size:20px;display:block}
+  .vote3 .v.on-ok{border-color:var(--ok);background:var(--ok-soft);color:#0f7a37}
+  .vote3 .v.on-may{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
+  .vote3 .v.on-no{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
+
+  /* availability grid */
+  .avail{display:flex;flex-direction:column;gap:10px}
+  .avail .staff{border:1px solid var(--line);border-radius:10px;padding:12px}
+  .avail .sname{font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between}
+  .slots{display:flex;flex-wrap:wrap;gap:6px}
+  .slot{font-size:12px;padding:5px 9px;border-radius:8px;background:var(--ok-soft);color:#0f7a37;font-weight:600}
+  .slot.busy{background:#f1f3f6;color:var(--mut);text-decoration:line-through}
+
+  /* ---------- Bottom nav ---------- */
+  nav.bottomnav{
+    position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:960px;
+    background:var(--panel);border-top:1px solid var(--line);display:flex;z-index:30;
+    padding-bottom:env(safe-area-inset-bottom)}
+  nav.bottomnav button{flex:1;background:none;border:0;padding:10px 4px 9px;min-height:56px;cursor:pointer;color:var(--mut);
+    display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600}
+  nav.bottomnav button .ni{font-size:20px;line-height:1}
+  nav.bottomnav button.active{color:var(--brand)}
+
+  /* ---------- Modal / sheet ---------- */
+  .scrim{position:fixed;inset:0;background:rgba(16,24,40,.42);z-index:50;display:none;align-items:flex-end;justify-content:center}
+  .scrim.open{display:flex}
+  .sheet{background:#fff;width:100%;max-width:960px;border-radius:18px 18px 0 0;padding:8px 16px 22px;max-height:88vh;overflow:auto;animation:up .22s ease}
+  @keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+  .sheet .grab{width:40px;height:4px;border-radius:2px;background:#d7dde5;margin:6px auto 12px}
+  .sheet h3{margin:0 0 4px;font-size:17px}
+  @media(min-width:640px){
+    .scrim{align-items:center}
+    .sheet{border-radius:16px;max-width:520px;margin:0 16px}
+  }
+
+  /* toast */
+  #toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%) translateY(20px);z-index:80;
+    background:#1f2a37;color:#fff;padding:11px 18px;border-radius:999px;font-size:14px;font-weight:600;
+    opacity:0;pointer-events:none;transition:.25s;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90%}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* login */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+    background:radial-gradient(120% 100% at 50% 0%,var(--brand-soft) 0%,var(--bg) 55%)}
+  .login-card{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 40px rgba(16,24,40,.08);
+    padding:28px 24px;width:100%;max-width:380px;text-align:center}
+  .login-card .mark{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--brand),var(--brand-lite));
+    display:grid;place-items:center;color:#fff;font-size:22px;font-weight:800;margin:0 auto 14px}
+  .login-card h2{margin:0 0 4px;font-size:20px}
+  .login-card p{margin:0 0 20px;color:var(--sub);font-size:13px}
+  .role-pick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px}
+  .role-pick label{position:relative}
+  .role-pick input{position:absolute;opacity:0;pointer-events:none}
+  .role-pick .rb{display:block;padding:10px 4px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:var(--sub)}
+  .role-pick .rb .rem{font-size:20px;display:block;margin-bottom:2px}
+  .role-pick input:checked + .rb{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+  .fine{font-size:11px;color:var(--mut);margin-top:16px;line-height:1.5}
+
+  .tag{font-size:11px;background:#eef2f6;color:#64748b;padding:2px 8px;border-radius:6px;font-weight:600}
+
+  /* ---------- date chips (ホットペッパー風) ---------- */
+  .datechips{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 8px;-webkit-overflow-scrolling:touch}
+  .datechips::-webkit-scrollbar{height:0}
+  .datechip{flex:none;min-width:52px;text-align:center;border:1px solid var(--line);border-radius:12px;
+    padding:8px 6px;cursor:pointer;background:#fff;transition:.12s;position:relative}
+  .datechip .dw{font-size:11px;color:var(--sub);font-weight:600}
+  .datechip .dd{font-size:18px;font-weight:800;line-height:1.1;margin-top:1px}
+  .datechip .dc{font-size:10px;color:var(--ok);font-weight:700;margin-top:2px}
+  .datechip.sat .dw,.datechip.sat .dd{color:#2563eb}
+  .datechip.sun .dw,.datechip.sun .dd{color:#dc2626}
+  .datechip.active{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 2px var(--brand-soft)}
+  .datechip.active .dw,.datechip.active .dd{color:var(--brand-d)}
+
+  /* slot grid */
+  .slotgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px}
+  @media(max-width:400px){.slotgrid{grid-template-columns:repeat(2,1fr)}}
+  .slotbtn{position:relative;border:1px solid var(--line);border-radius:10px;padding:11px 4px;text-align:center;
+    font-weight:700;font-size:15px;cursor:pointer;background:#fff;transition:.1s;color:var(--ink)}
+  .slotbtn:hover{border-color:#cdd7e3}
+  .slotbtn.off{background:#f5f6f8;color:#c2cad3;cursor:not-allowed;text-decoration:line-through}
+  .slotbtn.off::after{content:"×";position:absolute;top:3px;right:6px;font-size:11px;color:#cbd3dc}
+  .slotbtn.sel{border-color:var(--brand);background:var(--brand);color:#fff}
+  /* スタッフ不可時間エディタ用の状態 */
+  .slotbtn.avoff{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
+  .slotbtn.avoff::after{content:"×";position:absolute;top:3px;right:6px;font-size:12px;color:var(--bad)}
+  .slotbtn.locked{background:#f1f3f6;color:#aeb7c0;cursor:not-allowed}
+  .slotbtn .tagm{display:block;font-size:9px;font-weight:700;margin-top:1px;opacity:.85}
+
+  /* スクロール式 時間ピッカー */
+  .tpick{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;border:1px solid var(--line);
+    border-radius:10px;background:#fff;cursor:pointer;font-size:15px;font-weight:600;min-height:44px}
+  .tpick.open{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+  .tpick .tpic{color:var(--sub);font-size:16px}
+  .tpbar{margin-top:6px;border:1px solid var(--line);border-radius:10px;background:#fff;
+    max-height:190px;overflow-y:auto;-webkit-overflow-scrolling:touch;box-shadow:var(--shadow)}
+  .tpbar button{display:block;width:100%;text-align:center;border:0;background:none;padding:11px;
+    font-size:15px;font-weight:600;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--line2)}
+  .tpbar button:last-child{border-bottom:0}
+  .tpbar button.on{background:var(--brand-soft);color:var(--brand-d)}
+  .tpbar button:hover{background:#f2f7f5}
+  .tp-wrap{display:flex;gap:10px}
+  .tp-wrap>div{flex:1;min-width:0}
+  .slotbtn.sel .snum{position:absolute;top:-8px;left:-8px;width:22px;height:22px;border-radius:50%;
+    background:var(--warn);color:#fff;font-size:12px;display:grid;place-items:center;border:2px solid #fff}
+  .selsummary{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .selsummary .sr{display:flex;align-items:center;gap:8px;font-size:14px}
+  .selsummary .sr .cn{width:22px;height:22px;border-radius:6px;background:var(--warn-soft);color:var(--warn);
+    display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
+  .selsummary .sr .x{margin-left:auto;color:var(--mut);cursor:pointer;font-size:18px;padding:0 6px}
+
+  /* ---------- month calendar (Googleカレンダー風) ---------- */
+  .cal .calhead{display:flex;align-items:center;justify-content:space-between;padding:2px 2px 10px}
+  .cal .calhead .cm{font-size:17px;font-weight:800}
+  .cal .navbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:#fff;
+    font-size:16px;cursor:pointer;color:var(--sub)}
+  .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+  .caldow{text-align:center;font-size:11px;font-weight:700;color:var(--sub);padding:2px 0}
+  .caldow.sun{color:#dc2626}.caldow.sat{color:#2563eb}
+  .calcell{aspect-ratio:1/1.05;border:1px solid transparent;border-radius:9px;padding:4px 3px;cursor:default;
+    display:flex;flex-direction:column;align-items:center;gap:2px;font-size:13px;background:#fafbfc}
+  .calcell.out{opacity:.35}
+  .calcell.has{cursor:pointer;background:#fff;border-color:var(--line)}
+  .calcell.has:hover{border-color:var(--brand)}
+  .calcell.today .dn{background:var(--brand);color:#fff;border-radius:50%;width:22px;height:22px;display:grid;place-items:center}
+  .calcell.sel{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft)}
+  .calcell .dn{font-weight:600;line-height:1}
+  .calcell .dots{display:flex;gap:2px;flex-wrap:wrap;justify-content:center}
+  .calcell .evdot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+  .calcell .evmore{font-size:9px;color:var(--brand-d);font-weight:800}
+  .cal-legend{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);margin:10px 2px 0}
+
+  /* weekday availability rows */
+  .wkrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line2)}
+  .wkrow:last-child{border-bottom:0}
+  .wkrow .wd{width:28px;font-weight:700;text-align:center}
+  .wkrow .sw{width:44px;height:26px;border-radius:999px;background:#dfe4ea;position:relative;cursor:pointer;flex:none;transition:.15s}
+  .wkrow .sw.on{background:var(--brand)}
+  .wkrow .sw i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}
+  .wkrow .sw.on i{left:21px}
+  .wkrow input[type=time]{padding:7px 8px;font-size:14px}
+  .wkrow .times{display:flex;align-items:center;gap:5px;flex:1}
+  .wkrow.off .times{opacity:.4;pointer-events:none}
+
+  @media(max-width:400px){.kv{grid-template-columns:80px 1fr}}
+
+  /* notification bell */
+  .bell{position:relative;width:40px;height:40px;border-radius:999px;border:1px solid var(--line);
+    background:var(--panel);font-size:18px;cursor:pointer;display:grid;place-items:center;flex:none}
+  .bell:hover{border-color:#cdd7e3}
+  .bell .badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;
+    background:var(--bad);color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid #fff}
+  .noti{display:flex;gap:11px;padding:12px 4px;border-bottom:1px solid var(--line2)}
+  .noti:last-child{border-bottom:0}
+  .noti .nic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:16px;flex:none}
+  .noti .nt{font-weight:600;font-size:14px}
+  .noti .ns{font-size:12px;color:var(--mut)}
+  .noti.unread{background:var(--brand-soft);border-radius:8px;padding-left:8px;padding-right:8px}
+
+  /* calendar: 面談ドット・祝日・ビュー切替 */
+  .calcell .ivdot{width:6px;height:6px;border-radius:50%;background:var(--iv)}
+  .calcell.holiday .dn{color:#dc2626}
+  .calview-tabs{display:flex;gap:6px}
+  .calview-tabs button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;
+    font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;min-height:36px}
+  .calview-tabs button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+  .agenda{display:flex;flex-direction:column}
+  .agenda .ag{display:flex;gap:11px;padding:11px 4px;border-bottom:1px solid var(--line2)}
+  .agenda .ag:last-child{border-bottom:0}
+  .agenda .agd{flex:none;width:52px;text-align:center}
+  .agenda .agd .agn{font-size:18px;font-weight:800;line-height:1}
+  .agenda .agd .agw{font-size:11px;color:var(--sub)}
+  .agenda .agbar{width:4px;border-radius:2px;background:var(--brand);flex:none}
+  .agenda .agbar.iv{background:var(--iv)}
+  .agenda .agt{font-weight:600}
+  .agenda .ags{font-size:12px;color:var(--sub)}
+  .legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-right:3px}
+
+  /* date pager (面談予約) */
+  .datepager{display:flex;align-items:center;gap:8px}
+  .datepager .datechips{flex:1}
+  .datepager .pg{width:38px;height:52px;border-radius:10px;border:1px solid var(--line);background:#fff;
+    font-size:18px;color:var(--sub);cursor:pointer;flex:none}
+  .datepager .pg:disabled{opacity:.35;cursor:not-allowed}
+  .datechip.full{opacity:.45;cursor:not-allowed}
+  .datechip.full .dc{color:var(--mut)}
+
+  /* filter bar */
+  .filterbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .filterbar select,.filterbar input{width:auto;flex:1;min-width:120px;padding:9px 10px;font-size:14px}
+  .chipfilter{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .chipfilter button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 13px;
+    font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;min-height:36px}
+  .chipfilter button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+</style>
+</head>
+<body>
+
+<!-- ========== LOGIN ========== -->
+<div id="login">
+  <div class="login-card">
+    <div class="mark">OPS</div>
+    <h2>OPS日調アプリ</h2>
+    <p>ドットジェイピー 日程調整・面談管理</p>
+
+    <div style="text-align:left">
+      <label class="fl">ニックネーム<span class="req">*</span></label>
+      <input id="loginNick" placeholder="例：たろう" autocomplete="off">
+      <div class="field-err" id="loginNickErr">ニックネームを入力してください</div>
+
+      <label class="fl">所属支部</label>
+      <select id="loginBranch"></select>
+
+      <label class="fl">ログインする区分<span class="tag" style="margin-left:6px">デモ用切替</span></label>
+      <div class="role-pick">
+        <label><input type="radio" name="lrole" value="intern" checked><span class="rb"><span class="rem">🎓</span>インターン生</span></label>
+        <label><input type="radio" name="lrole" value="staff"><span class="rb"><span class="rem">💼</span>スタッフ</span></label>
+        <label><input type="radio" name="lrole" value="admin"><span class="rb"><span class="rem">🛡️</span>管理者</span></label>
+      </div>
+
+      <button class="btn pri block" style="margin-top:20px" onclick="doLogin()">はじめる</button>
+    </div>
+    <p class="fine">これはデモ版です。データはこのブラウザ内（localStorage）にのみ保存され、外部には送信されません。<br>Googleカレンダー連携・メール送信は画面上のモックです。</p>
+  </div>
+</div>
+
+<!-- ========== APP ========== -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="logo"><span class="mark">OPS</span><span>日調アプリ<small>ドットジェイピー</small></span></div>
+    <div class="spacer"></div>
+    <button class="bell" id="bell" onclick="openNotifications()" aria-label="通知">🔔<span class="badge hidden" id="bellBadge">0</span></button>
+    <div class="userchip" onclick="openSwitchUser()">
+      <span class="av" id="chipAv">–</span>
+      <span>
+        <span id="chipName" style="font-weight:600"></span>
+        <span class="rolebadge" id="chipRole"></span>
+      </span>
+    </div>
+  </header>
+
+  <main id="main"></main>
+
+  <nav class="bottomnav" id="nav"></nav>
+</div>
+
+<!-- generic sheet -->
+<div class="scrim" id="scrim" onclick="if(event.target===this)closeSheet()">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =========================================================
+   OPS日調アプリ  デモ用プロトタイプ
+   - 単一ファイル / localStorage / 依存ライブラリなし
+   - Googleカレンダー連携・メール送信はモック
+   ========================================================= */
+
+/* ---------- storage ---------- */
+const DB_KEY='ops_nittyou_v1';
+const nowISO=()=>new Date().toISOString();
+const uid=()=>Math.random().toString(36).slice(2,9);
+
+function seed(){
+  const branches=[{id:'b1',name:'茨城支部'},{id:'b2',name:'東京支部'},{id:'b3',name:'神奈川支部'}];
+  const users=[
+    {id:'u_s1',nickname:'さとう',role:'staff',branch_id:'b1'},
+    {id:'u_s2',nickname:'たなか',role:'staff',branch_id:'b1'},
+    {id:'u_a1',nickname:'かんり',role:'admin',branch_id:'b2'},
+    {id:'u_i1',nickname:'あおい',role:'intern',branch_id:'b1'},
+    {id:'u_i2',nickname:'けんた',role:'intern',branch_id:'b1'},
+    {id:'u_i3',nickname:'みなみ',role:'intern',branch_id:'b3'},
+  ];
+  const d=(days,h,m)=>{const t=new Date();t.setDate(t.getDate()+days);t.setHours(h,m,0,0);return t.toISOString();};
+  const interviews=[
+    {id:'iv1',intern_id:'u_i1',staff_id:'u_s1',status:'applied',
+      choice1:d(3,10,0),choice2:d(4,14,0),choice3:d(5,18,0),
+      meeting_type:'meet',confirmed_datetime:null,created_at:d(-1,9,0)},
+    {id:'iv2',intern_id:'u_i2',staff_id:'u_s1',status:'fixed',
+      choice1:d(2,13,0),choice2:d(3,15,0),choice3:d(6,19,0),
+      meeting_type:'zoom',confirmed_datetime:d(2,13,0),created_at:d(-2,20,0)},
+    {id:'iv3',intern_id:'u_i3',staff_id:'u_s2',status:'failed',
+      choice1:d(-1,10,0),choice2:d(-1,11,0),choice3:d(-1,12,0),
+      meeting_type:'meet',confirmed_datetime:null,created_at:d(-3,12,0)},
+  ];
+  const events=[
+    {id:'ev1',title:'新歓イベント',description:'新規インターン生向けのオリエンテーションです。',
+      start_datetime:d(7,18,0),end_datetime:d(7,20,0),location:'水戸市民会館',
+      meet_url:'',zoom_url:'https://zoom.us/j/123456789',branch_id:'b1',creator_id:'u_s1'},
+    {id:'ev2',title:'全体定例MTG',description:'月次の全体ミーティング。',
+      start_datetime:d(10,19,0),end_datetime:d(10,20,30),location:'オンライン',
+      meet_url:'https://meet.google.com/abc-defg-hij',zoom_url:'',branch_id:'b1',creator_id:'u_a1'},
+  ];
+  const event_responses=[
+    {id:uid(),event_id:'ev1',user_id:'u_i1',response:'ok'},
+    {id:uid(),event_id:'ev1',user_id:'u_i2',response:'may'},
+    {id:uid(),event_id:'ev2',user_id:'u_i1',response:'ok'},
+  ];
+  const emails=[
+    {id:uid(),sender_id:'u_s1',receiver_id:'u_i2',subject:'面談確定のお知らせ',
+      body:'お疲れ様です。面談日程が確定しましたのでお知らせします。',sent_at:d(-2,21,0)},
+  ];
+  // staff availability: 曜日別の面談可能時間帯 + 既存予定(busy, モック)
+  const wk=(over={})=>Object.assign(
+    {0:{on:false,s:'09:00',e:'19:00'},1:{on:true,s:'09:00',e:'19:00'},2:{on:true,s:'09:00',e:'19:00'},
+     3:{on:true,s:'09:00',e:'19:00'},4:{on:true,s:'09:00',e:'19:00'},5:{on:true,s:'09:00',e:'19:00'},
+     6:{on:false,s:'10:00',e:'16:00'}},over);
+  const availability={
+    u_s1:{weekly:wk(),blocks:[
+      {id:'blk1',start:d(3,10,0),end:d(3,12,0),note:'外部MTG'},
+      {id:'blk2',start:d(4,14,0),end:d(4,15,0),note:'授業'}]},
+    u_s2:{weekly:wk({6:{on:true,s:'10:00',e:'16:00'}}),blocks:[
+      {id:'blk3',start:d(2,15,0),end:d(2,17,0),note:'アルバイト'}]},
+  };
+  return {branches,users,interviews,events,event_responses,emails,availability,seededAt:nowISO()};
+}
+
+let DB=load();
+function load(){
+  try{const raw=localStorage.getItem(DB_KEY);if(raw)return JSON.parse(raw);}catch(e){}
+  const s=seed();localStorage.setItem(DB_KEY,JSON.stringify(s));return s;
+}
+function save(){localStorage.setItem(DB_KEY,JSON.stringify(DB));}
+function resetDB(){localStorage.removeItem(DB_KEY);DB=load();}
+
+/* ---------- session ---------- */
+let ME=null; // current user object
+const SESSION_KEY='ops_session_v1';
+
+function findUser(id){return DB.users.find(u=>u.id===id);}
+function branchName(id){const b=DB.branches.find(b=>b.id===id);return b?b.name:'—';}
+
+/* ---------- helpers ---------- */
+const ROLE_JP={intern:'インターン生',staff:'スタッフ',admin:'管理者'};
+const ROLE_CLS={intern:'role-intern',staff:'role-staff',admin:'role-admin'};
+const STATUS={none:{t:'未申請',c:'st-none'},applied:{t:'申請中',c:'st-applied'},fixed:{t:'確定済み',c:'st-fixed'},failed:{t:'不成立',c:'st-failed'}};
+const MTYPE={meet:'Google Meet',zoom:'Zoom'};
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function initials(name){return (name||'?').slice(0,1);}
+function pad(n){return String(n).padStart(2,'0');}
+function fmtDT(iso){if(!iso)return '—';const d=new Date(iso);const w='日月火水木金土'[d.getDay()];
+  return `${d.getMonth()+1}/${d.getDate()}(${w}) ${pad(d.getHours())}:${pad(d.getMinutes())}`;}
+function fmtDate(iso){const d=new Date(iso);const w='日月火水木金土'[d.getDay()];return `${d.getMonth()+1}/${d.getDate()}(${w})`;}
+function fmtRel(iso){const diff=(Date.now()-new Date(iso))/1000;
+  if(diff<60)return 'たった今';if(diff<3600)return Math.floor(diff/60)+'分前';
+  if(diff<86400)return Math.floor(diff/3600)+'時間前';return Math.floor(diff/86400)+'日前';}
+function toInputDT(iso){if(!iso)return '';const d=new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;}
+const WD_JP=['日','月','火','水','木','金','土'];
+const DEFAULT_WEEKLY={0:{on:false,s:'09:00',e:'19:00'},1:{on:true,s:'09:00',e:'19:00'},2:{on:true,s:'09:00',e:'19:00'},
+  3:{on:true,s:'09:00',e:'19:00'},4:{on:true,s:'09:00',e:'19:00'},5:{on:true,s:'09:00',e:'19:00'},6:{on:false,s:'10:00',e:'16:00'}};
+function getWeekly(id){const a=DB.availability&&DB.availability[id];return (a&&a.weekly)?a.weekly:DEFAULT_WEEKLY;}
+function ymd(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+function hm(iso){const d=new Date(iso);return `${pad(d.getHours())}:${pad(d.getMinutes())}`;}
+
+// スタッフの空きスロット（30分刻み）を今後N日分生成
+// 除外条件：曜日別の可能時間帯外／登録済みの不可時間ブロック／確定済み面談
+function genSlots(staffId,days=14){
+  const weekly=getWeekly(staffId);
+  const blocks=((DB.availability[staffId]||{}).blocks||[]).map(b=>[new Date(b.start).getTime(),new Date(b.end).getTime()]);
+  const taken=DB.interviews.filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
+    .map(i=>new Date(i.confirmed_datetime).getTime());
+  const now=Date.now();const out=[];
+  for(let off=0;off<days;off++){
+    const day=new Date();day.setHours(0,0,0,0);day.setDate(day.getDate()+off);
+    const conf=weekly[day.getDay()];
+    if(!conf||!conf.on)continue;
+    const [sh,sm]=conf.s.split(':').map(Number);
+    const [eh,em]=conf.e.split(':').map(Number);
+    const slots=[];
+    for(let t=sh*60+sm; t+30<=eh*60+em; t+=30){
+      const dt=new Date(day);dt.setHours(Math.floor(t/60),t%60,0,0);
+      const st=dt.getTime(),en=st+30*60*1000;
+      if(st<now)continue;
+      const bad=blocks.some(([bs,be])=>st<be&&en>bs) || taken.some(x=>Math.abs(x-st)<30*60*1000-1);
+      slots.push({iso:dt.toISOString(),time:`${pad(Math.floor(t/60))}:${pad(t%60)}`,ok:!bad});
+    }
+    if(slots.length)out.push({dateObj:day,slots});
+  }
+  return out;
+}
+
+// スタッフの不可時間エディタ用：可能時間帯内の全30分枠を状態付きで返す
+// state: 'free'（受付中）/ 'block'（不可）/ 'taken'（確定面談）
+function genEditSlots(staffId,days=14){
+  const weekly=getWeekly(staffId);
+  const blocks=((DB.availability[staffId]||{}).blocks||[]);
+  const taken=DB.interviews.filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
+    .map(i=>new Date(i.confirmed_datetime).getTime());
+  const now=Date.now();const out=[];
+  for(let off=0;off<days;off++){
+    const day=new Date();day.setHours(0,0,0,0);day.setDate(day.getDate()+off);
+    const conf=weekly[day.getDay()];
+    if(!conf||!conf.on)continue;
+    const [sh,sm]=conf.s.split(':').map(Number);
+    const [eh,em]=conf.e.split(':').map(Number);
+    const slots=[];
+    for(let t=sh*60+sm; t+30<=eh*60+em; t+=30){
+      const dt=new Date(day);dt.setHours(Math.floor(t/60),t%60,0,0);
+      const st=dt.getTime(),en=st+30*60*1000;
+      if(st<now)continue;
+      const takenHit=taken.some(x=>Math.abs(x-st)<30*60*1000-1);
+      const blk=blocks.find(b=>{const bs=new Date(b.start).getTime(),be=new Date(b.end).getTime();return st<be&&en>bs;});
+      let state='free',blockId=null,removable=false;
+      if(takenHit)state='taken';
+      else if(blk){state='block';blockId=blk.id;removable=(blk.kind==='slot');}
+      slots.push({iso:dt.toISOString(),time:`${pad(Math.floor(t/60))}:${pad(t%60)}`,state,blockId,removable});
+    }
+    if(slots.length)out.push({dateObj:day,slots});
+  }
+  return out;
+}
+
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200);}
+
+/* ---------- sheet ---------- */
+function openSheet(html){const s=document.getElementById('sheet');
+  s.innerHTML='<div class="grab"></div>'+html;document.getElementById('scrim').classList.add('open');}
+function closeSheet(){document.getElementById('scrim').classList.remove('open');}
+
+/* =========================================================
+   LOGIN
+   ========================================================= */
+function initLoginBranches(){
+  document.getElementById('loginBranch').innerHTML=DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('');
+}
+function doLogin(){
+  const nick=document.getElementById('loginNick').value.trim();
+  const err=document.getElementById('loginNickErr');
+  if(!nick){err.classList.add('show');return;}
+  err.classList.remove('show');
+  const role=document.querySelector('input[name=lrole]:checked').value;
+  const branch=document.getElementById('loginBranch').value;
+  // reuse an existing seeded user of that role if nickname matches, else create
+  let u=DB.users.find(x=>x.nickname===nick&&x.role===role);
+  if(!u){u={id:'u_'+uid(),nickname:nick,role,branch_id:branch,created_at:nowISO()};DB.users.push(u);save();}
+  loginAs(u.id);
+}
+function loginAs(id){
+  ME=findUser(id);
+  localStorage.setItem(SESSION_KEY,ME.id);
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  renderChip();buildNav();go(defaultTab());
+}
+function logout(){localStorage.removeItem(SESSION_KEY);location.reload();}
+
+function renderChip(){
+  document.getElementById('chipAv').textContent=initials(ME.nickname);
+  document.getElementById('chipName').textContent=ME.nickname;
+  const r=document.getElementById('chipRole');
+  r.textContent=ROLE_JP[ME.role];r.className='rolebadge '+ROLE_CLS[ME.role];
+  updateBell();
+}
+
+/* quick user switch (demo convenience) */
+function openSwitchUser(){
+  const rows=DB.users.map(u=>`
+    <div class="row" onclick="closeSheet();loginAs('${u.id}')">
+      <span class="av">${esc(initials(u.nickname))}</span>
+      <span class="rmain"><span class="rt">${esc(u.nickname)}</span>
+        <span class="rs">${branchName(u.branch_id)}</span></span>
+      <span class="rolebadge ${ROLE_CLS[u.role]}">${ROLE_JP[u.role]}</span>
+    </div>`).join('');
+  openSheet(`<h3>ユーザー切替</h3>
+    <p class="page-sub">デモ用：ログインしているユーザーを切り替えて各区分の画面を確認できます。</p>
+    <div class="card"><div class="rowlist">${rows}</div></div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn block" onclick="closeSheet();logout()">ログアウト</button>
+    </div>
+    <button class="btn ghost block" style="margin-top:6px;color:var(--bad)" onclick="if(confirm('デモデータを初期状態に戻します。よろしいですか？')){resetDB();closeSheet();toast('データを初期化しました');go(currentTab)}">デモデータを初期化</button>`);
+}
+
+/* =========================================================
+   NAVIGATION
+   ========================================================= */
+const NAV={
+  intern:[
+    {id:'home',label:'ホーム',ic:'🏠'},
+    {id:'apply',label:'面談申請',ic:'📝'},
+    {id:'my',label:'面談状況',ic:'📋'},
+  ],
+  staff:[
+    {id:'home',label:'ホーム',ic:'🏠'},
+    {id:'interviews',label:'面談一覧',ic:'📋'},
+    {id:'avail',label:'空き日程',ic:'🕒'},
+  ],
+  admin:[
+    {id:'home',label:'ホーム',ic:'🏠'},
+    {id:'branches',label:'支部',ic:'🏢'},
+    {id:'users',label:'ユーザー',ic:'👥'},
+  ],
+};
+let currentTab='home';
+let APPLY=null;              // 面談申請の一時状態
+let calYM=null, calSel=null; // イベントカレンダーの表示月・選択日
+let calMode='month';         // 'month' | 'list'（表示切替）
+let IVFILTER={status:'all',branch:'all',q:''}; // 面談一覧フィルタ
+let AVSET=null;              // スタッフ不可時間エディタの一時状態
+let BLKFORM=null;            // 「日時でまとめて追加」フォームの状態
+
+// 日本の祝日（2026年・デモ用）。key='YYYY-M-D'
+const HOLIDAYS={
+  '2026-1-1':'元日','2026-1-12':'成人の日','2026-2-11':'建国記念の日','2026-2-23':'天皇誕生日',
+  '2026-3-20':'春分の日','2026-4-29':'昭和の日','2026-5-3':'憲法記念日','2026-5-4':'みどりの日',
+  '2026-5-5':'こどもの日','2026-5-6':'振替休日','2026-7-20':'海の日','2026-8-11':'山の日',
+  '2026-9-21':'敬老の日','2026-9-22':'国民の休日','2026-9-23':'秋分の日','2026-10-12':'スポーツの日',
+  '2026-11-3':'文化の日','2026-11-23':'勤労感謝の日'};
+function holidayName(y,m,d){return HOLIDAYS[`${y}-${m+1}-${d}`];} // m=0-11
+function defaultTab(){return 'home';}
+function buildNav(){
+  const nav=document.getElementById('nav');
+  nav.innerHTML=NAV[ME.role].map(t=>`<button data-tab="${t.id}" onclick="go('${t.id}')">
+    <span class="ni">${t.ic}</span>${t.label}</button>`).join('');
+}
+function go(tab){
+  currentTab=tab;
+  if(tab==='apply')APPLY=null;      // 申請画面は毎回リセット
+  if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
+  if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  window.scrollTo(0,0);
+  render();
+}
+function render(){
+  const m=document.getElementById('main');
+  const r=ME.role, t=currentTab;
+  let html='';
+  if(t==='home')html=viewHome();
+  else if(t==='apply')html=viewApply();
+  else if(t==='my')html=viewMyInterviews();
+  else if(t==='interviews')html=viewStaffInterviews();
+  else if(t==='avail')html=viewAvailability();
+  else if(t==='avset')html=viewAvailSet();
+  else if(t==='branches')html=viewBranches();
+  else if(t==='users')html=viewUsers();
+  else html='<div class="empty">画面が見つかりません</div>';
+  m.innerHTML='<div class="view">'+html+'</div>';
+  updateBell();
+}
+
+/* =========================================================
+   HOME
+   ========================================================= */
+function tile(tab,ic,color,t,d){
+  return `<div class="card click home-tile" onclick="go('${tab}')">
+    <div class="cb"><span class="tile-ic" style="background:${color.bg};color:${color.fg}">${ic}</span>
+      <span><span class="tile-t">${t}</span><br><span class="tile-d">${d}</span></span>
+      <span class="tile-arrow">›</span></div></div>`;
+}
+function viewHome(){
+  const hi=`<h1 class="page">こんにちは、${esc(ME.nickname)}さん</h1>
+    <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
+  if(ME.role==='intern'){
+    const mine=DB.interviews.filter(i=>i.intern_id===ME.id);
+    const latest=mine.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
+    let statusCard='';
+    if(latest){const s=STATUS[latest.status];
+      statusCard=`<div class="hint"><span>💡</span><span>あなたの面談は現在 <b>「${s.t}」</b> です。${latest.status==='failed'?'再申請をお願いします。':''}</span></div>`;}
+    const inbox=DB.emails.filter(m=>m.receiver_id===ME.id).length;
+    return hi+statusCard+
+      tile('apply','📝',{bg:'#e2f5ec',fg:'#0b8a63'},'面談を申請する','希望日時を3つ提出して面談を予約')+
+      tile('my','📋',{bg:'#fdf1e0',fg:'#d97706'},'面談状況を確認','申請中・確定済みの面談を確認')+
+      `<div class="card click home-tile" onclick="openMailHistory()">
+        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">✉️</span>
+        <span><span class="tile-t">受信メール</span><br><span class="tile-d">面談確定・リンクなどの通知メール${inbox?`（${inbox}件）`:''}</span></span>
+        <span class="tile-arrow">›</span></div></div>`+
+      eventsSection();
+  }
+  if(ME.role==='staff'){
+    const pend=DB.interviews.filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
+    return hi+
+      (pend?`<div class="hint"><span>🔔</span><span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
+      tile('interviews','📋',{bg:'#e2f5ec',fg:'#0b8a63'},'面談一覧・確定',`担当インターン生の面談を管理${pend?`（未対応 ${pend}）`:''}`)+
+      tile('avail','🕒',{bg:'#e0f2fe',fg:'#0369a1'},'スタッフ空き日程','Googleカレンダーから空き時間を確認')+
+      `<div class="card click home-tile" onclick="openAvailabilitySettings()">
+        <div class="cb"><span class="tile-ic" style="background:#fdf1e0;color:#d97706">⏰</span>
+        <span><span class="tile-t">面談可能時間帯を設定</span><br><span class="tile-d">曜日ごとに面談を受けられる時間を設定</span></span>
+        <span class="tile-arrow">›</span></div></div>`+
+      `<div class="card click home-tile" onclick="go('avset')">
+        <div class="cb"><span class="tile-ic" style="background:#fdecec;color:#dc2626">🚫</span>
+        <span><span class="tile-t">面談できない時間を登録</span><br><span class="tile-d">30分枠をタップ、または日時でまとめて指定</span></span>
+        <span class="tile-arrow">›</span></div></div>`+
+      `<div class="card click home-tile" onclick="openMailHistory()">
+        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">✉️</span>
+        <span><span class="tile-t">メール履歴</span><br><span class="tile-d">インターン生へ送信したメールの履歴</span></span>
+        <span class="tile-arrow">›</span></div></div>`+
+      eventsSection();
+  }
+  // admin
+  return hi+
+    tile('branches','🏢',{bg:'#efeafe',fg:'#6d28d9'},'支部管理','支部の追加・編集・削除')+
+    tile('users','👥',{bg:'#eaf1ff',fg:'#1f56cf'},'ユーザー管理','全支部のユーザーと権限を管理')+
+    `<div class="card click home-tile" onclick="openSystemSettings()">
+      <div class="cb"><span class="tile-ic" style="background:#f1f3f6;color:#64748b">⚙️</span>
+      <span><span class="tile-t">システム設定</span><br><span class="tile-d">連携・デモデータの管理</span></span>
+      <span class="tile-arrow">›</span></div></div>`+
+    eventsSection();
+}
+function openSystemSettings(){
+  openSheet(`<h3>システム設定</h3>
+    <div class="hint mock"><span>🧪</span><span>デモ版のため設定はダミーです。</span></div>
+    <dl class="kv" style="margin-top:14px">
+      <dt>Googleカレンダー</dt><dd>連携済み（モック）</dd>
+      <dt>メール送信</dt><dd>有効（モック）</dd>
+      <dt>登録支部数</dt><dd>${DB.branches.length}</dd>
+      <dt>登録ユーザー</dt><dd>${DB.users.length}人</dd>
+    </dl>
+    <button class="btn block" style="margin-top:16px;color:var(--bad);border-color:#f2b8b8"
+      onclick="if(confirm('デモデータを初期状態に戻します。よろしいですか？')){resetDB();closeSheet();toast('初期化しました');go('home')}">デモデータを初期化</button>`);
+}
+
+/* =========================================================
+   面談申請（インターン生）
+   ========================================================= */
+function viewApply(){
+  const staffs=DB.users.filter(u=>u.role==='staff'&&u.branch_id===ME.branch_id);
+  if(!APPLY)APPLY={staff:staffs[0]?.id||'',day:0,page:0,sel:[],mtype:'meet'};
+  if(!staffs.length)return `<h1 class="page">面談を申請</h1>
+    <div class="empty"><div class="ei">💼</div><p>あなたの支部に担当できるスタッフがいません。</p></div>`;
+
+  const staffOpts=staffs.map(s=>`<option value="${s.id}" ${s.id===APPLY.staff?'selected':''}>${esc(s.nickname)}</option>`).join('');
+  const avail=genSlots(APPLY.staff,14);
+  // 日付チップ（5日ずつページ送り）
+  const PAGE=5;
+  let chips,slotArea;
+  if(!avail.length){
+    chips='';
+    slotArea=`<div class="empty" style="padding:28px"><div class="ei">🈳</div><p>このスタッフは現在、面談可能な空き枠がありません。</p></div>`;
+  }else{
+    if(APPLY.day>=avail.length)APPLY.day=0;
+    // 選択中の日が今のページに入るようにpageを補正
+    if(APPLY.page==null)APPLY.page=0;
+    const maxPage=Math.max(0,Math.ceil(avail.length/PAGE)-1);
+    if(APPLY.page>maxPage)APPLY.page=maxPage;
+    const start=APPLY.page*PAGE, end=Math.min(start+PAGE,avail.length);
+    const chipHtml=avail.slice(start,end).map((d,j)=>{
+      const i=start+j;const w=d.dateObj.getDay();const free=d.slots.filter(s=>s.ok).length;
+      const full=free===0;
+      const cls=['datechip',i===APPLY.day&&!full?'active':'',w===0?'sun':'',w===6?'sat':'',full?'full':''].join(' ');
+      return `<div class="${cls}" ${full?'':`onclick="setApplyDay(${i})"`}>
+        <div class="dw">${WD_JP[w]}</div><div class="dd">${d.dateObj.getDate()}</div>
+        <div class="dc">${full?'満':'空'+free}</div></div>`;}).join('');
+    chips=`<div class="datepager">
+      <button class="pg" onclick="setApplyPage(-1)" ${APPLY.page<=0?'disabled':''}>‹</button>
+      <div class="datechips">${chipHtml}</div>
+      <button class="pg" onclick="setApplyPage(1)" ${APPLY.page>=maxPage?'disabled':''}>›</button>
+    </div>`;
+    // 選択中の日が満枠なら、そのページ内の空きがある日へ移す
+    if(avail[APPLY.day].slots.filter(s=>s.ok).length===0){
+      const alt=avail.findIndex((d,i)=>i>=start&&d.slots.some(s=>s.ok));
+      if(alt>=0)APPLY.day=alt;
+    }
+    const day=avail[APPLY.day];
+    slotArea=`<div class="slotgrid">`+day.slots.map(s=>{
+      const idx=APPLY.sel.indexOf(s.iso);
+      if(!s.ok)return `<div class="slotbtn off">${s.time}</div>`;
+      return `<div class="slotbtn ${idx>=0?'sel':''}" onclick="toggleSlot('${s.iso}')">
+        ${idx>=0?`<span class="snum">${idx+1}</span>`:''}${s.time}</div>`;}).join('')+`</div>`;
+  }
+  // 選択サマリー
+  const summary=APPLY.sel.length?`<div class="divider"></div>
+    <label class="fl">選んだ希望日時（最大3つ）</label>
+    <div class="selsummary">`+APPLY.sel.map((iso,i)=>`
+      <div class="sr"><span class="cn">${i+1}</span><span>${fmtDT(iso)}</span>
+      <span class="x" onclick="toggleSlot('${iso}')">×</span></div>`).join('')+`</div>`:'';
+
+  return `<h1 class="page">面談を申請</h1>
+    <p class="page-sub">空いている30分枠を最大3つまで選んでください（第1〜第3希望）。担当スタッフが日程を確定します。</p>
+    <div class="card"><div class="cb">
+      <label class="fl">担当スタッフ</label>
+      <select onchange="setApplyStaff(this.value)">${staffOpts}</select>
+      <label class="fl">日付を選ぶ</label>
+      ${chips}
+      ${avail.length?`<label class="fl">時間を選ぶ（${APPLY.sel.length}/3）</label>`:''}
+      ${slotArea}
+      ${summary}
+      <div class="divider"></div>
+      <label class="fl">面談方法<span class="req">*</span></label>
+      <div class="seg">
+        <label><input type="radio" name="mtype" value="meet" ${APPLY.mtype==='meet'?'checked':''} onchange="APPLY.mtype='meet'"><span class="segb">Google Meet</span></label>
+        <label><input type="radio" name="mtype" value="zoom" ${APPLY.mtype==='zoom'?'checked':''} onchange="APPLY.mtype='zoom'"><span class="segb">Zoom</span></label>
+      </div>
+      <button class="btn pri block" style="margin-top:20px" ${APPLY.sel.length?'':'disabled'} onclick="submitApply()">
+        ${APPLY.sel.length?`この${APPLY.sel.length}件で申請する`:'枠を選んでください'}</button>
+    </div></div>`;
+}
+function setApplyStaff(id){APPLY.staff=id;APPLY.day=0;APPLY.page=0;APPLY.sel=[];render();}
+function setApplyDay(i){APPLY.day=i;render();}
+function setApplyPage(delta){APPLY.page=(APPLY.page||0)+delta;render();}
+function toggleSlot(iso){
+  const i=APPLY.sel.indexOf(iso);
+  if(i>=0)APPLY.sel.splice(i,1);
+  else{if(APPLY.sel.length>=3){toast('希望は3つまでです');return;}APPLY.sel.push(iso);}
+  render();
+}
+function submitApply(){
+  if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
+  // 選択順を第1〜第3希望に。空きスロットのみ選択できるため過去・重複は発生しない。
+  const sorted=APPLY.sel.slice(); // 選択順を尊重
+  const iv={id:'iv_'+uid(),intern_id:ME.id,staff_id:APPLY.staff||null,status:'applied',
+    choice1:sorted[0]||null,choice2:sorted[1]||null,choice3:sorted[2]||null,
+    meeting_type:APPLY.mtype,confirmed_datetime:null,created_at:nowISO()};
+  DB.interviews.push(iv);save();
+  notifyLog('面談申請',`${ME.nickname}さんが面談を申請しました`);
+  toast('面談を申請しました');
+  go('my');
+}
+
+/* =========================================================
+   面談状況（インターン生）
+   ========================================================= */
+function viewMyInterviews(){
+  const mine=DB.interviews.filter(i=>i.intern_id===ME.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  if(!mine.length)return `<h1 class="page">面談状況</h1>
+    <div class="empty"><div class="ei">📋</div><p>まだ面談の申請がありません。</p>
+    <button class="btn pri" onclick="go('apply')">面談を申請する</button></div>`;
+  const rows=mine.map(iv=>{const s=STATUS[iv.status];const staff=findUser(iv.staff_id);
+    return `<div class="card"><div class="cb">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span class="pill ${s.c}">${s.t}</span>
+        <span class="tag">${MTYPE[iv.meeting_type]}</span>
+        <span style="margin-left:auto;color:var(--mut);font-size:12px">${fmtRel(iv.created_at)}</span>
+      </div>
+      <div class="meta"><span>担当：<b>${staff?esc(staff.nickname):'未定'}</b></span></div>
+      ${iv.status==='fixed'
+        ? `<div class="hint" style="margin-top:8px"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>${MTYPE[iv.meeting_type]}のリンクはメールで届きます。</span></div>`
+        : iv.status==='failed'
+        ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
+           <button class="btn pri block sm" style="margin-top:10px" onclick="go('apply')">再申請する</button>`
+        : `<dl class="kv" style="margin-top:8px">
+             ${[iv.choice1,iv.choice2,iv.choice3].filter(Boolean).map((c,i)=>`<dt>第${i+1}希望</dt><dd>${fmtDT(c)}</dd>`).join('')}</dl>`}
+    </div></div>`;}).join('');
+  return `<h1 class="page">面談状況</h1><p class="page-sub">あなたの面談申請の状況です。</p>${rows}`;
+}
+
+/* =========================================================
+   面談一覧・確定・不成立（スタッフ）
+   ========================================================= */
+function viewStaffInterviews(){
+  // staff sees interviews of own branch (assigned to them or their branch)
+  const all=DB.interviews.filter(iv=>{
+    const intern=findUser(iv.intern_id);
+    return iv.staff_id===ME.id || (intern&&intern.branch_id===ME.branch_id);
+  }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||new Date(b.created_at)-new Date(a.created_at);});
+  if(!all.length)return `<h1 class="page">面談一覧</h1><div class="empty"><div class="ei">📋</div><p>担当する面談はまだありません。</p></div>`;
+  // フィルタ適用
+  const q=(IVFILTER.q||'').trim();
+  const list=all.filter(iv=>{
+    if(IVFILTER.status!=='all'&&iv.status!==IVFILTER.status)return false;
+    if(q){const intern=findUser(iv.intern_id);if(!(intern?.nickname||'').includes(q))return false;}
+    return true;
+  });
+  const cnt={all:all.length,applied:0,fixed:0,failed:0};all.forEach(i=>cnt[i.status]++);
+  const chip=(v,label)=>`<button class="${IVFILTER.status===v?'on':''}" onclick="setIvFilter('status','${v}')">${label}<span style="opacity:.7"> ${v==='all'?cnt.all:cnt[v]}</span></button>`;
+  const filterBar=`<div class="chipfilter">
+      ${chip('all','すべて')}${chip('applied','申請中')}${chip('fixed','確定済み')}${chip('failed','不成立')}
+    </div>
+    <div class="filterbar">
+      <input placeholder="🔍 学生名で検索" value="${esc(IVFILTER.q)}" oninput="IVFILTER.q=this.value" onchange="render()"
+        onkeydown="if(event.key==='Enter')render()">
+      ${q||IVFILTER.status!=='all'?`<button class="btn sm" onclick="clearIvFilter()">クリア</button>`:''}
+    </div>`;
+  if(!list.length)return `<h1 class="page">面談一覧</h1>
+    <p class="page-sub">${branchName(ME.branch_id)}の面談 ${all.length}件</p>
+    ${filterBar}
+    <div class="empty"><div class="ei">🔍</div><p>条件に一致する面談がありません。</p></div>`;
+  const rows=list.map(iv=>{const s=STATUS[iv.status];const intern=findUser(iv.intern_id);
+    return `<div class="row" onclick="openInterview('${iv.id}')">
+      <span class="av">${esc(initials(intern?.nickname))}</span>
+      <span class="rmain">
+        <span class="rt">${esc(intern?.nickname||'—')} <span class="tag">${branchName(intern?.branch_id)}</span></span>
+        <span class="rs">申請 ${fmtRel(iv.created_at)}・${MTYPE[iv.meeting_type]}${iv.status==='fixed'?'・確定 '+fmtDT(iv.confirmed_datetime):''}</span>
+      </span>
+      <span class="pill ${s.c}">${s.t}</span>
+    </div>`;}).join('');
+  return `<h1 class="page">面談一覧</h1>
+    <p class="page-sub">${branchName(ME.branch_id)}の面談 ${all.length}件${cnt.applied?` ・ 確定待ち ${cnt.applied}件`:''}${list.length!==all.length?` ・ 表示中 ${list.length}件`:''}</p>
+    ${filterBar}
+    <div class="card"><div class="rowlist">${rows}</div></div>`;
+}
+function setIvFilter(key,val){IVFILTER[key]=val;render();}
+function clearIvFilter(){IVFILTER={status:'all',branch:'all',q:''};render();}
+function openInterview(id){
+  const iv=DB.interviews.find(x=>x.id===id);const intern=findUser(iv.intern_id);const s=STATUS[iv.status];
+  const choiceRow=(n,val)=>`<div class="choice ${iv.confirmed_datetime===val?'sel':''}">
+      <span class="cn">${n}</span><span>${fmtDT(val)}</span>
+      ${iv.status==='applied'?`<button class="btn pri sm pick" onclick="confirmInterview('${id}','${val}')">これで確定</button>`:
+        (iv.confirmed_datetime===val?'<span class="pick pill st-fixed">確定</span>':'')}
+    </div>`;
+  let actions='';
+  if(iv.status==='applied'){
+    actions=`<div class="choice-list">
+        ${[iv.choice1,iv.choice2,iv.choice3].filter(Boolean).map((c,i)=>choiceRow(i+1,c)).join('')}</div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn" style="flex:1" onclick="openCustomConfirm('${id}')">別日時で確定</button>
+        <button class="btn bad" style="flex:1" onclick="failInterview('${id}')">不成立にする</button>
+      </div>`;
+  }else if(iv.status==='fixed'){
+    actions=`<div class="hint"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
+      <div class="hint mock" style="margin-top:8px"><span>📆</span><span>Googleカレンダーに登録済み（モック）</span></div>
+      <button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','${MTYPE[iv.meeting_type]}リンクの送付','お疲れ様です。面談の${MTYPE[iv.meeting_type]}リンクをお送りします。')">${MTYPE[iv.meeting_type]}リンクを送る</button>`;
+  }else{
+    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>この面談は不成立として処理されています。</span></div>
+      <button class="btn block" style="margin-top:12px" onclick="reopenInterview('${id}')">申請中に戻す</button>`;
+  }
+  openSheet(`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+      <span class="av" style="width:40px;height:40px">${esc(initials(intern?.nickname))}</span>
+      <div><h3 style="margin:0">${esc(intern?.nickname)}</h3>
+        <div class="rs" style="color:var(--sub);font-size:13px">${branchName(intern?.branch_id)} ・ 申請 ${fmtRel(iv.created_at)}</div></div>
+      <span class="pill ${s.c}" style="margin-left:auto">${s.t}</span>
+    </div>
+    <dl class="kv" style="margin:12px 0">
+      <dt>面談方法</dt><dd>${MTYPE[iv.meeting_type]}</dd>
+    </dl>
+    ${actions}`);
+}
+function confirmInterview(id,dt){
+  const iv=DB.interviews.find(x=>x.id===id);
+  iv.status='fixed';iv.confirmed_datetime=dt;save();
+  notifyLog('面談確定',`${findUser(iv.intern_id)?.nickname}さんの面談が確定しました`);
+  // auto compose confirmation mail
+  closeSheet();
+  toast('面談を確定しました（カレンダー登録・通知済み）');
+  openSendMail(iv.intern_id,'面談確定のお知らせ',
+    `お疲れ様です。\n面談日程が下記のとおり確定しましたのでお知らせします。\n\n日時：${fmtDT(dt)}\n方法：${MTYPE[iv.meeting_type]}\n\nよろしくお願いいたします。`);
+}
+function openCustomConfirm(id){
+  openSheet(`<h3>別日時で確定</h3>
+    <p class="page-sub">候補以外の日時を指定して確定します。</p>
+    <label class="fl">確定日時<span class="req">*</span></label>
+    <input type="datetime-local" id="customDT">
+    <div class="field-err" id="customDTe"></div>
+    <button class="btn pri block" style="margin-top:16px" onclick="doCustomConfirm('${id}')">この日時で確定</button>`);
+}
+function doCustomConfirm(id){
+  const v=document.getElementById('customDT').value;const e=document.getElementById('customDTe');
+  e.classList.remove('show');
+  if(!v){e.textContent='日時を入力してください';e.classList.add('show');return;}
+  if(new Date(v)<new Date()){e.textContent='過去の日時は指定できません';e.classList.add('show');return;}
+  confirmInterview(id,new Date(v).toISOString());
+}
+function failInterview(id){
+  const iv=DB.interviews.find(x=>x.id===id);const intern=findUser(iv.intern_id);
+  if(!confirm(`${intern?.nickname||'この学生'}さんの面談を「不成立」にします。\n再提出依頼メールの作成画面に進みます。よろしいですか？`))return;
+  iv.status='failed';iv.confirmed_datetime=null;save();
+  notifyLog('面談不成立',`${findUser(iv.intern_id)?.nickname}さんの面談が不成立になりました`);
+  closeSheet();
+  // show mail template per spec
+  openSendMail(iv.intern_id,'面談日程再提出のお願い',
+    `お疲れ様です。\n\nご提出いただいた候補日では面談日程の調整が難しかったため、お手数ですが再度候補日をご提出いただけますでしょうか。\n\nご迷惑をおかけし申し訳ありません。\n\nよろしくお願いいたします。`);
+}
+function reopenInterview(id){
+  const iv=DB.interviews.find(x=>x.id===id);iv.status='applied';save();closeSheet();toast('申請中に戻しました');go('interviews');
+}
+
+/* =========================================================
+   メール送信（モック）
+   ========================================================= */
+function openSendMail(receiverId,subject,body){
+  const r=findUser(receiverId);
+  openSheet(`<h3>メール送信</h3>
+    <div class="hint mock"><span>✉️</span><span>デモ版：実際には送信されず、履歴に記録されます。</span></div>
+    <dl class="kv" style="margin:12px 0 4px"><dt>宛先</dt><dd>${esc(r?.nickname||'—')}（インターン生）</dd></dl>
+    <label class="fl">件名</label>
+    <input id="mailSubj" value="${esc(subject)}">
+    <label class="fl">本文</label>
+    <textarea id="mailBody" style="min-height:180px">${esc(body)}</textarea>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn" style="flex:1" onclick="closeSheet()">閉じる</button>
+      <button class="btn pri" style="flex:2" onclick="sendMail('${receiverId}')">送信する</button>
+    </div>`);
+}
+function sendMail(receiverId){
+  const subject=document.getElementById('mailSubj').value.trim();
+  const body=document.getElementById('mailBody').value.trim();
+  if(!subject){toast('件名を入力してください');return;}
+  DB.emails.push({id:uid(),sender_id:ME.id,receiver_id:receiverId,subject,body,sent_at:nowISO()});
+  save();closeSheet();toast('メールを送信しました（履歴に記録）');
+  if(currentTab==='interviews')go('interviews');
+}
+
+/* =========================================================
+   イベント（一覧・回答・作成）
+   ========================================================= */
+function eventCard(ev){
+  const resp=DB.event_responses.filter(r=>r.event_id===ev.id);
+  const c={ok:0,may:0,no:0};resp.forEach(r=>c[r.response]++);
+  const total=c.ok+c.may+c.no||1;
+  const mine=resp.find(r=>r.user_id===ME.id);
+  return `<div class="card"><div class="cb">
+      <div style="display:flex;align-items:center;gap:8px">
+        <b style="font-size:16px">${esc(ev.title)}</b>
+        <span class="tag" style="margin-left:auto">${branchName(ev.branch_id)}</span>
+      </div>
+      <div class="meta" style="margin-top:6px">
+        <span>🗓 <b>${fmtDT(ev.start_datetime)}</b> 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}</span>
+      </div>
+      <div class="meta"><span>📍 ${esc(ev.location||'—')}</span></div>
+      ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
+      ${(ev.meet_url||ev.zoom_url)?`<div class="meta" style="margin-top:6px">${ev.meet_url?`<span>🔗 <a href="${esc(ev.meet_url)}" target="_blank" rel="noopener">Meet</a></span>`:''}${ev.zoom_url?`<span>🔗 <a href="${esc(ev.zoom_url)}" target="_blank" rel="noopener">Zoom</a></span>`:''}</div>`:''}
+
+      <div class="votebar">
+        <i class="vb-ok" style="width:${c.ok/total*100}%"></i>
+        <i class="vb-may" style="width:${c.may/total*100}%"></i>
+        <i class="vb-no" style="width:${c.no/total*100}%"></i>
+      </div>
+      <div class="votekeys">
+        <span>○ 参加 <b>${c.ok}</b></span><span>△ 未定 <b>${c.may}</b></span><span>× 不参加 <b>${c.no}</b></span>
+      </div>
+
+      <div class="vote3" style="margin-top:12px">
+        <div class="v ${mine?.response==='ok'?'on-ok':''}" onclick="vote('${ev.id}','ok')"><span class="em">○</span>参加</div>
+        <div class="v ${mine?.response==='may'?'on-may':''}" onclick="vote('${ev.id}','may')"><span class="em">△</span>未定</div>
+        <div class="v ${mine?.response==='no'?'on-no':''}" onclick="vote('${ev.id}','no')"><span class="em">×</span>不参加</div>
+      </div>
+      ${ME.role!=='intern'?`
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>
+          ${(ME.role==='admin'||ev.creator_id===ME.id)?`<button class="btn sm" onclick="openEventForm('${ev.id}')">編集</button>
+          <button class="btn sm bad" onclick="deleteEvent('${ev.id}')">削除</button>`:''}
+        </div>`:''}
+    </div></div>`;
+}
+// 自分に関係する確定面談を取得（カレンダー併記用）
+function myInterviewsForCal(){
+  return DB.interviews.filter(iv=>{
+    if(iv.status!=='fixed'||!iv.confirmed_datetime)return false;
+    if(ME.role==='admin')return true;
+    if(ME.role==='intern')return iv.intern_id===ME.id;
+    const intern=findUser(iv.intern_id);
+    return iv.staff_id===ME.id||(intern&&intern.branch_id===ME.branch_id);
+  });
+}
+function ivLabel(iv){const intern=findUser(iv.intern_id),staff=findUser(iv.staff_id);
+  return ME.role==='intern'?`面談：${staff?staff.nickname:'担当'}さん`:`面談：${intern?intern.nickname:'—'}さん`;}
+function eventsSection(){
+  if(!calYM){const t=new Date();calYM={y:t.getFullYear(),m:t.getMonth()};}
+  let list=DB.events.slice();
+  if(ME.role!=='admin')list=list.filter(e=>e.branch_id===ME.branch_id);
+  const ivs=myInterviewsForCal();
+  const canCreate=ME.role!=='intern';
+  const {y,m}=calYM;
+  const evByDay={},ivByDay={};
+  list.forEach(e=>{const k=ymd(new Date(e.start_datetime));(evByDay[k]=evByDay[k]||[]).push(e);});
+  ivs.forEach(iv=>{const k=ymd(new Date(iv.confirmed_datetime));(ivByDay[k]=ivByDay[k]||[]).push(iv);});
+
+  const legend=`<div class="cal-legend">
+      <span class="legend-dot" style="background:var(--brand)"></span>イベント
+      <span class="legend-dot" style="background:var(--iv);margin-left:10px"></span>面談
+      <span style="margin-left:auto">日付タップで絞り込み</span></div>`;
+
+  let body;
+  if(calMode==='list'){
+    body=agendaView(list,ivs,y,m);
+  }else{
+    const startDow=new Date(y,m,1).getDay();
+    const daysInMonth=new Date(y,m+1,0).getDate();
+    const prevDays=new Date(y,m,0).getDate();
+    const todayKey=ymd(new Date());
+    let cells='';
+    for(let i=startDow-1;i>=0;i--)cells+=`<div class="calcell out"><span class="dn">${prevDays-i}</span></div>`;
+    for(let d=1;d<=daysInMonth;d++){
+      const key=ymd(new Date(y,m,d));const evs=evByDay[key]||[];const dvs=ivByDay[key]||[];
+      const has=evs.length+dvs.length;const hol=holidayName(y,m,d);
+      const cls=['calcell',has?'has':'',key===todayKey?'today':'',key===calSel?'sel':'',hol?'holiday':''].join(' ');
+      let dots='';
+      if(has){const parts=[...evs.slice(0,2).map(()=>'<span class="evdot"></span>'),
+        ...dvs.slice(0,2).map(()=>'<span class="ivdot"></span>')];
+        dots=`<div class="dots">${parts.slice(0,3).join('')}${has>3?`<span class="evmore">+${has-3}</span>`:''}</div>`;}
+      cells+=`<div class="${cls}"${hol?` title="${esc(hol)}"`:''} ${has?`onclick="calSelect('${key}')"`:''}><span class="dn">${d}</span>${dots}</div>`;
+    }
+    const trail=(7-(startDow+daysInMonth)%7)%7;
+    for(let i=1;i<=trail;i++)cells+=`<div class="calcell out"><span class="dn">${i}</span></div>`;
+    const dow=WD_JP.map((w,i)=>`<div class="caldow ${i===0?'sun':''} ${i===6?'sat':''}">${w}</div>`).join('');
+    body=`<div class="calgrid">${dow}${cells}</div>${legend}`;
+  }
+
+  const cal=`<div class="card cal"><div class="cb">
+      <div class="calhead">
+        <button class="navbtn" onclick="calShift(-1)">‹</button>
+        <span class="cm">${y}年${m+1}月</span>
+        <button class="navbtn" onclick="calShift(1)">›</button>
+      </div>
+      ${body}
+    </div></div>`;
+
+  // 選択日 or 当月のイベント（出欠カード）
+  let below=list.filter(e=>{const dt=new Date(e.start_datetime);
+    return calSel? ymd(dt)===calSel : (dt.getFullYear()===y&&dt.getMonth()===m);});
+  below.sort((a,b)=>new Date(a.start_datetime)-new Date(b.start_datetime));
+  // 選択日の確定面談（該当日のみ、補足表示）
+  const ivBelow=calSel?ivs.filter(iv=>ymd(new Date(iv.confirmed_datetime))===calSel):[];
+  const ivCards=ivBelow.map(iv=>`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
+      <span class="tile-ic" style="width:38px;height:38px;background:var(--iv-soft);color:var(--iv);font-size:16px">🗓</span>
+      <span><b>${esc(ivLabel(iv))}</b><br><span class="tile-d">${fmtDT(iv.confirmed_datetime)} ・ ${MTYPE[iv.meeting_type]}</span></span>
+    </div></div>`).join('');
+  const listTitle=calSel?`${Number(calSel.split('-')[1])}/${Number(calSel.split('-')[2])} の予定`:`${m+1}月のイベント`;
+  const clearBtn=calSel?`<button class="btn ghost sm" onclick="calSelect(null)">絞り込み解除</button>`:'';
+  const cards=(below.length||ivBelow.length)?ivCards+below.map(eventCard).join('')
+    :`<div class="empty"><div class="ei">📅</div><p>${calSel?'この日の予定はありません。':'この月のイベントはありません。'}</p></div>`;
+
+  return `<div class="divider" style="margin:22px 0 14px"></div>
+    <div style="display:flex;align-items:center;margin:0 2px 10px;gap:8px">
+      <h2 style="margin:0;font-size:18px">📅 カレンダー</h2>
+      <div class="calview-tabs" style="margin-left:auto">
+        <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
+        <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
+      </div></div>
+    <p class="page-sub" style="margin-top:-2px">イベント（緑）と確定面談（紫）を表示。下で各イベントの出欠を回答できます。</p>
+    ${canCreate?`<button class="btn pri block" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しいイベントを作成</button>`:''}
+    ${cal}
+    <div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
+    ${cards}`;
+}
+// リスト（アジェンダ）表示：当月のイベント＋面談を時系列で
+function agendaView(list,ivs,y,m){
+  const items=[];
+  list.forEach(e=>{const dt=new Date(e.start_datetime);
+    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${hm(e.start_datetime)}・${e.location||'—'}`,key:ymd(dt)});});
+  ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
+    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'iv',title:ivLabel(iv),sub:`${hm(iv.confirmed_datetime)}・${MTYPE[iv.meeting_type]}`,key:ymd(dt)});});
+  items.sort((a,b)=>a.dt-b.dt);
+  if(!items.length)return `<div class="empty" style="padding:26px"><div class="ei">📅</div><p>${m+1}月の予定はありません。</p></div>`;
+  return `<div class="agenda">`+items.map(it=>{
+    const w=WD_JP[it.dt.getDay()];
+    return `<div class="ag" ${it.type==='ev'?`style="cursor:pointer" onclick="calSelect('${it.key}')"`:''}>
+      <span class="agd"><span class="agn" style="${it.dt.getDay()===0?'color:#dc2626':it.dt.getDay()===6?'color:#2563eb':''}">${it.dt.getDate()}</span><span class="agw">${w}</span></span>
+      <span class="agbar ${it.type==='iv'?'iv':''}"></span>
+      <span style="flex:1"><span class="agt">${esc(it.title)}</span><br><span class="ags">${esc(it.sub)}</span></span>
+    </div>`;}).join('')+`</div>`;
+}
+function setCalMode(mode){calMode=mode;render();}
+function calShift(delta){let m=calYM.m+delta,y=calYM.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}calYM={y,m};calSel=null;render();}
+function calSelect(key){calSel=(key&&key!==calSel)?key:null;render();}
+function vote(evId,resp){
+  let r=DB.event_responses.find(x=>x.event_id===evId&&x.user_id===ME.id);
+  if(r){r.response=r.response===resp?null:resp; if(!r.response)DB.event_responses=DB.event_responses.filter(x=>x!==r);}
+  else DB.event_responses.push({id:uid(),event_id:evId,user_id:ME.id,response:resp});
+  save();toast('回答を記録しました');render();
+}
+function openEventResponders(evId){
+  const resp=DB.event_responses.filter(r=>r.event_id===evId);
+  const label={ok:'○ 参加',may:'△ 未定',no:'× 不参加'};
+  const rows=resp.length?resp.map(r=>{const u=findUser(r.user_id);
+    return `<div class="row"><span class="av">${esc(initials(u?.nickname))}</span>
+      <span class="rmain"><span class="rt">${esc(u?.nickname||'—')}</span>
+      <span class="rs">${branchName(u?.branch_id)}</span></span>
+      <span class="tag">${label[r.response]}</span></div>`;}).join('')
+    :'<div class="empty">まだ回答がありません</div>';
+  openSheet(`<h3>回答者一覧</h3><div class="card"><div class="rowlist">${rows}</div></div>`);
+}
+function openEventForm(id){
+  const ev=id?DB.events.find(e=>e.id===id):null;
+  const bopts=DB.branches.map(b=>`<option value="${b.id}" ${ev?.branch_id===b.id||(!ev&&b.id===ME.branch_id)?'selected':''}>${esc(b.name)}</option>`).join('');
+  openSheet(`<h3>${ev?'イベントを編集':'イベントを作成'}</h3>
+    <label class="fl">イベント名<span class="req">*</span></label>
+    <input id="evTitle" value="${esc(ev?.title||'')}"><div class="field-err" id="evTitleE"></div>
+    <label class="fl">説明</label>
+    <textarea id="evDesc">${esc(ev?.description||'')}</textarea>
+    <label class="fl">開催日時<span class="req">*</span></label>
+    <input type="datetime-local" id="evStart" value="${toInputDT(ev?.start_datetime)}"><div class="field-err" id="evStartE"></div>
+    <label class="fl">終了日時</label>
+    <input type="datetime-local" id="evEnd" value="${toInputDT(ev?.end_datetime)}">
+    <label class="fl">開催場所</label>
+    <input id="evLoc" value="${esc(ev?.location||'')}" placeholder="例：水戸市民会館／オンライン">
+    <label class="fl">対象支部</label>
+    <select id="evBranch">${bopts}</select>
+    <label class="fl">Meetリンク</label>
+    <input id="evMeet" value="${esc(ev?.meet_url||'')}" placeholder="https://meet.google.com/...">
+    <label class="fl">Zoomリンク</label>
+    <input id="evZoom" value="${esc(ev?.zoom_url||'')}" placeholder="https://zoom.us/j/...">
+    <button class="btn pri block" style="margin-top:18px" onclick="saveEvent(${ev?`'${ev.id}'`:'null'})">${ev?'更新する':'作成する'}</button>`);
+}
+function saveEvent(id){
+  const title=document.getElementById('evTitle').value.trim();
+  const start=document.getElementById('evStart').value;
+  let ok=true;
+  const te=document.getElementById('evTitleE'),se=document.getElementById('evStartE');
+  te.classList.remove('show');se.classList.remove('show');
+  if(!title){te.textContent='イベント名は必須です';te.classList.add('show');ok=false;}
+  if(!start){se.textContent='開催日時は必須です';se.classList.add('show');ok=false;}
+  if(!ok)return;
+  const data={title,description:document.getElementById('evDesc').value.trim(),
+    start_datetime:new Date(start).toISOString(),
+    end_datetime:document.getElementById('evEnd').value?new Date(document.getElementById('evEnd').value).toISOString():new Date(start).toISOString(),
+    location:document.getElementById('evLoc').value.trim(),
+    branch_id:document.getElementById('evBranch').value,
+    meet_url:document.getElementById('evMeet').value.trim(),
+    zoom_url:document.getElementById('evZoom').value.trim()};
+  if(id){Object.assign(DB.events.find(e=>e.id===id),data);toast('イベントを更新しました');}
+  else{DB.events.push({id:'ev_'+uid(),creator_id:ME.id,...data});notifyLog('イベント作成',`「${title}」が作成されました`);toast('イベントを作成しました');}
+  save();closeSheet();render();
+}
+function deleteEvent(id){
+  if(!confirm('このイベントを削除しますか？'))return;
+  DB.events=DB.events.filter(e=>e.id!==id);
+  DB.event_responses=DB.event_responses.filter(r=>r.event_id!==id);
+  save();toast('イベントを削除しました');render();
+}
+
+/* =========================================================
+   スタッフ空き日程（Googleカレンダー参照＝モック）
+   ========================================================= */
+function viewAvailability(){
+  const staffs=DB.users.filter(u=>u.role==='staff'&&(ME.role==='admin'||u.branch_id===ME.branch_id));
+  const cards=staffs.map(s=>{
+    const flat=[];
+    genSlots(s.id,7).forEach(d=>d.slots.forEach(x=>{if(x.ok)flat.push(`${fmtDate(d.dateObj.toISOString())} ${x.time}`);}));
+    const show=flat.slice(0,16).map(t=>`<span class="slot">${t}</span>`).join('');
+    const more=flat.length>16?`<span class="slot" style="background:#eef2f6;color:#64748b">他${flat.length-16}枠</span>`:'';
+    const slots=flat.length?show+more:'<span class="rs" style="color:var(--mut)">空き枠なし</span>';
+    return `<div class="staff">
+      <div class="sname"><span>${esc(s.nickname)}</span><span class="tag">空き ${flat.length}枠</span></div>
+      <div class="slots">${slots}</div></div>`;
+  }).join('')||'<div class="empty">スタッフが登録されていません</div>';
+  return `<h1 class="page">スタッフ空き日程</h1>
+    <p class="page-sub">面談可能時間帯と登録済みの予定から、空き時間を表示します（今後7日）。</p>
+    <div class="hint mock"><span>🧪</span><span>デモ版：曜日別の可能時間帯・不可時間・確定済み面談から算出しています。</span></div>
+    <div class="avail" style="margin-top:12px">${cards}</div>`;
+}
+
+/* =========================================================
+   面談可能時間帯の設定（スタッフ・曜日ごと）
+   ========================================================= */
+function openAvailabilitySettings(){
+  const w=getWeekly(ME.id);
+  const rows=[1,2,3,4,5,6,0].map(d=>{const c=w[d];const on=c.on;
+    return `<div class="wkrow ${on?'':'off'}" id="wk${d}">
+      <span class="wd ${d===0?'sun':''} ${d===6?'sat':''}">${WD_JP[d]}</span>
+      <span class="sw ${on?'on':''}" onclick="toggleWk(${d})"><i></i></span>
+      <span class="times">
+        <input type="time" id="wks${d}" value="${c.s}">
+        <span style="color:var(--sub)">〜</span>
+        <input type="time" id="wke${d}" value="${c.e}">
+      </span></div>`;}).join('');
+  openSheet(`<h3>面談可能時間帯</h3>
+    <p class="page-sub">インターン生は、ここで設定した時間帯の中から30分刻みで面談を予約できます。</p>
+    <div class="hint mock"><span>📆</span><span>実運用ではGoogleカレンダーの予定と自動で突き合わせます（デモでは一部の予定をダミーで反映）。</span></div>
+    <div style="margin-top:8px">${rows}</div>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>`);
+}
+function toggleWk(d){
+  const c=getWeekly(ME.id)[d];const cur=document.querySelector(`#wk${d} .sw`).classList.contains('on');
+  document.querySelector(`#wk${d} .sw`).classList.toggle('on',!cur);
+  document.getElementById('wk'+d).classList.toggle('off',cur);
+}
+function saveAvailability(){
+  const weekly={};
+  [0,1,2,3,4,5,6].forEach(d=>{
+    weekly[d]={on:document.querySelector(`#wk${d} .sw`).classList.contains('on'),
+      s:document.getElementById('wks'+d).value||'09:00',
+      e:document.getElementById('wke'+d).value||'19:00'};
+    if(weekly[d].e<=weekly[d].s)weekly[d].e=weekly[d].s;
+  });
+  DB.availability[ME.id]=Object.assign({},DB.availability[ME.id],{weekly});
+  save();closeSheet();toast('面談可能時間帯を保存しました');
+}
+
+/* =========================================================
+   面談できない時間（カレンダー・30分枠タップ式）
+   ========================================================= */
+function viewAvailSet(){
+  if(!AVSET)AVSET={day:0,page:0};
+  const avail=genEditSlots(ME.id,14);
+  const back=`<button class="btn ghost sm" style="margin-bottom:6px" onclick="go('home')">‹ ホームに戻る</button>`;
+  if(!avail.length){
+    return `${back}<h1 class="page">面談できない時間を設定</h1>
+      <div class="empty"><div class="ei">📆</div><p>面談可能時間帯が設定されていません。<br>先に「面談可能時間帯」で曜日を有効にしてください。</p>
+      <button class="btn pri" onclick="openAvailabilitySettings()">面談可能時間帯を設定</button></div>`;
+  }
+  const PAGE=5;
+  if(AVSET.day>=avail.length)AVSET.day=0;
+  if(AVSET.page==null)AVSET.page=0;
+  const maxPage=Math.max(0,Math.ceil(avail.length/PAGE)-1);
+  if(AVSET.page>maxPage)AVSET.page=maxPage;
+  const start=AVSET.page*PAGE,end=Math.min(start+PAGE,avail.length);
+  const chipHtml=avail.slice(start,end).map((d,j)=>{
+    const i=start+j;const w=d.dateObj.getDay();
+    const off=d.slots.filter(s=>s.state!=='free').length; // 不可・面談の数
+    const cls=['datechip',i===AVSET.day?'active':'',w===0?'sun':'',w===6?'sat':''].join(' ');
+    return `<div class="${cls}" onclick="avSetDay(${i})">
+      <div class="dw">${WD_JP[w]}</div><div class="dd">${d.dateObj.getDate()}</div>
+      <div class="dc" style="color:${off?'var(--bad)':'var(--sub)'}">${off?'不可'+off:'—'}</div></div>`;}).join('');
+  const chips=`<div class="datepager">
+    <button class="pg" onclick="avSetPage(-1)" ${AVSET.page<=0?'disabled':''}>‹</button>
+    <div class="datechips">${chipHtml}</div>
+    <button class="pg" onclick="avSetPage(1)" ${AVSET.page>=maxPage?'disabled':''}>›</button>
+  </div>`;
+  const day=avail[AVSET.day];
+  const grid=`<div class="slotgrid">`+day.slots.map(s=>{
+    if(s.state==='taken')return `<div class="slotbtn locked">${s.time}<span class="tagm">面談あり</span></div>`;
+    if(s.state==='block'){
+      return s.removable
+        ? `<div class="slotbtn avoff" onclick="avUnblock('${s.blockId}')">${s.time}<span class="tagm">不可</span></div>`
+        : `<div class="slotbtn locked">${s.time}<span class="tagm">予定あり</span></div>`;
+    }
+    return `<div class="slotbtn" onclick="avBlock('${s.iso}')">${s.time}</div>`;}).join('')+`</div>`;
+  const blockedCnt=day.slots.filter(s=>s.state==='block').length;
+
+  // 登録済み一覧（今後の予定・両方式まとめて）
+  const blocks=((DB.availability[ME.id]||{}).blocks||[]).slice()
+    .filter(b=>new Date(b.end)>=new Date())
+    .sort((x,y)=>new Date(x.start)-new Date(y.start));
+  const listRows=blocks.length?blocks.map(b=>{
+    const isSlot=b.kind==='slot';
+    return `<div class="row" style="cursor:default">
+      <span class="av" style="border-radius:10px;background:#fdecec;color:#dc2626">🚫</span>
+      <span class="rmain"><span class="rt">${fmtDate(b.start)} ${hm(b.start)}〜${hm(b.end)}</span>
+      <span class="rs">${esc(b.note||'予定あり')}${isSlot?'（枠タップ）':''}</span></span>
+      <button class="btn sm bad" onclick="delBlock('${b.id}')">削除</button>
+    </div>`;}).join(''):'<div class="empty" style="padding:20px">登録された不可時間はありません</div>';
+
+  // 日時でまとめて追加フォーム（スクロール式 時間ピッカー）
+  if(!BLKFORM)initBlkForm();
+  const today=ymd(new Date());
+  const form=`
+    <label class="fl">日付</label>
+    <input type="date" id="blkDate" value="${BLKFORM.date}" min="${today}" onchange="BLKFORM.date=this.value">
+    <div class="tp-wrap" style="margin-top:8px">
+      <div>
+        <label class="fl" style="margin-top:0">開始</label>
+        <div class="tpick" id="tpick_start" onclick="tpToggle('start')"><span id="tpv_start">${BLKFORM.start}</span><span class="tpic">🕐</span></div>
+        <div class="tpbar hidden" id="tpbar_start">${timeOptions('start')}</div>
+      </div>
+      <div>
+        <label class="fl" style="margin-top:0">終了</label>
+        <div class="tpick" id="tpick_end" onclick="tpToggle('end')"><span id="tpv_end">${BLKFORM.end}</span><span class="tpic">🕐</span></div>
+        <div class="tpbar hidden" id="tpbar_end">${timeOptions('end')}</div>
+      </div>
+    </div>
+    <label class="fl">メモ（任意）</label>
+    <input id="blkNote" value="${esc(BLKFORM.note)}" placeholder="例：授業／アルバイト" oninput="BLKFORM.note=this.value">
+    <div class="field-err" id="blkErr"></div>
+    <button class="btn pri block" style="margin-top:16px" onclick="addBlock()">この時間を不可にする</button>`;
+
+  return `${back}
+    <h1 class="page">面談できない時間を登録</h1>
+    <p class="page-sub">面談を受けたくない時間を登録します。ここで指定した時間はインターン生の予約画面で「×」になり選べなくなります。</p>
+
+    <h3 style="margin:6px 2px 8px;font-size:15px">① カレンダーから枠をタップ</h3>
+    <div class="card"><div class="cb">
+      <label class="fl">日付を選ぶ</label>
+      ${chips}
+      <label class="fl">時間をタップ（不可 ${blockedCnt}枠）</label>
+      ${grid}
+      <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
+        <span><span class="legend-dot" style="background:#fff;border:1px solid var(--line)"></span>受付中（タップで不可）</span>
+        <span><span class="legend-dot" style="background:var(--bad)"></span>不可（タップで解除）</span>
+        <span><span class="legend-dot" style="background:#aeb7c0"></span>予定・面談あり</span>
+      </div>
+    </div></div>
+
+    <h3 style="margin:20px 2px 8px;font-size:15px">② 日時でまとめて追加</h3>
+    <p class="page-sub" style="margin-top:-4px">長い時間帯や特定日をまとめて指定できます。</p>
+    <div class="card"><div class="cb">${form}</div></div>
+
+    <h3 style="margin:20px 2px 8px;font-size:15px">登録済み（今後の予定）</h3>
+    <div class="card"><div class="rowlist">${listRows}</div></div>`;
+}
+function avSetDay(i){AVSET.day=i;render();}
+function avSetPage(delta){AVSET.page=(AVSET.page||0)+delta;render();}
+function avBlock(iso){
+  const st=new Date(iso),en=new Date(st.getTime()+30*60000);
+  DB.availability[ME.id]=DB.availability[ME.id]||{};
+  DB.availability[ME.id].blocks=DB.availability[ME.id].blocks||[];
+  DB.availability[ME.id].blocks.push({id:'blk_'+uid(),start:st.toISOString(),end:en.toISOString(),note:'面談不可',kind:'slot'});
+  save();toast('この枠を面談不可にしました');render();
+}
+function avUnblock(id){
+  const a=DB.availability[ME.id];if(!a)return;
+  a.blocks=(a.blocks||[]).filter(b=>b.id!==id);
+  save();toast('面談可能に戻しました');render();
+}
+
+/* 「日時でまとめて追加」フォーム＋スクロール式 時間ピッカー */
+function initBlkForm(){BLKFORM={date:ymd(new Date()),start:'12:00',end:'13:00',note:''};}
+// 00:00〜23:30 を30分刻みで返す
+function timeOptions(which){
+  let h='';
+  for(let t=0;t<24*60;t+=30){const v=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
+    h+=`<button class="${BLKFORM[which]===v?'on':''}" onclick="tpSet('${which}','${v}')">${v}</button>`;}
+  return h;
+}
+function tpToggle(which){
+  const bar=document.getElementById('tpbar_'+which);
+  const other=which==='start'?'end':'start';
+  document.getElementById('tpbar_'+other)?.classList.add('hidden');
+  document.getElementById('tpick_'+other)?.classList.remove('open');
+  const willOpen=bar.classList.contains('hidden');
+  bar.classList.toggle('hidden');
+  document.getElementById('tpick_'+which).classList.toggle('open',willOpen);
+  if(willOpen){const on=bar.querySelector('button.on');if(on)on.scrollIntoView({block:'center'});}
+}
+function tpSet(which,v){
+  BLKFORM[which]=v;
+  // 開始を変えて終了以上になったら終了を+30分に自動調整
+  if(which==='start'&&BLKFORM.end<=v){
+    let [hh,mm]=v.split(':').map(Number);let t=hh*60+mm+30;if(t>=24*60)t=24*60-30;
+    BLKFORM.end=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
+    const ev=document.getElementById('tpv_end');if(ev)ev.textContent=BLKFORM.end;
+    const eb=document.getElementById('tpbar_end');if(eb)eb.innerHTML=timeOptions('end');
+  }
+  document.getElementById('tpv_'+which).textContent=v;
+  const bar=document.getElementById('tpbar_'+which);bar.innerHTML=timeOptions(which);bar.classList.add('hidden');
+  document.getElementById('tpick_'+which).classList.remove('open');
+}
+function addBlock(){
+  const {date,start:s,end:e}=BLKFORM;const note=(BLKFORM.note||'').trim();
+  const err=document.getElementById('blkErr');err.classList.remove('show');
+  if(!date||!s||!e){err.textContent='日付・開始・終了を入力してください';err.classList.add('show');return;}
+  const start=new Date(`${date}T${s}`),end=new Date(`${date}T${e}`);
+  if(end<=start){err.textContent='終了は開始より後にしてください';err.classList.add('show');return;}
+  if(end<new Date()){err.textContent='過去の時間は登録できません';err.classList.add('show');return;}
+  DB.availability[ME.id]=DB.availability[ME.id]||{};
+  DB.availability[ME.id].blocks=DB.availability[ME.id].blocks||[];
+  DB.availability[ME.id].blocks.push({id:'blk_'+uid(),start:start.toISOString(),end:end.toISOString(),note});
+  save();toast('不可時間を登録しました');
+  initBlkForm();render();
+}
+function delBlock(id){
+  const a=DB.availability[ME.id];if(!a)return;
+  a.blocks=(a.blocks||[]).filter(b=>b.id!==id);
+  save();toast('削除しました');render();
+}
+
+/* =========================================================
+   支部管理（管理者）
+   ========================================================= */
+function viewBranches(){
+  const rows=DB.branches.map(b=>{
+    const uc=DB.users.filter(u=>u.branch_id===b.id).length;
+    return `<div class="row">
+      <span class="av" style="border-radius:10px">🏢</span>
+      <span class="rmain"><span class="rt">${esc(b.name)}</span><span class="rs">ユーザー ${uc}人</span></span>
+      <button class="btn sm" onclick="openBranchForm('${b.id}')">編集</button>
+      <button class="btn sm bad" onclick="deleteBranch('${b.id}')">削除</button>
+    </div>`;}).join('');
+  return `<h1 class="page">支部管理</h1><p class="page-sub">支部の追加・編集・削除ができます。</p>
+    <button class="btn pri block" style="margin-bottom:12px" onclick="openBranchForm()">＋ 支部を追加</button>
+    <div class="card"><div class="rowlist">${rows}</div></div>`;
+}
+function openBranchForm(id){
+  const b=id?DB.branches.find(x=>x.id===id):null;
+  openSheet(`<h3>${b?'支部を編集':'支部を追加'}</h3>
+    <label class="fl">支部名<span class="req">*</span></label>
+    <input id="brName" value="${esc(b?.name||'')}" placeholder="例：千葉支部">
+    <div class="field-err" id="brNameE"></div>
+    <button class="btn pri block" style="margin-top:16px" onclick="saveBranch(${b?`'${b.id}'`:'null'})">${b?'更新する':'追加する'}</button>`);
+}
+function saveBranch(id){
+  const name=document.getElementById('brName').value.trim();const e=document.getElementById('brNameE');
+  e.classList.remove('show');
+  if(!name){e.textContent='支部名は必須です';e.classList.add('show');return;}
+  if(id)DB.branches.find(b=>b.id===id).name=name;
+  else DB.branches.push({id:'b_'+uid(),name});
+  save();closeSheet();toast('保存しました');go('branches');
+}
+function deleteBranch(id){
+  const uc=DB.users.filter(u=>u.branch_id===id).length;
+  if(uc>0){alert('この支部には所属ユーザーがいるため削除できません。先にユーザーの支部を変更してください。');return;}
+  if(!confirm('この支部を削除しますか？'))return;
+  DB.branches=DB.branches.filter(b=>b.id!==id);save();toast('削除しました');go('branches');
+}
+
+/* =========================================================
+   ユーザー管理（管理者）
+   ========================================================= */
+function viewUsers(){
+  const byBranch={};DB.users.forEach(u=>{(byBranch[u.branch_id]=byBranch[u.branch_id]||[]).push(u);});
+  let html=`<h1 class="page">ユーザー管理</h1><p class="page-sub">全支部のユーザーと権限を管理します。</p>
+    <button class="btn pri block" style="margin-bottom:12px" onclick="openUserForm()">＋ ユーザーを追加</button>`;
+  DB.branches.forEach(b=>{
+    const us=byBranch[b.id]||[];
+    html+=`<div class="card"><div class="ch"><h3>${esc(b.name)}</h3><span class="tag" style="margin-left:auto">${us.length}人</span></div>
+      <div class="rowlist">${us.length?us.map(u=>`
+        <div class="row" onclick="openUserForm('${u.id}')">
+          <span class="av">${esc(initials(u.nickname))}</span>
+          <span class="rmain"><span class="rt">${esc(u.nickname)}</span>
+          <span class="rs">${u.id===ME.id?'（あなた）':''}</span></span>
+          <span class="rolebadge ${ROLE_CLS[u.role]}">${ROLE_JP[u.role]}</span>
+        </div>`).join(''):'<div class="empty" style="padding:20px">ユーザーなし</div>'}</div></div>`;
+  });
+  return html;
+}
+function openUserForm(id){
+  const u=id?findUser(id):null;
+  const bopts=DB.branches.map(b=>`<option value="${b.id}" ${u?.branch_id===b.id?'selected':''}>${esc(b.name)}</option>`).join('');
+  const roles=['intern','staff','admin'];
+  openSheet(`<h3>${u?'ユーザーを編集':'ユーザーを追加'}</h3>
+    <label class="fl">ニックネーム<span class="req">*</span></label>
+    <input id="usNick" value="${esc(u?.nickname||'')}"><div class="field-err" id="usNickE"></div>
+    <label class="fl">支部</label>
+    <select id="usBranch">${bopts}</select>
+    <label class="fl">権限</label>
+    <div class="seg">${roles.map(r=>`<label><input type="radio" name="usRole" value="${r}" ${((u?.role||'intern')===r)?'checked':''}><span class="segb">${ROLE_JP[r]}</span></label>`).join('')}</div>
+    <div class="btn-row" style="margin-top:18px">
+      ${u&&u.id!==ME.id?`<button class="btn bad" onclick="deleteUser('${u.id}')">削除</button>`:''}
+      <button class="btn pri" style="flex:1" onclick="saveUser(${u?`'${u.id}'`:'null'})">${u?'更新する':'追加する'}</button>
+    </div>`);
+}
+function saveUser(id){
+  const nick=document.getElementById('usNick').value.trim();const e=document.getElementById('usNickE');
+  e.classList.remove('show');
+  if(!nick){e.textContent='ニックネームは必須です';e.classList.add('show');return;}
+  const data={nickname:nick,branch_id:document.getElementById('usBranch').value,
+    role:document.querySelector('input[name=usRole]:checked').value};
+  if(id)Object.assign(findUser(id),data);
+  else DB.users.push({id:'u_'+uid(),created_at:nowISO(),...data});
+  save();closeSheet();toast('保存しました');go('users');
+}
+function deleteUser(id){
+  if(!confirm('このユーザーを削除しますか？'))return;
+  DB.users=DB.users.filter(u=>u.id!==id);save();closeSheet();toast('削除しました');go('users');
+}
+
+/* =========================================================
+   通知ログ（アプリ内通知の簡易実装）
+   ========================================================= */
+function notifyLog(type,msg){
+  DB.notifications=DB.notifications||[];
+  DB.notifications.push({id:uid(),type,msg,at:nowISO()});
+  save();updateBell();
+}
+const NOTI_READ_KEY='ops_notiread_v1';
+function getNotiRead(){try{return JSON.parse(localStorage.getItem(NOTI_READ_KEY))||{};}catch(e){return {};}}
+function lastRead(){return getNotiRead()[ME?.id]||'1970-01-01T00:00:00.000Z';}
+function unreadCount(){return (DB.notifications||[]).filter(n=>n.at>lastRead()).length;}
+const NOTI_IC={'面談申請':{e:'📝',bg:'#e2f5ec',fg:'#0b8a63'},'面談確定':{e:'✅',bg:'#e7f6ec',fg:'#0f7a37'},
+  '面談不成立':{e:'⚠️',bg:'#fdecec',fg:'#dc2626'},'イベント作成':{e:'📅',bg:'#f0eafe',fg:'#7c3aed'},
+  'イベント更新':{e:'🔄',bg:'#fdf1e0',fg:'#d97706'}};
+function updateBell(){
+  const b=document.getElementById('bellBadge');if(!b||!ME)return;
+  const n=unreadCount();
+  if(n>0){b.textContent=n>9?'9+':n;b.classList.remove('hidden');}
+  else b.classList.add('hidden');
+}
+function openNotifications(){
+  const list=(DB.notifications||[]).slice().sort((a,b)=>new Date(b.at)-new Date(a.at));
+  const lr=lastRead();
+  const rows=list.length?list.map(n=>{const ic=NOTI_IC[n.type]||{e:'🔔',bg:'#eef2f6',fg:'#64748b'};
+    return `<div class="noti ${n.at>lr?'unread':''}">
+      <span class="nic" style="background:${ic.bg};color:${ic.fg}">${ic.e}</span>
+      <span><span class="nt">${esc(n.msg)}</span><br><span class="ns">${esc(n.type)} ・ ${fmtRel(n.at)}</span></span>
+    </div>`;}).join(''):'<div class="empty" style="padding:26px"><div class="ei">🔔</div><p>通知はまだありません。</p></div>';
+  openSheet(`<h3>通知</h3>
+    <p class="page-sub">面談・イベントに関するアプリ内通知です。</p>
+    <div class="card"><div class="cb" style="padding:4px 12px">${rows}</div></div>`);
+  // 開いたら既読に
+  const map=getNotiRead();map[ME.id]=nowISO();localStorage.setItem(NOTI_READ_KEY,JSON.stringify(map));
+  updateBell();
+}
+
+/* =========================================================
+   メール履歴の閲覧
+   ========================================================= */
+function openMailHistory(){
+  let list=DB.emails.slice();
+  if(ME.role==='intern')list=list.filter(m=>m.receiver_id===ME.id);        // 受信
+  else if(ME.role==='staff')list=list.filter(m=>m.sender_id===ME.id);       // 送信
+  list.sort((a,b)=>new Date(b.sent_at||0)-new Date(a.sent_at||0));
+  const rows=list.length?list.map(m=>{
+    const other=ME.role==='intern'?findUser(m.sender_id):findUser(m.receiver_id);
+    const who=ME.role==='intern'?'差出人':'宛先';
+    return `<div class="row" style="cursor:pointer" onclick="openMailDetail('${m.id}')">
+      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d)">✉️</span>
+      <span class="rmain"><span class="rt">${esc(m.subject)}</span>
+      <span class="rs">${who}：${esc(other?.nickname||'—')} ・ ${m.sent_at?fmtRel(m.sent_at):''}</span></span>
+      <span class="tile-arrow">›</span></div>`;}).join('')
+    :`<div class="empty" style="padding:26px"><div class="ei">✉️</div><p>${ME.role==='intern'?'受信したメールはありません。':'送信したメールはありません。'}</p></div>`;
+  openSheet(`<h3>${ME.role==='intern'?'受信メール':'メール履歴（送信済み）'}</h3>
+    <div class="hint mock"><span>✉️</span><span>デモ版：アプリ内に記録されたメールの履歴です。</span></div>
+    <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>`);
+}
+function openMailDetail(id){
+  const m=DB.emails.find(x=>x.id===id);if(!m)return;
+  const from=findUser(m.sender_id),to=findUser(m.receiver_id);
+  openSheet(`<h3>${esc(m.subject)}</h3>
+    <dl class="kv" style="margin:12px 0">
+      <dt>差出人</dt><dd>${esc(from?.nickname||'—')}</dd>
+      <dt>宛先</dt><dd>${esc(to?.nickname||'—')}</dd>
+      <dt>送信日時</dt><dd>${m.sent_at?fmtDT(m.sent_at):'—'}</dd>
+    </dl>
+    <div class="divider"></div>
+    <div style="white-space:pre-wrap;font-size:14px;line-height:1.7">${esc(m.body)}</div>
+    <button class="btn block" style="margin-top:16px" onclick="openMailHistory()">← 一覧へ戻る</button>`);
+}
+
+/* =========================================================
+   BOOT
+   ========================================================= */
+initLoginBranches();
+const saved=localStorage.getItem(SESSION_KEY);
+if(saved&&findUser(saved)){loginAs(saved);}
+</script>
+</body>
+</html>
