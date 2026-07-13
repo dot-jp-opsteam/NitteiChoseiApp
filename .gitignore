@@ -1,0 +1,4 @@
+node_modules/
+server/ops_nittyou.local.db
+server/ops_nittyou.sqlite
+*.log

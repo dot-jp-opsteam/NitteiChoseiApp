@@ -1,0 +1,14 @@
+{
+  "name": "ops-nittyou-server",
+  "version": "1.0.0",
+  "description": "OPS日調アプリ用バックエンド（フェーズ0：DB移行）",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.4",
+    "express": "^4.19.2"
+  }
+}
