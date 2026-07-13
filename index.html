@@ -462,6 +462,10 @@ function viewHome(){
         <div class="cb"><span class="tile-ic" style="background:#fdecec;color:#dc2626">🚫</span>
         <span><span class="tile-t">面談できない時間を登録</span><br><span class="tile-d">30分枠をタップ、または日時でまとめて指定</span></span>
         <span class="tile-arrow">›</span></div></div>`+
+      `<div class="card click home-tile" onclick="openGoogleCalendarSettings()">
+        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">📅</span>
+        <span><span class="tile-t">Googleカレンダー連携</span><br><span class="tile-d">予定を自動で面談不可に反映／確定した面談を自動登録</span></span>
+        <span class="tile-arrow">›</span></div></div>`+
       `<div class="card click home-tile" onclick="openMailHistory()">
         <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">✉️</span>
         <span><span class="tile-t">メール履歴</span><br><span class="tile-d">インターン生へ送信したメールの履歴</span></span>
@@ -489,6 +493,44 @@ function openSystemSettings(){
     </dl>
     <button class="btn block" style="margin-top:16px;color:var(--bad);border-color:#f2b8b8"
       onclick="if(confirm('デモデータを初期状態に戻します。よろしいですか？')){resetDB();closeSheet();toast('初期化しました');go('home')}">デモデータを初期化</button>`);
+}
+
+/* =========================================================
+   Googleカレンダー連携（スタッフ）
+   ========================================================= */
+async function openGoogleCalendarSettings(){
+  openSheet(`<h3>Googleカレンダー連携</h3><p class="page-sub">状態を確認しています…</p>`);
+  try{
+    const res=await fetch(`/api/google/status?staffId=${encodeURIComponent(ME.id)}`);
+    if(!res.ok)throw new Error('status fetch failed');
+    renderGoogleCalendarSettings(await res.json());
+  }catch(e){
+    openSheet(`<h3>Googleカレンダー連携</h3>
+      <div class="hint mock" style="background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>連携状態の取得に失敗しました。時間をおいて再度お試しください。</span></div>`);
+  }
+}
+function renderGoogleCalendarSettings(data){
+  if(!data.enabled){
+    openSheet(`<h3>Googleカレンダー連携</h3>
+      <div class="hint mock"><span>⚠️</span><span>サーバー側でGoogleカレンダー連携がまだ設定されていません。管理者にお問い合わせください。</span></div>`);
+    return;
+  }
+  if(data.connected){
+    openSheet(`<h3>Googleカレンダー連携</h3>
+      <div class="hint"><span>✅</span><span>連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。</span></div>
+      <p class="page-sub" style="margin-top:10px">Notion Calendarをお使いの場合も、表示しているアカウントが同じGoogleアカウントであれば自動的に反映されます。iPhone標準カレンダー（iCloud）は別対応が必要です。</p>
+      <button class="btn block" style="margin-top:16px;color:var(--bad);border-color:#f2b8b8" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
+  }else{
+    openSheet(`<h3>Googleカレンダー連携</h3>
+      <p class="page-sub">あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。</p>
+      <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携する</button>`);
+  }
+}
+function disconnectGoogleCalendar(){
+  if(!confirm('Googleカレンダーとの連携を解除します。よろしいですか？'))return;
+  fetch('/api/auth/google/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({staffId:ME.id})})
+    .then(()=>{toast('連携を解除しました');closeSheet();})
+    .catch(()=>toast('解除に失敗しました'));
 }
 
 /* =========================================================
@@ -710,7 +752,7 @@ function openInterview(id){
       </div>`;
   }else if(iv.status==='fixed'){
     actions=`<div class="hint"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
-      <div class="hint mock" style="margin-top:8px"><span>📆</span><span>Googleカレンダーに登録済み（モック）</span></div>
+      <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px"><span>📆</span><span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
       <button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','${MTYPE[iv.meeting_type]}リンクの送付','お疲れ様です。面談の${MTYPE[iv.meeting_type]}リンクをお送りします。')">${MTYPE[iv.meeting_type]}リンクを送る</button>`;
   }else{
     actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>この面談は不成立として処理されています。</span></div>
@@ -1454,6 +1496,12 @@ function openMailDetail(id){
   startPolling();
   const saved=localStorage.getItem(SESSION_KEY);
   if(saved&&findUser(saved)){loginAs(saved);}
+  const googleParam=new URLSearchParams(location.search).get('google');
+  if(googleParam){
+    history.replaceState(null,'',location.pathname);
+    if(googleParam==='connected')toast('Googleカレンダーと連携しました');
+    else if(googleParam==='error')toast('Googleカレンダー連携に失敗しました');
+  }
 })();
 </script>
 </body>

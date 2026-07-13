@@ -11,3 +11,11 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        value: https://ops-nittyou-app.onrender.com

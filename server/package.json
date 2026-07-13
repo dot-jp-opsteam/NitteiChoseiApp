@@ -1,9 +1,12 @@
 {
   "name": "ops-nittyou-server",
   "version": "1.0.0",
-  "description": "OPS日調アプリ用バックエンド（フェーズ0：DB移行）",
+  "description": "OPS日調アプリ用バックエンド（フェーズ0：DB移行／フェーズ1：Googleカレンダー連携）",
   "type": "commonjs",
   "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js"
   },
