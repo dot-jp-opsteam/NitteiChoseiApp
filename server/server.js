@@ -141,7 +141,10 @@ async function syncInterviewsToGoogle(oldDB, newBody) {
     try {
       if (!wasFixed && isFixed && iv.confirmed_datetime) {
         const tokenRow = await getTokenRow(iv.staff_id);
-        if (!tokenRow) continue;
+        if (!tokenRow) {
+          console.log(`Googleカレンダー未連携のためスキップ（interview ${iv.id}, staff ${iv.staff_id}）`);
+          continue;
+        }
         const accessToken = await accessTokenFor(tokenRow);
         const intern = (newBody.users || []).find((u) => u.id === iv.intern_id);
         const start = new Date(iv.confirmed_datetime);
@@ -153,6 +156,7 @@ async function syncInterviewsToGoogle(oldDB, newBody) {
           end: { dateTime: end.toISOString(), timeZone: 'Asia/Tokyo' },
         });
         iv.googleEventId = created.id;
+        console.log(`Googleカレンダーにイベントを作成しました（interview ${iv.id}, event ${created.id}）`);
       } else if (wasFixed && !isFixed && old.googleEventId) {
         const tokenRow = await getTokenRow(iv.staff_id);
         if (tokenRow) {
