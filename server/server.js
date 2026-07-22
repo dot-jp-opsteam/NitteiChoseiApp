@@ -17,12 +17,17 @@
      - POST /api/webhooks/google-calendar            Googleからのpush通知受信
    ========================================================= */
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { createClient } = require('@libsql/client');
 const express = require('express');
 const google = require('./google');
+const auth = require('./auth');
 
 const PORT = process.env.PORT || 8080;
 const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.TOKEN_ENCRYPTION_KEY && process.env.PUBLIC_BASE_URL);
+const STAFF_SIGNUP_SECRET = process.env.STAFF_SIGNUP_SECRET || '';
+const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@example.com';
+const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'change-me-immediately';
 
 const client = createClient(
   process.env.TURSO_DATABASE_URL
@@ -53,6 +58,41 @@ async function initDB() {
       connected_at TEXT NOT NULL
     )
   `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      nickname TEXT NOT NULL,
+      role TEXT NOT NULL,
+      branch_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      approved_at TEXT,
+      approved_by TEXT
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
+  const countRs = await client.execute('SELECT COUNT(*) as c FROM users');
+  if (Number(countRs.rows[0].c) === 0) {
+    if (!process.env.SEED_ADMIN_EMAIL || !process.env.SEED_ADMIN_PASSWORD) {
+      console.warn('SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD が未設定です。デフォルトの仮パスワードで初期管理者を作成します。必ずログイン後すぐにパスワードを変更するか、環境変数を設定して再デプロイしてください。');
+    }
+    const passwordHash = await auth.hashPassword(SEED_ADMIN_PASSWORD);
+    await client.execute({
+      sql: `INSERT INTO users (id, email, password_hash, nickname, role, branch_id, status, created_at)
+            VALUES (?,?,?,?,?,?,?,?)`,
+      args: ['u_' + crypto.randomBytes(6).toString('hex'), SEED_ADMIN_EMAIL.toLowerCase(), passwordHash, '管理者', 'admin', null, 'active', new Date().toISOString()],
+    });
+    console.log(`初期管理者アカウントを作成しました（email: ${SEED_ADMIN_EMAIL}）`);
+  }
 }
 
 async function readDB() {
@@ -73,6 +113,103 @@ async function writeDB(obj) {
     args: [data, updatedAt],
   });
   return updatedAt;
+}
+
+/* ---------- users テーブル操作 ---------- */
+function toPublicUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id, email: row.email, nickname: row.nickname, role: row.role,
+    branch_id: row.branch_id, status: row.status,
+    created_at: row.created_at, approved_at: row.approved_at,
+  };
+}
+async function findUserByEmail(email) {
+  const rs = await client.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [String(email || '').toLowerCase()] });
+  return rs.rows[0] || null;
+}
+async function findUserById(id) {
+  const rs = await client.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
+  return rs.rows[0] || null;
+}
+async function listActiveUsers() {
+  const rs = await client.execute({ sql: "SELECT * FROM users WHERE status = 'active'" });
+  return rs.rows.map(toPublicUser);
+}
+async function listPendingStaff() {
+  const rs = await client.execute({ sql: "SELECT * FROM users WHERE role = 'staff' AND status = 'pending' ORDER BY created_at" });
+  return rs.rows.map(toPublicUser);
+}
+async function insertUser({ email, passwordHash, nickname, role, branchId, status }) {
+  const id = 'u_' + crypto.randomBytes(6).toString('hex');
+  await client.execute({
+    sql: `INSERT INTO users (id, email, password_hash, nickname, role, branch_id, status, created_at)
+          VALUES (?,?,?,?,?,?,?,?)`,
+    args: [id, String(email).toLowerCase(), passwordHash, nickname, role, branchId || null, status, new Date().toISOString()],
+  });
+  return findUserById(id);
+}
+async function approveStaffRow(id, approvedBy) {
+  await client.execute({
+    sql: "UPDATE users SET status='active', approved_at=?, approved_by=? WHERE id=? AND role='staff' AND status='pending'",
+    args: [new Date().toISOString(), approvedBy, id],
+  });
+}
+async function rejectStaffRow(id) {
+  await client.execute({ sql: "DELETE FROM users WHERE id=? AND role='staff' AND status='pending'", args: [id] });
+}
+async function updateUserRow(id, { nickname, branchId, role }) {
+  await client.execute({
+    sql: 'UPDATE users SET nickname=?, branch_id=?, role=? WHERE id=?',
+    args: [nickname, branchId || null, role, id],
+  });
+}
+async function deleteUserRow(id) {
+  await client.execute({ sql: 'DELETE FROM users WHERE id=?', args: [id] });
+  await client.execute({ sql: 'DELETE FROM sessions WHERE user_id=?', args: [id] });
+}
+
+/* ---------- sessions テーブル操作 ---------- */
+async function createSessionRow(userId) {
+  const token = auth.newSessionToken();
+  await client.execute({
+    sql: 'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)',
+    args: [auth.hashToken(token), userId, new Date().toISOString(), auth.sessionExpiry()],
+  });
+  return token;
+}
+async function getUserBySessionToken(token) {
+  if (!token) return null;
+  const rs = await client.execute({ sql: 'SELECT * FROM sessions WHERE token_hash = ?', args: [auth.hashToken(token)] });
+  const session = rs.rows[0];
+  if (!session) return null;
+  if (new Date(session.expires_at).getTime() < Date.now()) {
+    await client.execute({ sql: 'DELETE FROM sessions WHERE token_hash = ?', args: [session.token_hash] });
+    return null;
+  }
+  return findUserById(session.user_id);
+}
+async function deleteSessionByToken(token) {
+  if (!token) return;
+  await client.execute({ sql: 'DELETE FROM sessions WHERE token_hash = ?', args: [auth.hashToken(token)] });
+}
+
+/* ---------- 認証ミドルウェア ---------- */
+async function requireAuth(req, res, next) {
+  try {
+    const token = auth.getSessionTokenFromReq(req);
+    const user = await getUserBySessionToken(token);
+    if (!user || user.status !== 'active') return res.status(401).json({ error: '認証が必要です' });
+    req.authUser = user;
+    next();
+  } catch (e) {
+    console.error('認証チェックに失敗しました', e);
+    res.status(500).json({ error: '認証チェックに失敗しました' });
+  }
+}
+function requireAdmin(req, res, next) {
+  if (req.authUser.role !== 'admin') return res.status(403).json({ error: '権限がありません' });
+  next();
 }
 
 /* ---------- google_tokens テーブル操作 ---------- */
@@ -129,7 +266,7 @@ async function registerWatch(staffId, accessToken, calendarId) {
 }
 
 /* ---------- 面談確定/取消をGoogleカレンダーへ反映（PUT /api/db 保存時） ---------- */
-async function syncInterviewsToGoogle(oldDB, newBody) {
+async function syncInterviewsToGoogle(oldDB, newBody, users) {
   if (!GOOGLE_ENABLED) return;
   const oldMap = new Map((oldDB?.interviews || []).map((iv) => [iv.id, iv]));
   const newIds = new Set((newBody.interviews || []).map((iv) => iv.id));
@@ -139,14 +276,18 @@ async function syncInterviewsToGoogle(oldDB, newBody) {
     const wasFixed = old && old.status === 'fixed';
     const isFixed = iv.status === 'fixed';
     try {
-      if (!wasFixed && isFixed && iv.confirmed_datetime) {
+      if (isFixed && !iv.googleEventId && old && old.googleEventId && wasFixed) {
+        // 同一面談に対する保存リクエストがほぼ同時に届いた場合、後発リクエストは
+        // クライアント側が把握していない直前のgoogleEventIdを引き継ぐ（上書き消失防止）
+        iv.googleEventId = old.googleEventId;
+      } else if (!wasFixed && isFixed && iv.confirmed_datetime) {
         const tokenRow = await getTokenRow(iv.staff_id);
         if (!tokenRow) {
           console.log(`Googleカレンダー未連携のためスキップ（interview ${iv.id}, staff ${iv.staff_id}）`);
           continue;
         }
         const accessToken = await accessTokenFor(tokenRow);
-        const intern = (newBody.users || []).find((u) => u.id === iv.intern_id);
+        const intern = (users || []).find((u) => u.id === iv.intern_id);
         const start = new Date(iv.confirmed_datetime);
         const end = new Date(start.getTime() + 30 * 60000);
         const created = await google.createEvent(accessToken, tokenRow.calendar_id, {
@@ -191,10 +332,156 @@ app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-// 現在のDBを取得。未作成（初回アクセス）ならnullを返し、フロント側のseed()に委ねる
-app.get('/api/db', async (req, res) => {
+// ログイン画面（未認証）で支部選択に使う。認証情報は含まない
+app.get('/api/branches', async (req, res) => {
   try {
     const obj = await readDB();
+    res.json({ branches: obj?.branches || [] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '取得に失敗しました' });
+  }
+});
+
+/* ---------- 認証 ---------- */
+app.post('/api/auth/register-intern', async (req, res) => {
+  const { email, password, nickname, branch_id } = req.body || {};
+  if (!email || !password || !nickname) return res.status(400).json({ error: 'email・password・nicknameは必須です' });
+  if (String(password).length < 8) return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
+  try {
+    const existing = await findUserByEmail(email);
+    if (existing) return res.status(409).json({ error: 'このメールアドレスは既に登録されています' });
+    const passwordHash = await auth.hashPassword(password);
+    const user = await insertUser({ email, passwordHash, nickname, role: 'intern', branchId: branch_id, status: 'active' });
+    const token = await createSessionRow(user.id);
+    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
+    res.json({ ok: true, user: toPublicUser(user) });
+  } catch (e) {
+    console.error('インターン生登録に失敗しました', e);
+    res.status(500).json({ error: '登録に失敗しました' });
+  }
+});
+
+app.post('/api/auth/register-staff', async (req, res) => {
+  const { email, password, nickname, branch_id, inviteKey } = req.body || {};
+  if (!STAFF_SIGNUP_SECRET || !auth.safeEqual(inviteKey, STAFF_SIGNUP_SECRET)) {
+    return res.status(403).json({ error: '招待リンクが無効です' });
+  }
+  if (!email || !password || !nickname) return res.status(400).json({ error: 'email・password・nicknameは必須です' });
+  if (String(password).length < 8) return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
+  try {
+    const existing = await findUserByEmail(email);
+    if (existing) return res.status(409).json({ error: 'このメールアドレスは既に登録されています' });
+    const passwordHash = await auth.hashPassword(password);
+    await insertUser({ email, passwordHash, nickname, role: 'staff', branchId: branch_id, status: 'pending' });
+    res.json({ ok: true, pending: true });
+  } catch (e) {
+    console.error('スタッフ登録に失敗しました', e);
+    res.status(500).json({ error: '登録に失敗しました' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'email・passwordは必須です' });
+  try {
+    const row = await findUserByEmail(email);
+    if (!row || !(await auth.verifyPassword(password, row.password_hash))) {
+      return res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' });
+    }
+    if (row.status === 'pending') return res.status(403).json({ error: '管理者の承認待ちです。承認までしばらくお待ちください。' });
+    if (row.status !== 'active') return res.status(403).json({ error: 'このアカウントではログインできません' });
+    const token = await createSessionRow(row.id);
+    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
+    res.json({ ok: true, user: toPublicUser(row) });
+  } catch (e) {
+    console.error('ログインに失敗しました', e);
+    res.status(500).json({ error: 'ログインに失敗しました' });
+  }
+});
+
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
+  const token = auth.getSessionTokenFromReq(req);
+  await deleteSessionByToken(token);
+  res.setHeader('Set-Cookie', auth.serializeClearCookie());
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ user: toPublicUser(req.authUser) });
+});
+
+/* ---------- 管理者：スタッフ招待URL ---------- */
+app.get('/api/admin/staff-invite-url', requireAuth, requireAdmin, (req, res) => {
+  if (!STAFF_SIGNUP_SECRET) return res.status(500).json({ error: 'STAFF_SIGNUP_SECRETが未設定です' });
+  const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  res.json({ url: `${base}/?staff=${encodeURIComponent(STAFF_SIGNUP_SECRET)}` });
+});
+
+/* ---------- 管理者：ユーザー管理 ---------- */
+app.get('/api/admin/pending-staff', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json({ pending: await listPendingStaff() });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '取得に失敗しました' });
+  }
+});
+app.post('/api/admin/approve-staff', requireAuth, requireAdmin, async (req, res) => {
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ error: 'userIdが必要です' });
+  try {
+    await approveStaffRow(userId, req.authUser.id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '承認に失敗しました' });
+  }
+});
+app.post('/api/admin/reject-staff', requireAuth, requireAdmin, async (req, res) => {
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ error: 'userIdが必要です' });
+  try {
+    await rejectStaffRow(userId);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '却下に失敗しました' });
+  }
+});
+app.patch('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  const { nickname, branch_id, role } = req.body || {};
+  if (!nickname || !['intern', 'staff', 'admin'].includes(role)) {
+    return res.status(400).json({ error: 'nickname・roleは必須です' });
+  }
+  try {
+    const target = await findUserById(req.params.id);
+    if (!target) return res.status(404).json({ error: 'ユーザーが見つかりません' });
+    await updateUserRow(req.params.id, { nickname, branchId: branch_id, role });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '更新に失敗しました' });
+  }
+});
+app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  if (req.params.id === req.authUser.id) return res.status(400).json({ error: '自分自身は削除できません' });
+  try {
+    await deleteUserRow(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '削除に失敗しました' });
+  }
+});
+
+// 現在のDBを取得。未作成（初回アクセス）でも users だけは常に返し、branches等はフロント側のseed()投入に委ねる
+app.get('/api/db', requireAuth, async (req, res) => {
+  try {
+    const obj = await readDB();
+    const users = await listActiveUsers();
+    if (!obj) return res.json({ users });
+    obj.users = users;
     res.json(obj);
   } catch (e) {
     console.error(e);
@@ -202,15 +489,17 @@ app.get('/api/db', async (req, res) => {
   }
 });
 
-// DB全体を置き換えて保存する（既存save()の置き換え先）
-app.put('/api/db', async (req, res) => {
+// DB全体を置き換えて保存する（既存save()の置き換え先）。users は専用APIでのみ変更するためここでは無視する
+app.put('/api/db', requireAuth, async (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object') {
     return res.status(400).json({ error: 'invalid body' });
   }
+  delete body.users;
   try {
     const oldDB = await readDB();
-    await syncInterviewsToGoogle(oldDB, body);
+    const users = await listActiveUsers();
+    await syncInterviewsToGoogle(oldDB, body, users);
     const updatedAt = await writeDB(body);
     res.json({ ok: true, updatedAt });
   } catch (e) {
@@ -220,10 +509,11 @@ app.put('/api/db', async (req, res) => {
 });
 
 /* ---------- Googleカレンダー連携 ---------- */
-app.get('/api/auth/google/start', (req, res) => {
+app.get('/api/auth/google/start', requireAuth, (req, res) => {
   if (!GOOGLE_ENABLED) return res.status(503).send('Google連携は未設定です');
   const staffId = String(req.query.staffId || '');
   if (!staffId) return res.status(400).send('staffIdが必要です');
+  if (staffId !== req.authUser.id) return res.status(403).send('本人以外は連携できません');
   res.redirect(google.getAuthUrl(staffId));
 });
 
@@ -261,9 +551,10 @@ app.get('/api/auth/google/callback', async (req, res) => {
   }
 });
 
-app.post('/api/auth/google/disconnect', async (req, res) => {
+app.post('/api/auth/google/disconnect', requireAuth, async (req, res) => {
   const staffId = String(req.body?.staffId || '');
   if (!staffId) return res.status(400).json({ error: 'staffIdが必要です' });
+  if (staffId !== req.authUser.id) return res.status(403).json({ error: '本人以外は解除できません' });
   try {
     const tokenRow = await getTokenRow(staffId);
     if (tokenRow) {
@@ -284,9 +575,10 @@ app.post('/api/auth/google/disconnect', async (req, res) => {
   }
 });
 
-app.get('/api/google/status', async (req, res) => {
+app.get('/api/google/status', requireAuth, async (req, res) => {
   const staffId = String(req.query.staffId || '');
   if (!staffId) return res.status(400).json({ error: 'staffIdが必要です' });
+  if (staffId !== req.authUser.id) return res.status(403).json({ error: '本人以外は確認できません' });
   try {
     const row = await getTokenRow(staffId);
     res.json({ connected: !!row, enabled: GOOGLE_ENABLED });

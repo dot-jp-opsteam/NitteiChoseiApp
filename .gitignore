@@ -2,3 +2,5 @@ node_modules/
 server/ops_nittyou.local.db
 server/ops_nittyou.sqlite
 *.log
+管理者ログイン情報.txt
+index_backup_*.html
