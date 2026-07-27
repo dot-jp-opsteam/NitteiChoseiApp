@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プライバシーポリシー｜OPS日調アプリ</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="doc-page">
+  <header class="doc-head">
+    <span class="mark">OPS</span>
+    <div>
+      <h1>プライバシーポリシー</h1>
+      <p class="doc-sub">OPS日調アプリ（ドットジェイピー）</p>
+    </div>
+  </header>
+
+  <p class="doc-updated">最終更新日：2026年7月27日</p>
+
+  <p>OPS日調アプリ（以下「本アプリ」）は、学生団体ドットジェイピーの各支部において、インターン生とスタッフの面談日程の調整・管理を行うためのアプリケーションです。本アプリにおける利用者情報の取り扱いについて、以下のとおり定めます。</p>
+
+  <h2>1. 取得する情報</h2>
+  <p>本アプリは、次の情報を取得します。</p>
+  <table class="doc-table">
+    <thead><tr><th>種類</th><th>内容</th><th>取得方法</th></tr></thead>
+    <tbody>
+      <tr><td>アカウント情報</td><td>メールアドレス、ニックネーム、所属支部、役割（インターン生／スタッフ／管理者）</td><td>ご本人の入力</td></tr>
+      <tr><td>認証情報</td><td>パスワード（ハッシュ化して保存し、元の文字列は保持しません）、ログインセッション</td><td>ご本人の入力</td></tr>
+      <tr><td>Googleアカウント情報</td><td>メールアドレス、氏名、プロフィール画像、Googleアカウントの識別子</td><td>「Googleでログイン」を利用された場合のみ</td></tr>
+      <tr><td>Googleカレンダー情報</td><td>予定の日時・件名・参加者などの情報</td><td>「Googleカレンダー連携」を許可された場合のみ</td></tr>
+      <tr><td>アプリ内の活動情報</td><td>面談の申請・確定内容、イベントの出欠、アプリ内メッセージの履歴</td><td>ご利用に伴い自動的に記録</td></tr>
+    </tbody>
+  </table>
+
+  <h2>2. 利用目的</h2>
+  <ul>
+    <li>面談日程の調整、確定、通知を行うため</li>
+    <li>ご本人であることの確認（ログイン）のため</li>
+    <li>確定した面談を、ご本人のGoogleカレンダーに登録・更新するため</li>
+    <li>支部内での予定の重複を避け、空き時間を判定するため</li>
+    <li>お問い合わせへの対応、不具合の調査のため</li>
+  </ul>
+  <p>取得した情報を、上記の目的以外に利用することはありません。広告配信、行動ターゲティング、プロファイリングには一切利用しません。</p>
+
+  <h2>3. Googleユーザーデータの取り扱い</h2>
+  <p>本アプリがGoogle APIから取得した情報の使用および他アプリへの移転は、<a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API サービスのユーザーデータに関するポリシー</a>（限定的使用の要件を含む）に準拠します。</p>
+  <ul>
+    <li>取得したカレンダー情報は、本アプリ上で面談日程を表示・調整する目的にのみ使用します。</li>
+    <li>第三者への販売、譲渡、広告目的での利用は行いません。</li>
+    <li>人間による内容の閲覧は行いません。ただし、ご本人の明示的な同意がある場合、セキュリティ上の調査が必要な場合、または法令上必要な場合を除きます。</li>
+    <li>本アプリは、面談予定の作成・更新のために<code>https://www.googleapis.com/auth/calendar</code>の権限を要求します。ログインのみを行う場合は、メールアドレスと氏名（<code>openid</code>、<code>email</code>、<code>profile</code>）のみを取得します。</li>
+  </ul>
+
+  <h2>4. 連携の解除と削除</h2>
+  <ul>
+    <li>アプリ内の「Googleカレンダー連携」画面から、いつでも連携を解除できます。解除すると、保存していたアクセス権限は削除されます。</li>
+    <li><a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Googleアカウントの設定画面</a>からも、本アプリへのアクセス権を取り消せます。</li>
+    <li>アカウントおよび関連データの削除をご希望の場合は、下記の連絡先までご連絡ください。ご本人確認のうえ、速やかに削除します。</li>
+  </ul>
+
+  <h2>5. 第三者提供</h2>
+  <p>法令に基づく場合を除き、ご本人の同意なく第三者に情報を提供することはありません。ただし、本アプリの運営のために、以下の外部サービスを利用しています。</p>
+  <ul>
+    <li>Render（アプリケーションの稼働環境）</li>
+    <li>Turso（データベース）</li>
+    <li>Google LLC（ログイン認証、カレンダー連携、通知メールの送信）</li>
+  </ul>
+
+  <h2>6. 保管期間と安全管理</h2>
+  <ul>
+    <li>通信はすべてHTTPSにより暗号化しています。</li>
+    <li>パスワードは復元できない形式（scrypt）に変換して保存し、元の文字列は保持しません。</li>
+    <li>Googleのアクセス権限は暗号化して保存しています。</li>
+    <li>情報は、アカウントが存在する間、および法令上必要な期間に限り保管します。</li>
+  </ul>
+
+  <h2>7. お問い合わせ</h2>
+  <p>本ポリシーに関するお問い合わせ、データの開示・訂正・削除のご請求は、次の連絡先までお願いします。</p>
+  <p class="doc-contact">OPS日調アプリ 運営（ドットジェイピー）<br>
+     メール：<a href="mailto:leandroayrtonazuma@gmail.com">leandroayrtonazuma@gmail.com</a></p>
+
+  <h2>8. 本ポリシーの変更</h2>
+  <p>内容を変更する場合は、本ページに掲載します。重要な変更を行う場合は、アプリ内でお知らせします。</p>
+
+  <p class="doc-back"><a href="/">‹ アプリに戻る</a>　|　<a href="/terms.html">利用規約</a></p>
+</div>
+</body>
+</html>

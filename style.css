@@ -217,6 +217,26 @@
   .pw-toggle{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12px;color:var(--sub);cursor:pointer}
   .pw-toggle input{width:auto;margin:0;accent-color:var(--brand)}
 
+  /* ---------- プライバシーポリシー・利用規約ページ ---------- */
+  .doc-page{max-width:760px;margin:0 auto;padding:32px 20px 64px;line-height:1.9}
+  .doc-head{display:flex;align-items:center;gap:14px;margin-bottom:24px}
+  .doc-head .mark{width:46px;height:46px;border-radius:12px;flex:none;
+    background:linear-gradient(135deg,var(--brand),var(--brand-lite));
+    display:grid;place-items:center;color:#fff;font-size:19px;font-weight:800}
+  .doc-head h1{margin:0;font-size:22px}
+  .doc-sub{margin:2px 0 0;color:var(--sub);font-size:13px}
+  .doc-updated{color:var(--mut);font-size:12px;margin:0 0 24px}
+  .doc-page h2{font-size:16px;margin:30px 0 8px;padding-top:18px;border-top:1px solid var(--line)}
+  .doc-page ul{padding-left:22px;margin:8px 0}
+  .doc-page li{margin:5px 0}
+  .doc-page code{background:var(--bg);border:1px solid var(--line);border-radius:5px;
+    padding:1px 5px;font-size:12px;word-break:break-all}
+  .doc-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+  .doc-table th,.doc-table td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  .doc-table th{background:var(--bg);font-weight:700;white-space:nowrap}
+  .doc-contact{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .doc-back{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);font-size:14px}
+
   .forgot-link{margin:12px 0 0;text-align:center;font-size:13px}
   .forgot-link a{color:var(--brand);text-decoration:none;font-weight:600}
   .forgot-link a:hover{text-decoration:underline}

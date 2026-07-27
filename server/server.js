@@ -932,8 +932,25 @@ async function renewExpiringWatches() {
   }
 }
 
-// 静的ファイル（index.html, style.css）をこのサーバーから配信
-app.use(express.static(path.join(__dirname, '..')));
+/* 静的ファイルの配信。
+   以前はリポジトリ直下をそのまま公開していたが、それだと設計書や render.yaml まで
+   誰でも読めてしまうため、公開してよいファイルだけを明示的に許可する方式にしている。
+   新しく公開したいファイルが増えたときは、この一覧に追加すること。 */
+const PUBLIC_ROOT = path.join(__dirname, '..');
+const PUBLIC_FILES = {
+  '/': 'index.html',
+  '/index.html': 'index.html',
+  '/style.css': 'style.css',
+  '/privacy.html': 'privacy.html',
+  '/terms.html': 'terms.html',
+};
+app.get('*', (req, res) => {
+  let p;
+  try { p = decodeURIComponent(req.path); } catch (e) { p = req.path; }
+  const file = PUBLIC_FILES[p];
+  if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');
+  res.sendFile(path.join(PUBLIC_ROOT, file));
+});
 
 initDB()
   .then(() => {

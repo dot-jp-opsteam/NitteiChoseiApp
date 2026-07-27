@@ -776,12 +776,60 @@ function renderGoogleCalendarSettings(data){
     openSheet(`<h3>Googleカレンダー連携</h3>
       <div class="hint"><span>✅</span><span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
       <p class="page-sub" style="margin-top:10px">Notion Calendarをお使いの場合も、表示しているアカウントが同じGoogleアカウントであれば自動的に反映されます。iPhone標準カレンダー（iCloud）は別対応が必要です。</p>
-      <button class="btn block" style="margin-top:16px;color:var(--bad);border-color:#f2b8b8" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
+      ${openCalendarButton()}
+      <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:#f2b8b8" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
       <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
-      <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携する</button>`);
+      <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携する</button>
+      ${openCalendarButton()}`);
   }
+}
+
+/* Googleカレンダーを開くボタン。
+   パソコンでは新しいタブ、スマホではGoogleカレンダーアプリが開く。
+   どちらも日調アプリの画面は残るので、カレンダーを見ながら入力を続けられる */
+function openCalendarButton(){
+  const label=isMobileDevice()?'Googleカレンダーアプリを開く':'Googleカレンダーを新しいタブで開く';
+  const note=isMobileDevice()
+    ? 'カレンダーで予定を確認したら、この画面に戻って入力できます。'
+    : 'カレンダーを見ながら、この画面に予定を入力できます。';
+  return `<button class="btn block" style="margin-top:16px" onclick="openGoogleCalendarTab()">
+    ${GOOGLE_LOGO_SVG}<span style="margin-left:8px">${label}</span></button>
+    <p class="fine" style="margin-top:8px">${note}</p>`;
+}
+function isMobileDevice(){
+  return /iPhone|iPad|iPod|Android/.test(navigator.userAgent);
+}
+function openGoogleCalendarTab(){
+  // ログイン中のGoogleアカウントで開くよう authuser にメールアドレスを渡す
+  const web=ME&&ME.email
+    ? `https://calendar.google.com/calendar/u/0/r?authuser=${encodeURIComponent(ME.email)}`
+    : 'https://calendar.google.com/calendar/u/0/r';
+  const ua=navigator.userAgent;
+
+  if(/Android/.test(ua)){
+    // Androidはintent://でアプリを直接開く。未インストールならブラウザ版に自動で切り替わる
+    location.href='intent://calendar.google.com/calendar/r#Intent;scheme=https;'
+      +'package=com.google.android.calendar;S.browser_fallback_url='
+      +encodeURIComponent(web)+';end';
+    return;
+  }
+  if(/iPhone|iPad|iPod/.test(ua)){
+    // iOSはURLスキームで開く。アプリが入っていないと何も起きないため、
+    // 少し待ってからブラウザ版に切り替える。アプリが開いた場合は画面が隠れるので取り消す
+    const fallback=setTimeout(()=>{location.href=web;},1500);
+    const onHide=()=>{
+      if(document.hidden){
+        clearTimeout(fallback);
+        document.removeEventListener('visibilitychange',onHide);
+      }
+    };
+    document.addEventListener('visibilitychange',onHide);
+    location.href='googlecalendar://';
+    return;
+  }
+  window.open(web,'_blank','noopener');
 }
 function disconnectGoogleCalendar(){
   if(!confirm('Googleカレンダーとの連携を解除します。よろしいですか？'))return;
@@ -1365,7 +1413,8 @@ function openAvailabilitySettings(){
     <p class="page-sub">インターン生は、ここで設定した時間帯の中から30分刻みで面談を予約できます。</p>
     <div class="hint"><span>📆</span><span>Googleカレンダーと連携している場合、予定は自動的に不可時間として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
     <div style="margin-top:8px">${rows}</div>
-    <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>`);
+    <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
+    ${openCalendarButton()}`);
 }
 function toggleWk(d){
   const c=getWeekly(ME.id)[d];const cur=document.querySelector(`#wk${d} .sw`).classList.contains('on');
