@@ -200,18 +200,44 @@
   .role-pick input:checked + .rb{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
   .fine{font-size:11px;color:var(--mut);margin-top:16px;line-height:1.5}
 
-  /* ---------- ソーシャルログイン（画面下半分） ---------- */
-  /* 「または」を挟んで、上のメール＋パスワードと視覚的に切り分ける */
-  .or-sep{display:flex;align-items:center;gap:12px;margin:22px 0 16px;color:var(--mut);font-size:12px}
-  .or-sep::before,.or-sep::after{content:"";flex:1;height:1px;background:var(--line)}
-  .or-sep span{white-space:nowrap}
+  /* ---------- ログイン画面の2カラム構成 ---------- */
+  /* 左（PC）＝メールアドレスでログイン／右（PC）＝外部IDでログイン。
+     スマホでは1カラムに畳まれ、メールが上・外部IDが下に並ぶ */
+  .login-card.wide{max-width:860px}
+  .login-cols{display:grid;grid-template-columns:1fr;gap:26px}
+  @media(min-width:760px){
+    .login-cols{grid-template-columns:1.05fr .95fr;gap:34px;align-items:start}
+  }
+  .col-title{margin:0 0 14px;font-size:15px;font-weight:700;color:var(--ink);text-align:center}
+  /* 入力欄のかたまりを薄いパネルで囲み、右カラムのボタン群と対になるようにする */
+  .login-panel{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:18px 16px 20px}
+  .login-panel label.fl:first-of-type{margin-top:0}
+  .pw-toggle{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12px;color:var(--sub);cursor:pointer}
+  .pw-toggle input{width:auto;margin:0;accent-color:var(--brand)}
 
-  .btn.social{display:flex;align-items:center;justify-content:center;gap:10px;
-    background:#fff;border:1px solid #dadce0;color:#3c4043;font-weight:600}
+  .signup-box{margin-top:16px;border:1px solid var(--brand);border-radius:14px;padding:14px 14px 16px}
+  .signup-title{margin:0 0 10px;font-size:13px;font-weight:700;color:var(--ink);text-align:center}
+  .btn.signup{background:var(--brand);color:#fff;border:none;font-weight:700}
+  .btn.signup:hover{background:var(--brand-lite)}
+
+  /* ---------- 外部IDでログイン ---------- */
+  .social-col{display:flex;flex-direction:column}
+  .social-note{text-align:center;margin-top:12px}
+  /* Googleブランドガイドラインに沿って白地＋公式ロゴ。左のロゴ枠は見本デザインに合わせたもの */
+  .btn.social{display:flex;align-items:center;gap:0;padding:0;height:48px;
+    background:#fff;border:1px solid #dadce0;color:#3c4043;font-weight:700;overflow:hidden}
   .btn.social:hover{background:#f8faf9;border-color:#c9ced4}
+  .btn.social .social-ico{display:grid;place-items:center;width:48px;height:100%;flex:none;
+    border-right:1px solid #ececec}
+  .btn.social .social-label{flex:1;text-align:center;padding-right:48px}
   .btn.social svg{flex:none}
   /* 押せない状態（未設定のプロバイダ）をグレーアウトして見せる場合に使う */
   .btn.social:disabled{background:#f4f6f5;color:var(--mut)}
+
+  /* 旧レイアウトの「または」区切り（登録画面などで再利用する場合に備えて残す） */
+  .or-sep{display:flex;align-items:center;gap:12px;margin:22px 0 16px;color:var(--mut);font-size:12px}
+  .or-sep::before,.or-sep::after{content:"";flex:1;height:1px;background:var(--line)}
+  .or-sep span{white-space:nowrap}
 
   .tag{font-size:11px;background:#eef2f6;color:#64748b;padding:2px 8px;border-radius:6px;font-weight:600}
 

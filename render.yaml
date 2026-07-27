@@ -25,8 +25,7 @@ services:
         sync: false
       - key: STAFF_SIGNUP_SECRET
         sync: false
-      # Google Cloud Console にログイン用リダイレクトURI
-      # （https://ops-nittyou-app.onrender.com/api/auth/google/login/callback）を
-      # 登録し終えてから "true" に変更すると、ログイン画面にGoogleボタンが表示される
+      # ログイン用リダイレクトURI（/api/auth/google/login/callback）は
+      # 2026-07-27 に Google Cloud Console へ登録済み。OAuth同意画面も公開済みのため有効化
       - key: GOOGLE_LOGIN_ENABLED
-        value: "false"
+        value: "true"

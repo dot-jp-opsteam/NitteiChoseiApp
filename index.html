@@ -259,15 +259,25 @@ const GOOGLE_LOGO_SVG=`<svg viewBox="0 0 48 48" width="18" height="18" aria-hidd
   <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/>
 </svg>`;
 
-/* メール／パスワード欄とソーシャルログインを区切る「または」の線 */
+/* 右カラム（スマホでは下段）の「外部IDでログイン」ブロック。
+   サーバー側でGoogleが未設定のときは丸ごと非表示にして、押しても動かないボタンを見せない */
 function socialLoginBlock(){
   if(!GOOGLE_LOGIN_AVAILABLE)return '';
   return `
-    <div class="or-sep"><span>または</span></div>
-    <button class="btn social block" onclick="goGoogleLogin()">${GOOGLE_LOGO_SVG}<span>Googleでログイン</span></button>
-    <p class="fine" style="margin-top:10px;text-align:center">パスワードの入力は不要です。普段お使いのGoogleアカウントでそのまま始められます。</p>`;
+    <div class="login-col social-col">
+      <h3 class="col-title">外部IDでログイン</h3>
+      <button class="btn social block" onclick="goGoogleLogin()">
+        <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
+        <span class="social-label">Googleでログイン</span>
+      </button>
+      <p class="fine social-note">パスワードの入力は不要です。<br>普段お使いのGoogleアカウントでそのまま始められます。</p>
+    </div>`;
 }
 function goGoogleLogin(){location.href='/api/auth/google/login';}
+function toggleLoginPw(cb){
+  const el=document.getElementById('loginPassword');
+  if(el)el.type=cb.checked?'text':'password';
+}
 
 function branchOptions(selected){
   return LOGIN_BRANCHES.map(b=>`<option value="${b.id}" ${b.id===selected?'selected':''}>${esc(b.name)}</option>`).join('');
@@ -275,6 +285,10 @@ function branchOptions(selected){
 function switchLoginView(view){LOGIN_VIEW=view;renderLogin();}
 function renderLogin(){
   const body=document.getElementById('loginBody');
+  /* ログイン画面かつGoogleが使えるときだけ2カラムに広げる。
+     登録画面などは1カラムのままの方が入力に集中できるのでカードを細いままにする */
+  const wide=(LOGIN_VIEW==='login'&&GOOGLE_LOGIN_AVAILABLE);
+  document.querySelector('.login-card').classList.toggle('wide',wide);
   if(LOGIN_VIEW==='register-intern'){
     body.innerHTML=`
       <label class="fl">メールアドレス<span class="req">*</span></label>
@@ -307,15 +321,26 @@ function renderLogin(){
       <button class="btn ghost block" style="margin-top:14px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
   }else{
     body.innerHTML=`
-      <label class="fl">メールアドレス<span class="req">*</span></label>
-      <input id="loginEmail" type="email" autocomplete="username">
-      <label class="fl">パスワード<span class="req">*</span></label>
-      <input id="loginPassword" type="password" autocomplete="current-password">
-      <div class="field-err" id="loginErr"></div>
-      <button class="btn pri block" style="margin-top:20px" onclick="doLoginAuth()">ログイン</button>
-      <button class="btn ghost block" style="margin-top:10px" onclick="switchLoginView('register-intern')">初めての方（インターン生）はこちら</button>
-      ${STAFF_INVITE_KEY?`<button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('register-staff')">スタッフとして登録する</button>`:''}
-      ${socialLoginBlock()}`;
+      <div class="login-cols">
+        <div class="login-col">
+          <div class="login-panel">
+            <h3 class="col-title">メールアドレスでログイン</h3>
+            <label class="fl" for="loginEmail">メールアドレス<span class="req">*</span></label>
+            <input id="loginEmail" type="email" autocomplete="username" placeholder="example@dot-jp.com">
+            <label class="fl" for="loginPassword">パスワード<span class="req">*</span></label>
+            <input id="loginPassword" type="password" autocomplete="current-password">
+            <label class="pw-toggle"><input type="checkbox" onchange="toggleLoginPw(this)"><span>パスワードを表示する</span></label>
+            <div class="field-err" id="loginErr"></div>
+            <button class="btn pri block" style="margin-top:14px" onclick="doLoginAuth()">ログインする</button>
+          </div>
+          <div class="signup-box">
+            <p class="signup-title">アカウントをお持ちでない方</p>
+            <button class="btn signup block" onclick="switchLoginView('register-intern')">メールアドレスで会員登録する</button>
+            ${STAFF_INVITE_KEY?`<button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('register-staff')">スタッフとして登録する</button>`:''}
+          </div>
+        </div>
+        ${socialLoginBlock()}
+      </div>`;
   }
   // Enterキーでログインできるようにする（スマホのキーボードの「完了」でも送信される）
   const emailInput=document.getElementById('loginEmail');
