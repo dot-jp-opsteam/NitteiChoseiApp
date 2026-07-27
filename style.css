@@ -39,6 +39,7 @@
   .role-intern{background:var(--brand-soft);color:var(--brand-d)}
   .role-staff{background:var(--ok-soft);color:#0f7a37}
   .role-admin{background:#efeafe;color:#6d28d9}
+  .role-branch-admin{background:#fdf1e0;color:#b45309}
 
   main{flex:1;padding:16px 14px 92px}
   .view{animation:fade .18s ease}

@@ -99,6 +99,20 @@ async function initDB() {
       used_at TEXT
     )
   `);
+  /* ドットから配布されたアカウントの名簿。管理者がスタッフを名前で検索して支部に追加するために使う。
+     今はCSV取り込みだけだが、将来 Google Workspace のディレクトリ検索に差し替えられるよう
+     source 列で出所を区別している */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS directory (
+      email TEXT PRIMARY KEY,
+      full_name TEXT NOT NULL,
+      kana TEXT,
+      branch_hint TEXT,
+      search_key TEXT NOT NULL,
+      source TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
   // 既存DBへの追加カラム（Googleでログイン用）。既に存在する場合のエラーは無視する
   for (const ddl of [
     'ALTER TABLE users ADD COLUMN google_sub TEXT',
@@ -184,8 +198,14 @@ async function listActiveUsers() {
   const rs = await client.execute({ sql: "SELECT * FROM users WHERE status = 'active'" });
   return rs.rows.map(toPublicUser);
 }
-async function listPendingStaff() {
-  const rs = await client.execute({ sql: "SELECT * FROM users WHERE role = 'staff' AND status = 'pending' ORDER BY created_at" });
+async function listPendingStaff(branchId) {
+  // branchId を渡すとその支部の申請だけを返す（支部管理者用）
+  const rs = branchId
+    ? await client.execute({
+      sql: "SELECT * FROM users WHERE role = 'staff' AND status = 'pending' AND branch_id = ? ORDER BY created_at",
+      args: [branchId],
+    })
+    : await client.execute({ sql: "SELECT * FROM users WHERE role = 'staff' AND status = 'pending' ORDER BY created_at" });
   return rs.rows.map(toPublicUser);
 }
 async function insertUser({ email, passwordHash, nickname, role, branchId, status, googleSub, avatarUrl }) {
@@ -218,6 +238,50 @@ async function updateUserRow(id, { nickname, branchId, role }) {
 async function deleteUserRow(id) {
   await client.execute({ sql: 'DELETE FROM users WHERE id=?', args: [id] });
   await client.execute({ sql: 'DELETE FROM sessions WHERE user_id=?', args: [id] });
+}
+
+/* ---------- directory（スタッフ名簿）テーブル操作 ----------
+   「あずま」で azuma_reandoro@dot-jp.or.jp を引けるようにするため、
+   氏名・かな・メールアドレスをまとめて1本の検索キーにしておく。
+   全角/半角・大文字小文字・カタカナ/ひらがな・空白の違いを吸収する */
+function normalizeSearchText(s) {
+  return String(s || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\s　]+/g, '')
+    // カタカナをひらがなに寄せる（「アズマ」でも「あずま」でも当たるように）
+    .replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+}
+function buildSearchKey({ email, fullName, kana }) {
+  return normalizeSearchText([fullName, kana, email, String(email || '').split('@')[0]].join(' '));
+}
+async function upsertDirectoryRow({ email, fullName, kana, branchHint, source }) {
+  const mail = String(email || '').trim().toLowerCase();
+  await client.execute({
+    sql: `INSERT INTO directory (email, full_name, kana, branch_hint, search_key, source, updated_at)
+          VALUES (?,?,?,?,?,?,?)
+          ON CONFLICT(email) DO UPDATE SET
+            full_name=excluded.full_name, kana=excluded.kana, branch_hint=excluded.branch_hint,
+            search_key=excluded.search_key, source=excluded.source, updated_at=excluded.updated_at`,
+    args: [mail, fullName, kana || null, branchHint || null,
+      buildSearchKey({ email: mail, fullName, kana }), source, new Date().toISOString()],
+  });
+}
+async function searchDirectory(q, limit = 30) {
+  const key = normalizeSearchText(q);
+  if (!key) return [];
+  // LIKE のワイルドカードを打ち消してから部分一致で引く
+  const pattern = `%${key.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+  const rs = await client.execute({
+    sql: `SELECT email, full_name, kana, branch_hint FROM directory
+          WHERE search_key LIKE ? ESCAPE '\\' ORDER BY full_name LIMIT ?`,
+    args: [pattern, limit],
+  });
+  return rs.rows.map((r) => ({ email: r.email, full_name: r.full_name, kana: r.kana, branch_hint: r.branch_hint }));
+}
+async function directoryStatus() {
+  const rs = await client.execute('SELECT COUNT(*) AS c, MAX(updated_at) AS u FROM directory');
+  return { count: Number(rs.rows[0].c || 0), updated_at: rs.rows[0].u || null };
 }
 
 /* ---------- sessions テーブル操作 ---------- */
@@ -263,6 +327,27 @@ async function requireAuth(req, res, next) {
 function requireAdmin(req, res, next) {
   if (req.authUser.role !== 'admin') return res.status(403).json({ error: '権限がありません' });
   next();
+}
+/* 支部管理者（branch_admin）は自分の支部のユーザーだけを操作できる。
+   全体管理者（admin）は今までどおり全支部を操作できる */
+function requireBranchAdmin(req, res, next) {
+  const r = req.authUser.role;
+  if (r !== 'admin' && r !== 'branch_admin') return res.status(403).json({ error: '権限がありません' });
+  if (r === 'branch_admin' && !req.authUser.branch_id) {
+    return res.status(403).json({ error: '所属支部が未設定のため操作できません' });
+  }
+  next();
+}
+function canManageBranch(user, branchId) {
+  if (user.role === 'admin') return true;
+  return !!branchId && branchId === user.branch_id;
+}
+/* 支部管理者が触ってよい相手か。自分より上の権限（admin）は触らせない */
+function canManageUser(actor, target) {
+  if (!target) return false;
+  if (actor.role === 'admin') return true;
+  if (target.role === 'admin') return false;
+  return target.branch_id === actor.branch_id;
 }
 
 /* ---------- google_tokens テーブル操作 ---------- */
@@ -739,24 +824,32 @@ async function findValidReset(token) {
 /* ---------- 管理者：スタッフ登録URL ----------
    秘密キー付きの招待URLは廃止。@dot-jp.or.jp のGoogleアカウントを持っている人だけが
    登録できるため、URL自体は誰に知られても問題ない */
-app.get('/api/admin/staff-invite-url', requireAuth, requireAdmin, (req, res) => {
+app.get('/api/admin/staff-invite-url', requireAuth, requireBranchAdmin, (req, res) => {
   const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
   res.json({ url: `${base}/staff`, domain: STAFF_EMAIL_DOMAIN });
 });
 
 /* ---------- 管理者：ユーザー管理 ---------- */
-app.get('/api/admin/pending-staff', requireAuth, requireAdmin, async (req, res) => {
+// 支部管理者には自分の支部の分だけを見せる
+function scopeBranch(user) {
+  return user.role === 'admin' ? null : user.branch_id;
+}
+
+app.get('/api/admin/pending-staff', requireAuth, requireBranchAdmin, async (req, res) => {
   try {
-    res.json({ pending: await listPendingStaff() });
+    res.json({ pending: await listPendingStaff(scopeBranch(req.authUser)) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: '取得に失敗しました' });
   }
 });
-app.post('/api/admin/approve-staff', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/admin/approve-staff', requireAuth, requireBranchAdmin, async (req, res) => {
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'userIdが必要です' });
   try {
+    if (!canManageUser(req.authUser, await findUserById(userId))) {
+      return res.status(403).json({ error: '他の支部のユーザーは操作できません' });
+    }
     await approveStaffRow(userId, req.authUser.id);
     res.json({ ok: true });
   } catch (e) {
@@ -764,10 +857,13 @@ app.post('/api/admin/approve-staff', requireAuth, requireAdmin, async (req, res)
     res.status(500).json({ error: '承認に失敗しました' });
   }
 });
-app.post('/api/admin/reject-staff', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/admin/reject-staff', requireAuth, requireBranchAdmin, async (req, res) => {
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'userIdが必要です' });
   try {
+    if (!canManageUser(req.authUser, await findUserById(userId))) {
+      return res.status(403).json({ error: '他の支部のユーザーは操作できません' });
+    }
     await rejectStaffRow(userId);
     res.json({ ok: true });
   } catch (e) {
@@ -775,14 +871,24 @@ app.post('/api/admin/reject-staff', requireAuth, requireAdmin, async (req, res) 
     res.status(500).json({ error: '却下に失敗しました' });
   }
 });
-app.patch('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+app.patch('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, res) => {
   const { nickname, branch_id, role } = req.body || {};
-  if (!nickname || !['intern', 'staff', 'admin'].includes(role)) {
+  if (!nickname || !['intern', 'staff', 'branch_admin', 'admin'].includes(role)) {
     return res.status(400).json({ error: 'nickname・roleは必須です' });
   }
   try {
     const target = await findUserById(req.params.id);
     if (!target) return res.status(404).json({ error: 'ユーザーが見つかりません' });
+    if (!canManageUser(req.authUser, target)) {
+      return res.status(403).json({ error: '他の支部のユーザーは操作できません' });
+    }
+    // 支部管理者が自分より上の権限を作ったり、相手を他支部へ移したりできないようにする
+    if (req.authUser.role !== 'admin') {
+      if (role === 'admin') return res.status(403).json({ error: '全体管理者にする権限がありません' });
+      if (branch_id !== req.authUser.branch_id) {
+        return res.status(403).json({ error: '他の支部へは移動できません' });
+      }
+    }
     await updateUserRow(req.params.id, { nickname, branchId: branch_id, role });
     res.json({ ok: true });
   } catch (e) {
@@ -790,14 +896,148 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) =>
     res.status(500).json({ error: '更新に失敗しました' });
   }
 });
-app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, res) => {
   if (req.params.id === req.authUser.id) return res.status(400).json({ error: '自分自身は削除できません' });
   try {
+    if (!canManageUser(req.authUser, await findUserById(req.params.id))) {
+      return res.status(403).json({ error: '他の支部のユーザーは操作できません' });
+    }
     await deleteUserRow(req.params.id);
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: '削除に失敗しました' });
+  }
+});
+
+/* ---------- 管理者：スタッフ名簿（ドット配布アカウントの一覧） ----------
+   名簿は全支部共通の元データなので、取り込みは全体管理者だけが行う。
+   検索は支部管理者もできる（見つけた人を自分の支部に追加するため） */
+app.get('/api/admin/directory/status', requireAuth, requireBranchAdmin, async (req, res) => {
+  try {
+    res.json({ ...(await directoryStatus()), domain: STAFF_EMAIL_DOMAIN });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '取得に失敗しました' });
+  }
+});
+
+/* CSV/TSVを貼り付けて名簿を取り込む。列は「氏名, メールアドレス, かな, 支部」を想定し、
+   見出し行があれば列名から位置を判定する（順番が違っても取り込めるように） */
+app.post('/api/admin/directory/import', requireAuth, requireAdmin, async (req, res) => {
+  const text = String((req.body || {}).text || '');
+  if (!text.trim()) return res.status(400).json({ error: '取り込む内容を貼り付けてください' });
+  const HEADERS = {
+    name: ['氏名', '名前', 'フルネーム', 'name', 'full_name', 'fullname'],
+    email: ['メールアドレス', 'メール', 'mail', 'email', 'address'],
+    kana: ['かな', 'カナ', 'ふりがな', 'フリガナ', 'kana', 'yomi'],
+    branch: ['支部', '所属支部', 'branch'],
+  };
+  const splitLine = (line) => (line.includes('\t') ? line.split('\t') : line.split(',')).map((c) => c.trim().replace(/^"|"$/g, ''));
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let idx = { name: 0, email: 1, kana: 2, branch: 3 };
+  const first = splitLine(lines[0]);
+  const looksLikeHeader = first.some((c) => HEADERS.email.includes(c.toLowerCase()) || HEADERS.email.includes(c));
+  if (looksLikeHeader) {
+    idx = { name: -1, email: -1, kana: -1, branch: -1 };
+    first.forEach((cell, i) => {
+      const v = cell.toLowerCase();
+      for (const key of Object.keys(HEADERS)) {
+        if (HEADERS[key].includes(cell) || HEADERS[key].includes(v)) idx[key] = i;
+      }
+    });
+    lines.shift();
+    if (idx.email < 0) return res.status(400).json({ error: 'メールアドレスの列が見つかりませんでした' });
+  }
+  const errors = [];
+  let imported = 0;
+  try {
+    for (const [i, line] of lines.entries()) {
+      const cells = splitLine(line);
+      const email = String(cells[idx.email] || '').toLowerCase();
+      const fullName = idx.name >= 0 ? String(cells[idx.name] || '').trim() : '';
+      if (!email) { errors.push(`${i + 1}行目: メールアドレスがありません`); continue; }
+      if (!email.endsWith(`@${STAFF_EMAIL_DOMAIN}`)) {
+        errors.push(`${i + 1}行目: ${email} は @${STAFF_EMAIL_DOMAIN} ではありません`);
+        continue;
+      }
+      await upsertDirectoryRow({
+        email,
+        // 氏名が空でも検索できるよう、メールのローカル部で代用する
+        fullName: fullName || email.split('@')[0],
+        kana: idx.kana >= 0 ? String(cells[idx.kana] || '').trim() : '',
+        branchHint: idx.branch >= 0 ? String(cells[idx.branch] || '').trim() : '',
+        source: 'csv',
+      });
+      imported += 1;
+    }
+    res.json({ ok: true, imported, skipped: errors.length, errors: errors.slice(0, 20), ...(await directoryStatus()) });
+  } catch (e) {
+    console.error('名簿の取り込みに失敗しました', e);
+    res.status(500).json({ error: '取り込みに失敗しました' });
+  }
+});
+
+/* 名簿を名前・かな・メールで検索する。既にアプリに登録済みの人には目印を付けて返す */
+app.get('/api/admin/directory/search', requireAuth, requireBranchAdmin, async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 1) return res.json({ results: [] });
+  try {
+    const rows = await searchDirectory(q);
+    const results = [];
+    for (const r of rows) {
+      const existing = await findUserByEmail(r.email);
+      results.push({
+        ...r,
+        registered: !!existing,
+        registered_branch_id: existing ? existing.branch_id : null,
+        registered_status: existing ? existing.status : null,
+      });
+    }
+    res.json({ results });
+  } catch (e) {
+    console.error('名簿検索に失敗しました', e);
+    res.status(500).json({ error: '検索に失敗しました' });
+  }
+});
+
+/* 名簿から選んだ人を、その場でスタッフとして支部に登録する。
+   本人の操作を待たずに使える状態にするため status は active。
+   パスワードは持たせず、本人は @dot-jp.or.jp のGoogleログインで入る
+   （初回ログイン時にメールアドレスが一致してこのアカウントに紐付く） */
+app.post('/api/admin/staff', requireAuth, requireBranchAdmin, async (req, res) => {
+  const { email, full_name, branch_id } = req.body || {};
+  const mailAddr = String(email || '').trim().toLowerCase();
+  const name = String(full_name || '').trim();
+  if (!mailAddr) return res.status(400).json({ error: 'メールアドレスが必要です' });
+  if (!name) return res.status(400).json({ error: '氏名を入力してください' });
+  if (!branch_id) return res.status(400).json({ error: '所属支部を選択してください' });
+  if (!mailAddr.endsWith(`@${STAFF_EMAIL_DOMAIN}`)) {
+    return res.status(400).json({ error: `@${STAFF_EMAIL_DOMAIN} のアカウントのみ登録できます` });
+  }
+  if (!canManageBranch(req.authUser, branch_id)) {
+    return res.status(403).json({ error: '自分の支部にのみ登録できます' });
+  }
+  try {
+    const obj = await readDB();
+    if (!(obj?.branches || []).some((b) => b.id === branch_id)) {
+      return res.status(400).json({ error: '選択された支部が存在しません' });
+    }
+    if (await findUserByEmail(mailAddr)) {
+      return res.status(409).json({ error: 'このアカウントは既に登録されています' });
+    }
+    const user = await insertUser({
+      email: mailAddr,
+      passwordHash: '',
+      nickname: name,
+      role: 'staff',
+      branchId: branch_id,
+      status: 'active',
+    });
+    res.json({ ok: true, user: toPublicUser(user) });
+  } catch (e) {
+    console.error('スタッフの追加に失敗しました', e);
+    res.status(500).json({ error: '登録に失敗しました' });
   }
 });
 

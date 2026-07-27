@@ -133,8 +133,11 @@ function findUser(id){return (DB.users||[]).find(u=>u.id===id);}
 function branchName(id){const b=DB.branches.find(b=>b.id===id);return b?b.name:'—';}
 
 /* ---------- helpers ---------- */
-const ROLE_JP={intern:'インターン生',staff:'スタッフ',admin:'管理者'};
-const ROLE_CLS={intern:'role-intern',staff:'role-staff',admin:'role-admin'};
+const ROLE_JP={intern:'インターン生',staff:'スタッフ',branch_admin:'支部管理者',admin:'管理者'};
+const ROLE_CLS={intern:'role-intern',staff:'role-staff',branch_admin:'role-branch-admin',admin:'role-admin'};
+// 管理者と支部管理者に共通の判定。支部管理者は自分の支部の範囲でのみ管理できる
+function isAdminLike(u){u=u||ME;return !!u&&(u.role==='admin'||u.role==='branch_admin');}
+function isFullAdmin(u){u=u||ME;return !!u&&u.role==='admin';}
 const STATUS={none:{t:'未申請',c:'st-none'},applied:{t:'申請中',c:'st-applied'},fixed:{t:'確定済み',c:'st-fixed'},failed:{t:'不成立',c:'st-failed'}};
 const MTYPE={meet:'Google Meet',zoom:'Zoom'};
 const EVENT_COLORS=[
@@ -627,6 +630,13 @@ const NAV={
     {id:'interviews',label:'面談一覧',ic:'📋'},
     {id:'avail',label:'空き日程',ic:'🕒'},
   ],
+  // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
+  branch_admin:[
+    {id:'home',label:'ホーム',ic:'🏠'},
+    {id:'interviews',label:'面談一覧',ic:'📋'},
+    {id:'avail',label:'空き日程',ic:'🕒'},
+    {id:'users',label:'ユーザー',ic:'👥'},
+  ],
   admin:[
     {id:'home',label:'ホーム',ic:'🏠'},
     {id:'branches',label:'支部',ic:'🏢'},
@@ -660,7 +670,7 @@ function go(tab){
   if(tab==='apply')APPLY=null;      // 申請画面は毎回リセット
   if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
   if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
-  if(tab==='users'&&ME.role==='admin')loadPendingStaff(); // 承認待ちスタッフを非同期取得
+  if(tab==='users'&&isAdminLike()){loadPendingStaff();loadDirectoryStatus();} // 承認待ち・名簿状況を非同期取得
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   window.scrollTo(0,0);
   render();
@@ -714,9 +724,13 @@ function viewHome(){
         <span class="tile-arrow">›</span></div></div>`+
       eventsSection();
   }
-  if(ME.role==='staff'){
+  // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
+  if(ME.role==='staff'||ME.role==='branch_admin'){
     const pend=DB.interviews.filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
     return hi+
+      (ME.role==='branch_admin'
+        ?tile('users','👥',{bg:'#eaf1ff',fg:'#1f56cf'},'ユーザー管理',`${branchName(ME.branch_id)}のスタッフ追加・権限の管理`)
+        :'')+
       (pend?`<div class="hint"><span>🔔</span><span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
       tile('interviews','📋',{bg:'#e2f5ec',fg:'#0b8a63'},'面談一覧・確定',`担当インターン生の面談を管理${pend?`（未対応 ${pend}）`:''}`)+
       tile('avail','🕒',{bg:'#e0f2fe',fg:'#0369a1'},'スタッフ空き日程','Googleカレンダーから空き時間を確認')+
@@ -804,7 +818,7 @@ function renderGoogleCalendarSettings(data){
       <div class="hint mock"><span>⚠️</span><span>サーバー側でGoogleカレンダー連携がまだ設定されていません。管理者にお問い合わせください。</span></div>`);
     return;
   }
-  const isStaff=ME.role==='staff';
+  const isStaff=ME.role==='staff'||ME.role==='branch_admin';
   if(data.connected){
     openSheet(`<h3>Googleカレンダー連携</h3>
       <div class="hint"><span>✅</span><span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
@@ -913,7 +927,8 @@ function genApplyGrid(staffId,weekOffset){
   return{days,times,grid};
 }
 function viewApply(){
-  const staffs=DB.users.filter(u=>u.role==='staff'&&u.branch_id===ME.branch_id);
+  // 支部管理者も面談を担当するため、面談相手の候補に含める
+  const staffs=DB.users.filter(u=>(u.role==='staff'||u.role==='branch_admin')&&u.branch_id===ME.branch_id);
   if(!APPLY)APPLY={staff:staffs[0]?.id||'',weekOffset:0,sel:[],mtype:'meet',note:''};
   if(!staffs.length)return `<h1 class="page">面談を申請</h1>
     <div class="empty"><div class="ei">💼</div><p>あなたの支部に担当できるスタッフがいません。</p></div>`;
@@ -1411,7 +1426,7 @@ function deleteEvent(id){
    スタッフ空き日程
    ========================================================= */
 function viewAvailability(){
-  const staffs=DB.users.filter(u=>u.role==='staff'&&(ME.role==='admin'||u.branch_id===ME.branch_id));
+  const staffs=DB.users.filter(u=>(u.role==='staff'||u.role==='branch_admin')&&(isFullAdmin()||u.branch_id===ME.branch_id));
   const cards=staffs.map(s=>{
     const flat=[];
     genSlots(s.id,7).forEach(d=>d.slots.forEach(x=>{if(x.ok)flat.push(`${fmtDate(d.dateObj.toISOString())} ${x.time}`);}));
@@ -1727,8 +1742,141 @@ async function loadPendingStaff(){
     if(!res.ok)return;
     const {pending}=await res.json();
     ADMIN_PENDING=pending;
-    if(ME&&ME.role==='admin'&&currentTab==='users')render();
+    if(isAdminLike()&&currentTab==='users')render();
   }catch(e){/* オフライン時は無視 */}
+}
+
+/* ---------- スタッフ名簿から検索して支部に追加 ---------- */
+let DIR_STATUS={count:0,updated_at:null,domain:'dot-jp.or.jp'};
+let DIR_QUERY='';      // 検索欄の入力内容（再描画で消えないよう保持する）
+let DIR_RESULTS=null;  // null=未検索、[]=該当なし
+let DIR_BUSY=false;
+let DIR_ADDING=null;   // 「追加」シートで対象にしているメールアドレス
+async function loadDirectoryStatus(){
+  try{
+    const res=await fetch('/api/admin/directory/status');
+    if(!res.ok)return;
+    DIR_STATUS=await res.json();
+    if(isAdminLike()&&currentTab==='users')render();
+  }catch(e){/* オフライン時は無視 */}
+}
+async function searchDirectory(){
+  const el=document.getElementById('dirQ');
+  DIR_QUERY=el?el.value.trim():'';
+  if(!DIR_QUERY){DIR_RESULTS=null;render();return;}
+  DIR_BUSY=true;render();
+  try{
+    const res=await fetch('/api/admin/directory/search?q='+encodeURIComponent(DIR_QUERY));
+    const data=await res.json();
+    DIR_RESULTS=res.ok?(data.results||[]):[];
+    if(!res.ok)toast(data.error||'検索に失敗しました');
+  }catch(e){DIR_RESULTS=[];toast('検索に失敗しました');}
+  DIR_BUSY=false;render();
+  const again=document.getElementById('dirQ');
+  if(again){again.value=DIR_QUERY;again.focus();}
+}
+function dirKeydown(ev){if(ev.key==='Enter'){ev.preventDefault();searchDirectory();}}
+// 支部管理者は自分の支部にしか追加できないので、支部の選択肢を出さずに即追加する
+function addStaffFromDirectory(i){
+  const r=(DIR_RESULTS||[])[i];
+  if(!r)return;
+  const email=r.email,name=r.full_name;
+  DIR_ADDING=email;
+  const branches=isFullAdmin()?DB.branches:DB.branches.filter(b=>b.id===ME.branch_id);
+  const opts=branches.map(b=>`<option value="${b.id}" ${b.id===ME.branch_id?'selected':''}>${esc(b.name)}</option>`).join('');
+  openSheet(`<h3>スタッフとして追加</h3>
+    <p class="page-sub" style="margin-top:-6px">${esc(email)}</p>
+    <label class="fl">氏名<span class="req">*</span></label>
+    <input id="asName" value="${esc(name||'')}"><div class="field-err" id="asNameE"></div>
+    <label class="fl">所属支部<span class="req">*</span></label>
+    <select id="asBranch">${opts}</select>
+    <div class="hint" style="margin-top:12px"><span>💡</span><span>追加した時点ですぐ使える状態になります。ご本人は
+      ${esc(DIR_STATUS.domain)} のGoogleアカウントで「Googleでログイン」してください。パスワードは不要です。</span></div>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn pri" style="flex:1" onclick="doAddStaff()">この人を追加する</button>
+    </div>`);
+}
+async function doAddStaff(){
+  const email=DIR_ADDING;
+  if(!email)return;
+  const name=document.getElementById('asName').value.trim();
+  const e=document.getElementById('asNameE');e.classList.remove('show');
+  if(!name){e.textContent='氏名は必須です';e.classList.add('show');return;}
+  const branch=document.getElementById('asBranch').value;
+  if(!branch){e.textContent='所属支部を選択してください';e.classList.add('show');return;}
+  try{
+    const res=await fetch('/api/admin/staff',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email,full_name:name,branch_id:branch})});
+    const data=await res.json();
+    if(!res.ok){e.textContent=data.error||'登録に失敗しました';e.classList.add('show');return;}
+    closeSheet();toast('スタッフとして追加しました');
+    await refreshUsersAfterAdminChange();
+    if(DIR_QUERY)await searchDirectory();
+  }catch(err){e.textContent='通信に失敗しました';e.classList.add('show');}
+}
+function openDirectoryImport(){
+  openSheet(`<h3>スタッフ名簿を取り込む</h3>
+    <p class="page-sub" style="margin-top:-6px">ドットから配布されたアカウント一覧を貼り付けてください。
+      ExcelやGoogleスプレッドシートから、そのままコピー＆ペーストできます。</p>
+    <div class="hint"><span>💡</span><span>1行目に「氏名, メールアドレス, かな, 支部」の見出しを入れてください。
+      「かな」を入れておくと、ひらがなでも検索できます。</span></div>
+    <label class="fl">貼り付け欄<span class="req">*</span></label>
+    <textarea id="dirText" rows="10" placeholder="氏名,メールアドレス,かな,支部&#10;東 レアンドロ,azuma_reandoro@dot-jp.or.jp,あずま れあんどろ,東京支部"></textarea>
+    <div class="field-err" id="dirTextE"></div>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn pri" style="flex:1" onclick="doDirectoryImport()">取り込む</button>
+    </div>`);
+}
+async function doDirectoryImport(){
+  const text=document.getElementById('dirText').value;
+  const e=document.getElementById('dirTextE');e.classList.remove('show');
+  if(!text.trim()){e.textContent='内容を貼り付けてください';e.classList.add('show');return;}
+  try{
+    const res=await fetch('/api/admin/directory/import',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text})});
+    const data=await res.json();
+    if(!res.ok){e.textContent=data.error||'取り込みに失敗しました';e.classList.add('show');return;}
+    closeSheet();
+    toast(`${data.imported}件を取り込みました${data.skipped?`（${data.skipped}件スキップ）`:''}`);
+    if(data.errors&&data.errors.length)console.warn('取り込めなかった行:',data.errors);
+    await loadDirectoryStatus();
+  }catch(err){e.textContent='通信に失敗しました';e.classList.add('show');}
+}
+function directoryCard(){
+  const imported=DIR_STATUS.count>0;
+  let html=`<div class="card"><div class="ch"><h3>スタッフを名簿から追加</h3>
+    <span class="tag" style="margin-left:auto">${imported?`${DIR_STATUS.count}件`:'未取り込み'}</span></div><div class="cb" style="display:block">`;
+  if(!imported){
+    html+=`<div class="hint"><span>💡</span><span>まだスタッフ名簿が取り込まれていません。${isFullAdmin()
+      ?'下のボタンから、ドット配布アカウントの一覧を取り込んでください。'
+      :'全体管理者に名簿の取り込みを依頼してください。'}</span></div>`;
+  }else{
+    html+=`<p class="page-sub" style="margin-top:0">氏名・ふりがな・メールアドレスのどれでも検索できます（例：「あずま」）。</p>
+      <div class="btn-row">
+        <input id="dirQ" placeholder="名前で検索" value="${esc(DIR_QUERY)}" oninput="DIR_QUERY=this.value" onkeydown="dirKeydown(event)" style="flex:1">
+        <button class="btn pri" onclick="searchDirectory()">検索</button>
+      </div>`;
+    if(DIR_BUSY){
+      html+='<div class="empty" style="padding:16px">検索中…</div>';
+    }else if(DIR_RESULTS){
+      // 氏名やメールをそのままonclickに埋めると引用符で壊れるため、検索結果の添字だけを渡す
+      html+=DIR_RESULTS.length?`<div class="rowlist" style="margin-top:12px">${DIR_RESULTS.map((r,i)=>`
+        <div class="row" style="cursor:default">
+          <span class="av">${esc(initials(r.full_name))}</span>
+          <span class="rmain"><span class="rt">${esc(r.full_name)}</span>
+          <span class="rs">${esc(r.email)}${r.branch_hint?' ・ '+esc(r.branch_hint):''}</span></span>
+          ${r.registered
+            ?`<span class="tag">登録済み${r.registered_branch_id?'（'+esc(branchName(r.registered_branch_id))+'）':''}</span>`
+            :`<button class="btn sm pri" onclick="addStaffFromDirectory(${i})">追加</button>`}
+        </div>`).join('')}</div>`
+        :'<div class="empty" style="padding:16px">該当する人が見つかりませんでした</div>';
+    }
+  }
+  if(isFullAdmin()){
+    html+=`<div class="btn-row" style="margin-top:12px">
+      <button class="btn ghost" onclick="openDirectoryImport()">名簿を${imported?'更新':'取り込む'}</button></div>`;
+  }
+  return html+'</div></div>';
 }
 async function refreshUsersAfterAdminChange(){
   try{const remote=await apiGetDB();if(remote&&remote.users)DB.users=remote.users;}catch(e){}
@@ -1754,7 +1902,13 @@ async function rejectStaff(id){
 }
 function viewUsers(){
   const byBranch={};(DB.users||[]).forEach(u=>{(byBranch[u.branch_id]=byBranch[u.branch_id]||[]).push(u);});
-  let html=`<h1 class="page">ユーザー管理</h1><p class="page-sub">全支部のユーザーと権限を管理します。新規ユーザーはインターン生の自己登録、またはスタッフ招待URLから登録されます。</p>`;
+  // 支部管理者に見せるのは自分の支部だけ
+  const branches=isFullAdmin()?DB.branches:DB.branches.filter(b=>b.id===ME.branch_id);
+  let html=`<h1 class="page">ユーザー管理</h1><p class="page-sub">${isFullAdmin()
+    ?'全支部のユーザーと権限を管理します。'
+    :esc(branchName(ME.branch_id))+'のユーザーと権限を管理します。'}
+    名簿から検索して追加するか、ご本人にスタッフ登録ページから申請してもらえます。</p>`;
+  html+=directoryCard();
   if(ADMIN_PENDING.length){
     html+=`<div class="card"><div class="ch"><h3>承認待ちスタッフ</h3><span class="tag" style="margin-left:auto">${ADMIN_PENDING.length}件</span></div>
       <div class="rowlist">${ADMIN_PENDING.map(u=>`
@@ -1766,7 +1920,7 @@ function viewUsers(){
           <button class="btn sm bad" onclick="rejectStaff('${u.id}')">却下</button>
         </div>`).join('')}</div></div>`;
   }
-  DB.branches.forEach(b=>{
+  branches.forEach(b=>{
     const us=byBranch[b.id]||[];
     html+=`<div class="card"><div class="ch"><h3>${esc(b.name)}</h3><span class="tag" style="margin-left:auto">${us.length}人</span></div>
       <div class="rowlist">${us.length?us.map(u=>`
@@ -1782,8 +1936,10 @@ function viewUsers(){
 function openUserForm(id){
   const u=findUser(id);
   if(!u)return;
-  const bopts=DB.branches.map(b=>`<option value="${b.id}" ${u.branch_id===b.id?'selected':''}>${esc(b.name)}</option>`).join('');
-  const roles=['intern','staff','admin'];
+  // 支部管理者は他支部へ移せず、全体管理者にも昇格させられない（サーバー側でも同じ制限をかけている）
+  const bl=isFullAdmin()?DB.branches:DB.branches.filter(b=>b.id===ME.branch_id);
+  const bopts=bl.map(b=>`<option value="${b.id}" ${u.branch_id===b.id?'selected':''}>${esc(b.name)}</option>`).join('');
+  const roles=isFullAdmin()?['intern','staff','branch_admin','admin']:['intern','staff','branch_admin'];
   openSheet(`<h3>ユーザーを編集</h3>
     <label class="fl">ニックネーム<span class="req">*</span></label>
     <input id="usNick" value="${esc(u.nickname||'')}"><div class="field-err" id="usNickE"></div>
@@ -1862,7 +2018,7 @@ function openNotifications(){
 function openMailHistory(){
   let list=DB.emails.slice();
   if(ME.role==='intern')list=list.filter(m=>m.receiver_id===ME.id);        // 受信
-  else if(ME.role==='staff')list=list.filter(m=>m.sender_id===ME.id);       // 送信
+  else if(ME.role==='staff'||ME.role==='branch_admin')list=list.filter(m=>m.sender_id===ME.id); // 送信
   list.sort((a,b)=>new Date(b.sent_at||0)-new Date(a.sent_at||0));
   const rows=list.length?list.map(m=>{
     const other=ME.role==='intern'?findUser(m.sender_id):findUser(m.receiver_id);
