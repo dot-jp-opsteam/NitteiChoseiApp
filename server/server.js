@@ -943,6 +943,8 @@ const PUBLIC_FILES = {
   '/style.css': 'style.css',
   '/privacy.html': 'privacy.html',
   '/terms.html': 'terms.html',
+  // Google Search Console のサイト所有権確認用。確認状態を保つため削除しないこと
+  '/googlee6411894890471cb.html': 'googlee6411894890471cb.html',
 };
 app.get('*', (req, res) => {
   let p;
