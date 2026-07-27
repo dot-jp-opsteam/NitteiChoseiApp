@@ -1,6 +1,7 @@
 /* =========================================================
-   Googleカレンダー連携ヘルパー
+   Google連携ヘルパー（カレンダー連携＋Googleでログイン）
    - OAuth2（Authorization Code）のURL生成・トークン交換・リフレッシュ
+   - Googleでログイン（OpenID Connect）：id_tokenから本人情報を取得
    - トークンのAES-256-GCM暗号化・復号（TOKEN_ENCRYPTION_KEY使用）
    - watch（push通知）チャンネルの登録・停止
    - イベントの一覧取得・作成・更新・削除
@@ -17,9 +18,14 @@ const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const CAL_API = 'https://www.googleapis.com/calendar/v3';
 const SCOPE = 'https://www.googleapis.com/auth/calendar';
+const LOGIN_SCOPE = 'openid email profile';
 
 function redirectUri() {
   return `${PUBLIC_BASE_URL}/api/auth/google/callback`;
+}
+/* ログイン用は別のリダイレクトURIを使う（カレンダー連携用と役割が違うため混ざらないようにする） */
+function loginRedirectUri() {
+  return `${PUBLIC_BASE_URL}/api/auth/google/login/callback`;
 }
 
 /* ---------- 暗号化 ---------- */
@@ -53,6 +59,8 @@ function verifyState(state) {
   const [b64, sig] = String(state || '').split('.');
   if (!b64 || !sig) return null;
   const expected = crypto.createHmac('sha256', TOKEN_ENCRYPTION_KEY).update(b64).digest('base64url');
+  // 長さが違うと timingSafeEqual が例外を投げるため、先に長さを確認する
+  if (sig.length !== expected.length) return null;
   if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
   try {
     const payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
@@ -91,6 +99,58 @@ async function exchangeCode(code) {
   });
   if (!res.ok) throw new Error(`token exchange failed: ${await res.text()}`);
   return res.json(); // { access_token, refresh_token, expires_in, ... }
+}
+
+/* ---------- Googleでログイン（OpenID Connect） ----------
+   カレンダー連携とは別物。カレンダーの権限は要求せず、本人確認（メール・氏名）だけを取得する */
+function getLoginAuthUrl() {
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: loginRedirectUri(),
+    response_type: 'code',
+    scope: LOGIN_SCOPE,
+    // 毎回アカウント選択画面を出す（共用端末で前の人のアカウントに入ってしまうのを防ぐ）
+    prompt: 'select_account',
+    state: signState('login'),
+  });
+  return `${AUTH_URL}?${params.toString()}`;
+}
+
+async function exchangeLoginCode(code) {
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      redirect_uri: loginRedirectUri(),
+      grant_type: 'authorization_code',
+    }),
+  });
+  if (!res.ok) throw new Error(`login token exchange failed: ${await res.text()}`);
+  return res.json(); // { access_token, id_token, expires_in, ... }
+}
+
+/* id_token から本人情報を取り出す。
+   このトークンはGoogleのトークンエンドポイントからHTTPSで直接受け取ったものなので、
+   Googleの仕様上あらためて署名を検証する必要はない（aud/issだけ念のため確認する）。 */
+function parseIdToken(idToken) {
+  const parts = String(idToken || '').split('.');
+  if (parts.length !== 3) throw new Error('id_tokenの形式が不正です');
+  const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  if (claims.aud !== GOOGLE_CLIENT_ID) throw new Error('id_tokenの発行先が一致しません');
+  if (!['accounts.google.com', 'https://accounts.google.com'].includes(claims.iss)) {
+    throw new Error('id_tokenの発行元が不正です');
+  }
+  if (!claims.email) throw new Error('メールアドレスを取得できませんでした');
+  return {
+    sub: claims.sub,
+    email: String(claims.email).toLowerCase(),
+    emailVerified: claims.email_verified === true || claims.email_verified === 'true',
+    name: claims.name || claims.given_name || '',
+    picture: claims.picture || '',
+  };
 }
 
 async function refreshAccessToken(refreshToken) {
@@ -196,6 +256,7 @@ async function deleteEvent(accessToken, calendarId, eventId) {
 module.exports = {
   encrypt, decrypt,
   getAuthUrl, verifyState, exchangeCode, refreshAccessToken, getValidAccessToken,
+  getLoginAuthUrl, exchangeLoginCode, parseIdToken, loginRedirectUri,
   startWatch, stopWatch, listChangedEvents,
   createEvent, updateEvent, deleteEvent,
 };

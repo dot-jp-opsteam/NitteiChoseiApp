@@ -25,6 +25,11 @@ const auth = require('./auth');
 
 const PORT = process.env.PORT || 8080;
 const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.TOKEN_ENCRYPTION_KEY && process.env.PUBLIC_BASE_URL);
+/* 「Googleでログイン」はカレンダー連携と同じ資格情報を使うが、Google Cloud Console 側に
+   ログイン用のリダイレクトURI（/api/auth/google/login/callback）を登録し終えるまでは
+   ボタンを押してもGoogleがエラーを返す。設定完了後に GOOGLE_LOGIN_ENABLED=true を
+   指定してもらうことで、中途半端に壊れた状態が本番に出ないようにしている。 */
+const GOOGLE_LOGIN_ENABLED = GOOGLE_ENABLED && process.env.GOOGLE_LOGIN_ENABLED === 'true';
 const STAFF_SIGNUP_SECRET = process.env.STAFF_SIGNUP_SECRET || '';
 const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@example.com';
 const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'change-me-immediately';
@@ -80,6 +85,18 @@ async function initDB() {
       expires_at TEXT NOT NULL
     )
   `);
+  // 既存DBへの追加カラム（Googleでログイン用）。既に存在する場合のエラーは無視する
+  for (const ddl of [
+    'ALTER TABLE users ADD COLUMN google_sub TEXT',
+    'ALTER TABLE users ADD COLUMN avatar_url TEXT',
+  ]) {
+    try {
+      await client.execute(ddl);
+    } catch (e) {
+      if (!/duplicate column/i.test(e.message || '')) throw e;
+    }
+  }
+
   const countRs = await client.execute('SELECT COUNT(*) as c FROM users');
   if (Number(countRs.rows[0].c) === 0) {
     if (!process.env.SEED_ADMIN_EMAIL || !process.env.SEED_ADMIN_PASSWORD) {
@@ -122,11 +139,26 @@ function toPublicUser(row) {
     id: row.id, email: row.email, nickname: row.nickname, role: row.role,
     branch_id: row.branch_id, status: row.status,
     created_at: row.created_at, approved_at: row.approved_at,
+    avatar_url: row.avatar_url || null,
+    // Googleでログインしたばかりで所属支部が未設定のとき、フロント側で初回設定画面を出すための目印。
+    // 管理者は特定の支部に属さない運用のため対象外
+    needs_profile: row.role !== 'admin' && !row.branch_id,
   };
 }
 async function findUserByEmail(email) {
   const rs = await client.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [String(email || '').toLowerCase()] });
   return rs.rows[0] || null;
+}
+async function findUserByGoogleSub(sub) {
+  if (!sub) return null;
+  const rs = await client.execute({ sql: 'SELECT * FROM users WHERE google_sub = ?', args: [String(sub)] });
+  return rs.rows[0] || null;
+}
+async function linkGoogleAccount(id, { googleSub, avatarUrl }) {
+  await client.execute({
+    sql: 'UPDATE users SET google_sub = ?, avatar_url = COALESCE(?, avatar_url) WHERE id = ?',
+    args: [String(googleSub), avatarUrl || null, id],
+  });
 }
 async function findUserById(id) {
   const rs = await client.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
@@ -140,12 +172,15 @@ async function listPendingStaff() {
   const rs = await client.execute({ sql: "SELECT * FROM users WHERE role = 'staff' AND status = 'pending' ORDER BY created_at" });
   return rs.rows.map(toPublicUser);
 }
-async function insertUser({ email, passwordHash, nickname, role, branchId, status }) {
+async function insertUser({ email, passwordHash, nickname, role, branchId, status, googleSub, avatarUrl }) {
   const id = 'u_' + crypto.randomBytes(6).toString('hex');
   await client.execute({
-    sql: `INSERT INTO users (id, email, password_hash, nickname, role, branch_id, status, created_at)
-          VALUES (?,?,?,?,?,?,?,?)`,
-    args: [id, String(email).toLowerCase(), passwordHash, nickname, role, branchId || null, status, new Date().toISOString()],
+    sql: `INSERT INTO users (id, email, password_hash, nickname, role, branch_id, status, created_at, google_sub, avatar_url)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    // Googleでログインしたユーザーはパスワードを持たない。空文字は verifyPassword が必ず false を返すため、
+    // パスワードログインの経路からは入れない
+    args: [id, String(email).toLowerCase(), passwordHash || '', nickname, role, branchId || null, status,
+      new Date().toISOString(), googleSub || null, avatarUrl || null],
   });
   return findUserById(id);
 }
@@ -265,7 +300,26 @@ async function registerWatch(staffId, accessToken, calendarId) {
   await updateWatch(staffId, { channelId: watch.channelId, resourceId: watch.resourceId, channelToken: watch.channelToken, expiration: watch.expiration });
 }
 
-/* ---------- 面談確定/取消をGoogleカレンダーへ反映（PUT /api/db 保存時） ---------- */
+/* ---------- 面談確定/取消をGoogleカレンダーへ反映（PUT /api/db 保存時） ----------
+   確定した面談は、担当スタッフ・インターン生それぞれが個別にGoogle連携していれば
+   両者のカレンダーに独立してイベントを作成する（片方だけの連携でも動作する） */
+const IV_GOOGLE_SYNC_TARGETS = [
+  { userIdField: 'staff_id', eventIdField: 'googleEventId', summary: (intern) => `面談: ${intern ? intern.nickname : ''}さん` },
+  { userIdField: 'intern_id', eventIdField: 'googleEventIdIntern', summary: (intern, staff) => `面談: ${staff ? staff.nickname : ''}さんと` },
+];
+
+async function deleteGoogleEventFor(userId, eventId) {
+  if (!userId || !eventId) return;
+  try {
+    const tokenRow = await getTokenRow(userId);
+    if (!tokenRow) return;
+    const accessToken = await accessTokenFor(tokenRow);
+    await google.deleteEvent(accessToken, tokenRow.calendar_id, eventId);
+  } catch (e) {
+    console.warn(`Googleイベント削除に失敗しました（user ${userId}, event ${eventId}）`, e.message || e);
+  }
+}
+
 async function syncInterviewsToGoogle(oldDB, newBody, users) {
   if (!GOOGLE_ENABLED) return;
   const oldMap = new Map((oldDB?.interviews || []).map((iv) => [iv.id, iv]));
@@ -275,53 +329,49 @@ async function syncInterviewsToGoogle(oldDB, newBody, users) {
     const old = oldMap.get(iv.id);
     const wasFixed = old && old.status === 'fixed';
     const isFixed = iv.status === 'fixed';
-    try {
-      if (isFixed && !iv.googleEventId && old && old.googleEventId && wasFixed) {
-        // 同一面談に対する保存リクエストがほぼ同時に届いた場合、後発リクエストは
-        // クライアント側が把握していない直前のgoogleEventIdを引き継ぐ（上書き消失防止）
-        iv.googleEventId = old.googleEventId;
-      } else if (!wasFixed && isFixed && iv.confirmed_datetime) {
-        const tokenRow = await getTokenRow(iv.staff_id);
-        if (!tokenRow) {
-          console.log(`Googleカレンダー未連携のためスキップ（interview ${iv.id}, staff ${iv.staff_id}）`);
-          continue;
-        }
-        const accessToken = await accessTokenFor(tokenRow);
-        const intern = (users || []).find((u) => u.id === iv.intern_id);
-        const start = new Date(iv.confirmed_datetime);
-        const end = new Date(start.getTime() + 30 * 60000);
-        const created = await google.createEvent(accessToken, tokenRow.calendar_id, {
-          summary: `面談: ${intern ? intern.nickname : ''}さん`,
-          description: `OPS日調アプリで確定した面談です。\n面談方法: ${iv.meeting_type === 'zoom' ? 'Zoom' : 'Google Meet'}`,
-          start: { dateTime: start.toISOString(), timeZone: 'Asia/Tokyo' },
-          end: { dateTime: end.toISOString(), timeZone: 'Asia/Tokyo' },
-        });
-        iv.googleEventId = created.id;
-        console.log(`Googleカレンダーにイベントを作成しました（interview ${iv.id}, event ${created.id}）`);
-      } else if (wasFixed && !isFixed && old.googleEventId) {
-        const tokenRow = await getTokenRow(iv.staff_id);
-        if (tokenRow) {
+    const intern = (users || []).find((u) => u.id === iv.intern_id);
+    const staff = (users || []).find((u) => u.id === iv.staff_id);
+
+    for (const t of IV_GOOGLE_SYNC_TARGETS) {
+      const userId = iv[t.userIdField];
+      try {
+        if (isFixed && !iv[t.eventIdField] && old && old[t.eventIdField] && wasFixed) {
+          // 同一面談に対する保存リクエストがほぼ同時に届いた場合、後発リクエストは
+          // クライアント側が把握していない直前のgoogleEventIdを引き継ぐ（上書き消失防止）
+          iv[t.eventIdField] = old[t.eventIdField];
+        } else if (!wasFixed && isFixed && iv.confirmed_datetime) {
+          if (!userId) continue;
+          const tokenRow = await getTokenRow(userId);
+          if (!tokenRow) {
+            console.log(`Googleカレンダー未連携のためスキップ（interview ${iv.id}, user ${userId}）`);
+            continue;
+          }
           const accessToken = await accessTokenFor(tokenRow);
-          await google.deleteEvent(accessToken, tokenRow.calendar_id, old.googleEventId);
+          const start = new Date(iv.confirmed_datetime);
+          const end = new Date(start.getTime() + 30 * 60000);
+          const created = await google.createEvent(accessToken, tokenRow.calendar_id, {
+            summary: t.summary(intern, staff),
+            description: `OPS日調アプリで確定した面談です。\n面談方法: ${iv.meeting_type === 'zoom' ? 'Zoom' : 'Google Meet'}`,
+            start: { dateTime: start.toISOString(), timeZone: 'Asia/Tokyo' },
+            end: { dateTime: end.toISOString(), timeZone: 'Asia/Tokyo' },
+          });
+          iv[t.eventIdField] = created.id;
+          console.log(`Googleカレンダーにイベントを作成しました（interview ${iv.id}, user ${userId}, event ${created.id}）`);
+        } else if (wasFixed && !isFixed && old[t.eventIdField]) {
+          await deleteGoogleEventFor(userId, old[t.eventIdField]);
+          iv[t.eventIdField] = null;
         }
-        iv.googleEventId = null;
+      } catch (e) {
+        console.warn(`Googleカレンダー同期に失敗しました（interview ${iv.id}, ${t.eventIdField}）`, e.message || e);
       }
-    } catch (e) {
-      console.warn(`Googleカレンダー同期に失敗しました（interview ${iv.id}）`, e.message || e);
     }
   }
 
   // アプリ側で削除された確定済み面談のイベントも掃除する
   for (const old of oldDB?.interviews || []) {
-    if (!newIds.has(old.id) && old.status === 'fixed' && old.googleEventId) {
-      try {
-        const tokenRow = await getTokenRow(old.staff_id);
-        if (tokenRow) {
-          const accessToken = await accessTokenFor(tokenRow);
-          await google.deleteEvent(accessToken, tokenRow.calendar_id, old.googleEventId);
-        }
-      } catch (e) {
-        console.warn(`削除された面談のGoogleイベント削除に失敗しました（${old.id}）`, e.message || e);
+    if (!newIds.has(old.id) && old.status === 'fixed') {
+      for (const t of IV_GOOGLE_SYNC_TARGETS) {
+        await deleteGoogleEventFor(old[t.userIdField], old[t.eventIdField]);
       }
     }
   }
@@ -386,6 +436,10 @@ app.post('/api/auth/login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'email・passwordは必須です' });
   try {
     const row = await findUserByEmail(email);
+    // Googleでのみ登録したアカウントはパスワードを持たない。原因が分かる案内を返す
+    if (row && !row.password_hash) {
+      return res.status(401).json({ error: 'このアカウントはGoogleで登録されています。下の「Googleでログイン」からお進みください。' });
+    }
     if (!row || !(await auth.verifyPassword(password, row.password_hash))) {
       return res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' });
     }
@@ -409,6 +463,83 @@ app.post('/api/auth/logout', requireAuth, async (req, res) => {
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ user: toPublicUser(req.authUser) });
+});
+
+// ログイン画面が「Googleでログイン」ボタンを出してよいかを判断するための設定。認証不要
+app.get('/api/auth/config', (req, res) => {
+  res.json({ googleLogin: GOOGLE_LOGIN_ENABLED });
+});
+
+/* ---------- Googleでログイン（OpenID Connect） ----------
+   カレンダー連携（/api/auth/google/start）とは別経路。カレンダーの権限は要求しない */
+app.get('/api/auth/google/login', (req, res) => {
+  if (!GOOGLE_LOGIN_ENABLED) return res.redirect('/?login_error=disabled');
+  res.redirect(google.getLoginAuthUrl());
+});
+
+app.get('/api/auth/google/login/callback', async (req, res) => {
+  if (!GOOGLE_LOGIN_ENABLED) return res.redirect('/?login_error=disabled');
+  const { code, state, error } = req.query;
+  if (error) return res.redirect('/?login_error=cancelled');
+  if (!code || google.verifyState(state) !== 'login') return res.redirect('/?login_error=state');
+  try {
+    const tokens = await google.exchangeLoginCode(code);
+    const profile = google.parseIdToken(tokens.id_token);
+    // 未確認のメールアドレスを信用すると、他人のメールを騙って既存アカウントを乗っ取れてしまう
+    if (!profile.emailVerified) return res.redirect('/?login_error=unverified');
+
+    let user = await findUserByGoogleSub(profile.sub);
+    if (!user) {
+      // 同じメールアドレスで既にパスワード登録済みなら、そのアカウントにGoogleを紐付ける
+      const byEmail = await findUserByEmail(profile.email);
+      if (byEmail) {
+        await linkGoogleAccount(byEmail.id, { googleSub: profile.sub, avatarUrl: profile.picture });
+        user = await findUserById(byEmail.id);
+      } else {
+        // 初めての人はインターン生として即利用開始。所属支部はログイン後の初回設定画面で選んでもらう
+        user = await insertUser({
+          email: profile.email,
+          passwordHash: '',
+          nickname: profile.name || profile.email.split('@')[0],
+          role: 'intern',
+          branchId: null,
+          status: 'active',
+          googleSub: profile.sub,
+          avatarUrl: profile.picture,
+        });
+      }
+    }
+
+    if (user.status === 'pending') return res.redirect('/?login_error=pending');
+    if (user.status !== 'active') return res.redirect('/?login_error=inactive');
+
+    const token = await createSessionRow(user.id);
+    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
+    res.redirect('/?login=google');
+  } catch (e) {
+    console.error('Googleログインに失敗しました', e);
+    res.redirect('/?login_error=failed');
+  }
+});
+
+// Googleで初めてログインした人が、ニックネームと所属支部を設定する
+app.post('/api/auth/complete-profile', requireAuth, async (req, res) => {
+  const { nickname, branch_id } = req.body || {};
+  if (!nickname || !String(nickname).trim()) return res.status(400).json({ error: 'ニックネームを入力してください' });
+  if (!branch_id) return res.status(400).json({ error: '所属支部を選択してください' });
+  try {
+    const obj = await readDB();
+    const exists = (obj?.branches || []).some((b) => b.id === branch_id);
+    if (!exists) return res.status(400).json({ error: '選択された支部が存在しません' });
+    await client.execute({
+      sql: 'UPDATE users SET nickname = ?, branch_id = ? WHERE id = ?',
+      args: [String(nickname).trim(), branch_id, req.authUser.id],
+    });
+    res.json({ ok: true, user: toPublicUser(await findUserById(req.authUser.id)) });
+  } catch (e) {
+    console.error('プロフィール設定に失敗しました', e);
+    res.status(500).json({ error: '保存に失敗しました' });
+  }
 });
 
 /* ---------- 管理者：スタッフ招待URL ---------- */

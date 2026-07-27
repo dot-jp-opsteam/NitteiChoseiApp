@@ -200,6 +200,19 @@
   .role-pick input:checked + .rb{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
   .fine{font-size:11px;color:var(--mut);margin-top:16px;line-height:1.5}
 
+  /* ---------- ソーシャルログイン（画面下半分） ---------- */
+  /* 「または」を挟んで、上のメール＋パスワードと視覚的に切り分ける */
+  .or-sep{display:flex;align-items:center;gap:12px;margin:22px 0 16px;color:var(--mut);font-size:12px}
+  .or-sep::before,.or-sep::after{content:"";flex:1;height:1px;background:var(--line)}
+  .or-sep span{white-space:nowrap}
+
+  .btn.social{display:flex;align-items:center;justify-content:center;gap:10px;
+    background:#fff;border:1px solid #dadce0;color:#3c4043;font-weight:600}
+  .btn.social:hover{background:#f8faf9;border-color:#c9ced4}
+  .btn.social svg{flex:none}
+  /* 押せない状態（未設定のプロバイダ）をグレーアウトして見せる場合に使う */
+  .btn.social:disabled{background:#f4f6f5;color:var(--mut)}
+
   .tag{font-size:11px;background:#eef2f6;color:#64748b;padding:2px 8px;border-radius:6px;font-weight:600}
 
   /* ---------- date chips (ホットペッパー風) ---------- */
@@ -252,26 +265,33 @@
     display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
   .selsummary .sr .x{margin-left:auto;color:var(--mut);cursor:pointer;font-size:18px;padding:0 6px}
 
-  /* ---------- month calendar (Googleカレンダー風) ---------- */
-  .cal .calhead{display:flex;align-items:center;justify-content:space-between;padding:2px 2px 10px}
-  .cal .calhead .cm{font-size:17px;font-weight:800}
+  /* ---------- month calendar (iOSカレンダー風・ライトモード) ---------- */
+  .cal .calhead{display:flex;align-items:flex-end;justify-content:space-between;padding:2px 2px 12px}
+  .cal .calhead .cm{display:flex;align-items:baseline;gap:8px}
+  .cal .calhead .cm-m{font-size:30px;font-weight:800;line-height:1;letter-spacing:-.5px}
+  .cal .calhead .cm-y{font-size:15px;font-weight:600;color:var(--mut)}
+  .cal .calnav{display:flex;gap:6px}
   .cal .navbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:#fff;
     font-size:16px;cursor:pointer;color:var(--sub)}
-  .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
-  .caldow{text-align:center;font-size:11px;font-weight:700;color:var(--sub);padding:2px 0}
-  .caldow.sun{color:#dc2626}.caldow.sat{color:#2563eb}
-  .calcell{aspect-ratio:1/1.05;border:1px solid transparent;border-radius:9px;padding:4px 3px;cursor:default;
-    display:flex;flex-direction:column;align-items:center;gap:2px;font-size:13px;background:#fafbfc}
-  .calcell.out{opacity:.35}
-  .calcell.has{cursor:pointer;background:#fff;border-color:var(--line)}
-  .calcell.has:hover{border-color:var(--brand)}
-  .calcell.today .dn{background:var(--brand);color:#fff;border-radius:50%;width:22px;height:22px;display:grid;place-items:center}
-  .calcell.sel{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft)}
-  .calcell .dn{font-weight:600;line-height:1}
-  .calcell .dots{display:flex;gap:2px;flex-wrap:wrap;justify-content:center}
-  .calcell .evdot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
-  .calcell .evmore{font-size:9px;color:var(--brand-d);font-weight:800}
-  .cal-legend{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);margin:10px 2px 0}
+  .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:0}
+  .caldow{text-align:center;font-size:11px;font-weight:600;color:var(--mut);padding:2px 0 8px}
+  .calcell{min-height:86px;padding:5px 3px 5px;cursor:default;border-top:1px solid var(--line2);
+    display:flex;flex-direction:column;align-items:center;gap:3px;font-size:13px;background:transparent;overflow:hidden}
+  .calcell.out{background:transparent}
+  .calcell.has{cursor:pointer}
+  .calcell.today .dn{background:var(--brand);color:#fff;border-radius:50%;width:26px;height:26px;
+    display:grid;place-items:center;font-size:14px}
+  .calcell.sel{background:var(--brand-soft)}
+  .calcell .dn{font-weight:700;line-height:1;flex:none;color:var(--ink)}
+  .calcell.holiday .dn{color:#dc2626}
+  .calcell .chips{display:flex;flex-direction:column;gap:2px;width:100%;overflow:hidden}
+  .calcell .chip{width:100%;font-size:9px;font-weight:600;line-height:1.6;padding:1px 4px;
+    border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+  .calcell .chipmore{font-size:9.5px;color:var(--mut);font-weight:700;padding:0 2px;line-height:1.4}
+  .colorpick{display:flex;flex-wrap:wrap;gap:9px;padding:4px 0 2px}
+  .colorpick .cdot{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid transparent;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+  .colorpick .cdot.on{border-color:var(--ink)}
 
   /* weekday availability rows */
   .wkrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line2)}
@@ -300,9 +320,7 @@
   .noti .ns{font-size:12px;color:var(--mut)}
   .noti.unread{background:var(--brand-soft);border-radius:8px;padding-left:8px;padding-right:8px}
 
-  /* calendar: 面談ドット・祝日・ビュー切替 */
-  .calcell .ivdot{width:6px;height:6px;border-radius:50%;background:var(--iv)}
-  .calcell.holiday .dn{color:#dc2626}
+  /* calendar: ビュー切替 */
   .calview-tabs{display:flex;gap:6px}
   .calview-tabs button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;
     font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;min-height:36px}

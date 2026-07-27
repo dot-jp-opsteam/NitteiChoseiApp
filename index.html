@@ -137,6 +137,14 @@ const ROLE_JP={intern:'インターン生',staff:'スタッフ',admin:'管理者
 const ROLE_CLS={intern:'role-intern',staff:'role-staff',admin:'role-admin'};
 const STATUS={none:{t:'未申請',c:'st-none'},applied:{t:'申請中',c:'st-applied'},fixed:{t:'確定済み',c:'st-fixed'},failed:{t:'不成立',c:'st-failed'}};
 const MTYPE={meet:'Google Meet',zoom:'Zoom'};
+const EVENT_COLORS=[
+  {v:'#0ea678',n:'グリーン'},{v:'#2563eb',n:'ブルー'},{v:'#6366f1',n:'インディゴ'},{v:'#db2777',n:'ピンク'},
+  {v:'#e11d48',n:'レッド'},{v:'#f59e0b',n:'オレンジ'},{v:'#06b6d4',n:'ティール'},{v:'#64748b',n:'グレー'},
+];
+// カレンダーチップの淡色地色（ライトモード：薄い地色＋濃い文字）
+function _hexRgb(v){const s=v.replace('#','');return [parseInt(s.slice(0,2),16),parseInt(s.slice(2,4),16),parseInt(s.slice(4,6),16)];}
+function chipBg(v){if(v.startsWith('var'))return 'var(--iv-soft)';const[r,g,b]=_hexRgb(v);const t=x=>Math.round(x+(255-x)*0.84);return `rgb(${t(r)},${t(g)},${t(b)})`;}
+function chipFg(v){if(v.startsWith('var'))return 'var(--iv)';const[r,g,b]=_hexRgb(v);const d=x=>Math.round(x*0.72);return `rgb(${d(r)},${d(g)},${d(b)})`;}
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function initials(name){return (name||'?').slice(0,1);}
@@ -234,11 +242,32 @@ function openSheet(html){const s=document.getElementById('sheet');
 function closeSheet(){document.getElementById('scrim').classList.remove('open');}
 
 /* =========================================================
-   LOGIN（メールアドレス＋パスワード認証）
+   LOGIN
+   - 画面上半分：メールアドレス＋パスワード
+   - 画面下半分：Googleでログイン（ソーシャルログイン）
    ========================================================= */
 let LOGIN_VIEW='login'; // 'login' | 'register-intern' | 'register-staff' | 'pending'
 let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branchesから取得）
 let STAFF_INVITE_KEY=null; // URLの ?staff=<秘密キー> パラメータ
+let GOOGLE_LOGIN_AVAILABLE=false; // サーバー側でGoogleの資格情報が設定済みか（/api/auth/config）
+
+/* Googleブランドガイドラインに沿った公式ロゴ（外部読み込みなしで動くようSVGを直接埋め込む） */
+const GOOGLE_LOGO_SVG=`<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+  <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
+  <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+  <path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"/>
+  <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/>
+</svg>`;
+
+/* メール／パスワード欄とソーシャルログインを区切る「または」の線 */
+function socialLoginBlock(){
+  if(!GOOGLE_LOGIN_AVAILABLE)return '';
+  return `
+    <div class="or-sep"><span>または</span></div>
+    <button class="btn social block" onclick="goGoogleLogin()">${GOOGLE_LOGO_SVG}<span>Googleでログイン</span></button>
+    <p class="fine" style="margin-top:10px;text-align:center">パスワードの入力は不要です。普段お使いのGoogleアカウントでそのまま始められます。</p>`;
+}
+function goGoogleLogin(){location.href='/api/auth/google/login';}
 
 function branchOptions(selected){
   return LOGIN_BRANCHES.map(b=>`<option value="${b.id}" ${b.id===selected?'selected':''}>${esc(b.name)}</option>`).join('');
@@ -285,8 +314,45 @@ function renderLogin(){
       <div class="field-err" id="loginErr"></div>
       <button class="btn pri block" style="margin-top:20px" onclick="doLoginAuth()">ログイン</button>
       <button class="btn ghost block" style="margin-top:10px" onclick="switchLoginView('register-intern')">初めての方（インターン生）はこちら</button>
-      ${STAFF_INVITE_KEY?`<button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('register-staff')">スタッフとして登録する</button>`:''}`;
+      ${STAFF_INVITE_KEY?`<button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('register-staff')">スタッフとして登録する</button>`:''}
+      ${socialLoginBlock()}`;
   }
+  // Enterキーでログインできるようにする（スマホのキーボードの「完了」でも送信される）
+  const emailInput=document.getElementById('loginEmail');
+  const passInput=document.getElementById('loginPassword');
+  if(emailInput&&passInput){
+    [emailInput,passInput].forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter')doLoginAuth();}));
+  }
+}
+
+/* Googleで初回ログインした人にニックネームと所属支部を設定してもらう画面 */
+function renderProfileSetup(){
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+  LOGIN_VIEW='profile';
+  document.getElementById('loginBody').innerHTML=`
+    <div class="hint" style="margin-bottom:4px"><span>👋</span><span>ようこそ、${esc(ME.nickname)}さん。あと1ステップで完了です。</span></div>
+    <label class="fl">ニックネーム<span class="req">*</span></label>
+    <input id="setupNick" autocomplete="off" value="${esc(ME.nickname||'')}">
+    <label class="fl">所属支部<span class="req">*</span></label>
+    <select id="setupBranch">${branchOptions(ME.branch_id)}</select>
+    <div class="field-err" id="setupErr"></div>
+    <button class="btn pri block" style="margin-top:20px" onclick="doCompleteProfile()">はじめる</button>`;
+}
+async function doCompleteProfile(){
+  const nickname=document.getElementById('setupNick').value.trim();
+  const branch_id=document.getElementById('setupBranch').value;
+  const err=document.getElementById('setupErr');
+  err.classList.remove('show');
+  if(!nickname){err.textContent='ニックネームを入力してください';err.classList.add('show');return;}
+  if(!branch_id){err.textContent='所属支部を選択してください';err.classList.add('show');return;}
+  try{
+    const res=await fetch('/api/auth/complete-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nickname,branch_id})});
+    const data=await res.json();
+    if(!res.ok){err.textContent=data.error||'保存に失敗しました';err.classList.add('show');return;}
+    ME=data.user;
+    enterApp();
+  }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
 }
 async function doLoginAuth(){
   const email=document.getElementById('loginEmail').value.trim();
@@ -338,6 +404,12 @@ async function afterLogin(){
   const {user}=await meRes.json();
   ME=user;
   DB=await bootLoad();
+  // 支部の一覧は初回設定画面のプルダウンで使うため、DB取得後に反映しておく
+  LOGIN_BRANCHES=DB.branches||LOGIN_BRANCHES;
+  if(ME.needs_profile){renderProfileSetup();return;}
+  enterApp();
+}
+function enterApp(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   renderChip();buildNav();go(defaultTab());
@@ -458,6 +530,10 @@ function viewHome(){
         <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">✉️</span>
         <span><span class="tile-t">受信メール</span><br><span class="tile-d">面談確定・リンクなどの通知メール${inbox?`（${inbox}件）`:''}</span></span>
         <span class="tile-arrow">›</span></div></div>`+
+      `<div class="card click home-tile" onclick="openGoogleCalendarSettings()">
+        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">📅</span>
+        <span><span class="tile-t">Googleカレンダー連携</span><br><span class="tile-d">確定した面談を自分のカレンダーに自動登録</span></span>
+        <span class="tile-arrow">›</span></div></div>`+
       eventsSection();
   }
   if(ME.role==='staff'){
@@ -531,7 +607,7 @@ function copyStaffInviteUrl(){
 }
 
 /* =========================================================
-   Googleカレンダー連携（スタッフ）
+   Googleカレンダー連携（スタッフ・インターン生）
    ========================================================= */
 async function openGoogleCalendarSettings(){
   openSheet(`<h3>Googleカレンダー連携</h3><p class="page-sub">状態を確認しています…</p>`);
@@ -550,14 +626,15 @@ function renderGoogleCalendarSettings(data){
       <div class="hint mock"><span>⚠️</span><span>サーバー側でGoogleカレンダー連携がまだ設定されていません。管理者にお問い合わせください。</span></div>`);
     return;
   }
+  const isStaff=ME.role==='staff';
   if(data.connected){
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <div class="hint"><span>✅</span><span>連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。</span></div>
+      <div class="hint"><span>✅</span><span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
       <p class="page-sub" style="margin-top:10px">Notion Calendarをお使いの場合も、表示しているアカウントが同じGoogleアカウントであれば自動的に反映されます。iPhone標準カレンダー（iCloud）は別対応が必要です。</p>
       <button class="btn block" style="margin-top:16px;color:var(--bad);border-color:#f2b8b8" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <p class="page-sub">あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。</p>
+      <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
       <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携する</button>`);
   }
 }
@@ -712,7 +789,8 @@ function viewMyInterviews(){
       </div>
       <div class="meta"><span>担当：<b>${staff?esc(staff.nickname):'未定'}</b></span></div>
       ${iv.status==='fixed'
-        ? `<div class="hint" style="margin-top:8px"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>${MTYPE[iv.meeting_type]}のリンクはメールで届きます。</span></div>`
+        ? `<div class="hint" style="margin-top:8px"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>${MTYPE[iv.meeting_type]}のリンクはメールで届きます。</span></div>
+           <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px"><span>📆</span><span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（ホーム画面から連携できます）'}</span></div>`
         : iv.status==='failed'
         ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
            <button class="btn pri block sm" style="margin-top:10px" onclick="go('apply')">再申請する</button>`
@@ -881,6 +959,7 @@ function eventCard(ev){
   const mine=resp.find(r=>r.user_id===ME.id);
   return `<div class="card"><div class="cb">
       <div style="display:flex;align-items:center;gap:8px">
+        <span class="legend-dot" style="background:${ev.color||EVENT_COLORS[0].v};margin-right:0"></span>
         <b style="font-size:16px">${esc(ev.title)}</b>
         <span class="tag" style="margin-left:auto">${branchName(ev.branch_id)}</span>
       </div>
@@ -936,42 +1015,46 @@ function eventsSection(){
   list.forEach(e=>{const k=ymd(new Date(e.start_datetime));(evByDay[k]=evByDay[k]||[]).push(e);});
   ivs.forEach(iv=>{const k=ymd(new Date(iv.confirmed_datetime));(ivByDay[k]=ivByDay[k]||[]).push(iv);});
 
-  const legend=`<div class="cal-legend">
-      <span class="legend-dot" style="background:var(--brand)"></span>イベント
-      <span class="legend-dot" style="background:var(--iv);margin-left:10px"></span>面談
-      <span style="margin-left:auto">日付タップで絞り込み</span></div>`;
-
   let body;
   if(calMode==='list'){
     body=agendaView(list,ivs,y,m);
   }else{
     const startDow=new Date(y,m,1).getDay();
     const daysInMonth=new Date(y,m+1,0).getDate();
-    const prevDays=new Date(y,m,0).getDate();
     const todayKey=ymd(new Date());
     let cells='';
-    for(let i=startDow-1;i>=0;i--)cells+=`<div class="calcell out"><span class="dn">${prevDays-i}</span></div>`;
+    // 前月の空白セル（数字は表示しない）
+    for(let i=0;i<startDow;i++)cells+=`<div class="calcell out"></div>`;
     for(let d=1;d<=daysInMonth;d++){
       const key=ymd(new Date(y,m,d));const evs=evByDay[key]||[];const dvs=ivByDay[key]||[];
-      const has=evs.length+dvs.length;const hol=holidayName(y,m,d);
+      const items=[
+        ...evs.map(e=>({t:new Date(e.start_datetime),color:e.color||EVENT_COLORS[0].v,label:`${hm(e.start_datetime)} ${e.title}`})),
+        ...dvs.map(iv=>({t:new Date(iv.confirmed_datetime),color:'var(--iv)',label:`${hm(iv.confirmed_datetime)} ${ivLabel(iv)}`})),
+      ].sort((a,b)=>a.t-b.t);
+      const has=items.length;const hol=holidayName(y,m,d);
       const cls=['calcell',has?'has':'',key===todayKey?'today':'',key===calSel?'sel':'',hol?'holiday':''].join(' ');
-      let dots='';
-      if(has){const parts=[...evs.slice(0,2).map(()=>'<span class="evdot"></span>'),
-        ...dvs.slice(0,2).map(()=>'<span class="ivdot"></span>')];
-        dots=`<div class="dots">${parts.slice(0,3).join('')}${has>3?`<span class="evmore">+${has-3}</span>`:''}</div>`;}
-      cells+=`<div class="${cls}"${hol?` title="${esc(hol)}"`:''} ${has?`onclick="calSelect('${key}')"`:''}><span class="dn">${d}</span>${dots}</div>`;
+      let chipsHtml='';
+      if(has){
+        const showN=has>3?2:has;
+        const shown=items.slice(0,showN).map(it=>`<span class="chip" style="background:${chipBg(it.color)};color:${chipFg(it.color)}">${esc(it.label)}</span>`).join('');
+        const more=has>showN?`<span class="chipmore">+${has-showN}</span>`:'';
+        chipsHtml=`<div class="chips">${shown}${more}</div>`;
+      }
+      cells+=`<div class="${cls}"${hol?` title="${esc(hol)}"`:''} ${has?`onclick="calSelect('${key}')"`:''}><span class="dn">${d}</span>${chipsHtml}</div>`;
     }
     const trail=(7-(startDow+daysInMonth)%7)%7;
-    for(let i=1;i<=trail;i++)cells+=`<div class="calcell out"><span class="dn">${i}</span></div>`;
-    const dow=WD_JP.map((w,i)=>`<div class="caldow ${i===0?'sun':''} ${i===6?'sat':''}">${w}</div>`).join('');
-    body=`<div class="calgrid">${dow}${cells}</div>${legend}`;
+    for(let i=1;i<=trail;i++)cells+=`<div class="calcell out"></div>`;
+    const dow=WD_JP.map((w)=>`<div class="caldow">${w}</div>`).join('');
+    body=`<div class="calgrid">${dow}${cells}</div>`;
   }
 
   const cal=`<div class="card cal"><div class="cb">
       <div class="calhead">
-        <button class="navbtn" onclick="calShift(-1)">‹</button>
-        <span class="cm">${y}年${m+1}月</span>
-        <button class="navbtn" onclick="calShift(1)">›</button>
+        <span class="cm"><span class="cm-m">${m+1}月</span><span class="cm-y">${y}</span></span>
+        <span class="calnav">
+          <button class="navbtn" onclick="calShift(-1)">‹</button>
+          <button class="navbtn" onclick="calShift(1)">›</button>
+        </span>
       </div>
       ${body}
     </div></div>`;
@@ -998,7 +1081,7 @@ function eventsSection(){
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div></div>
-    <p class="page-sub" style="margin-top:-2px">イベント（緑）と確定面談（紫）を表示。下で各イベントの出欠を回答できます。</p>
+    <p class="page-sub" style="margin-top:-2px">イベント（作成時に選んだ色）と確定面談（紫）を表示。下で各イベントの出欠を回答できます。</p>
     ${canCreate?`<button class="btn pri block" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しいイベントを作成</button>`:''}
     ${cal}
     <div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
@@ -1008,7 +1091,7 @@ function eventsSection(){
 function agendaView(list,ivs,y,m){
   const items=[];
   list.forEach(e=>{const dt=new Date(e.start_datetime);
-    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${hm(e.start_datetime)}・${e.location||'—'}`,key:ymd(dt)});});
+    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${hm(e.start_datetime)}・${e.location||'—'}`,key:ymd(dt),color:e.color||EVENT_COLORS[0].v});});
   ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
     if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'iv',title:ivLabel(iv),sub:`${hm(iv.confirmed_datetime)}・${MTYPE[iv.meeting_type]}`,key:ymd(dt)});});
   items.sort((a,b)=>a.dt-b.dt);
@@ -1017,7 +1100,7 @@ function agendaView(list,ivs,y,m){
     const w=WD_JP[it.dt.getDay()];
     return `<div class="ag" ${it.type==='ev'?`style="cursor:pointer" onclick="calSelect('${it.key}')"`:''}>
       <span class="agd"><span class="agn" style="${it.dt.getDay()===0?'color:#dc2626':it.dt.getDay()===6?'color:#2563eb':''}">${it.dt.getDate()}</span><span class="agw">${w}</span></span>
-      <span class="agbar ${it.type==='iv'?'iv':''}"></span>
+      <span class="agbar ${it.type==='iv'?'iv':''}" ${it.type==='ev'?`style="background:${it.color}"`:''}></span>
       <span style="flex:1"><span class="agt">${esc(it.title)}</span><br><span class="ags">${esc(it.sub)}</span></span>
     </div>`;}).join('')+`</div>`;
 }
@@ -1057,11 +1140,18 @@ function openEventForm(id){
     <input id="evLoc" value="${esc(ev?.location||'')}" placeholder="例：水戸市民会館／オンライン">
     <label class="fl">対象支部</label>
     <select id="evBranch">${bopts}</select>
+    <label class="fl">カレンダーの色</label>
+    <div class="colorpick" id="evColorPick">${EVENT_COLORS.map(c=>`<span class="cdot${c.v===(ev?.color||EVENT_COLORS[0].v)?' on':''}" style="background:${c.v}" data-c="${c.v}" title="${c.n}" onclick="pickEvColor('${c.v}')"></span>`).join('')}</div>
+    <input type="hidden" id="evColor" value="${esc(ev?.color||EVENT_COLORS[0].v)}">
     <label class="fl">Meetリンク</label>
     <input id="evMeet" value="${esc(ev?.meet_url||'')}" placeholder="https://meet.google.com/...">
     <label class="fl">Zoomリンク</label>
     <input id="evZoom" value="${esc(ev?.zoom_url||'')}" placeholder="https://zoom.us/j/...">
     <button class="btn pri block" style="margin-top:18px" onclick="saveEvent(${ev?`'${ev.id}'`:'null'})">${ev?'更新する':'作成する'}</button>`);
+}
+function pickEvColor(v){
+  document.getElementById('evColor').value=v;
+  document.querySelectorAll('#evColorPick .cdot').forEach(el=>el.classList.toggle('on',el.dataset.c===v));
 }
 function saveEvent(id){
   const title=document.getElementById('evTitle').value.trim();
@@ -1077,6 +1167,7 @@ function saveEvent(id){
     end_datetime:document.getElementById('evEnd').value?new Date(document.getElementById('evEnd').value).toISOString():new Date(start).toISOString(),
     location:document.getElementById('evLoc').value.trim(),
     branch_id:document.getElementById('evBranch').value,
+    color:document.getElementById('evColor').value||EVENT_COLORS[0].v,
     meet_url:document.getElementById('evMeet').value.trim(),
     zoom_url:document.getElementById('evZoom').value.trim()};
   if(id){Object.assign(DB.events.find(e=>e.id===id),data);toast('イベントを更新しました');}
@@ -1580,7 +1671,24 @@ function openMailDetail(id){
   const params=new URLSearchParams(location.search);
   STAFF_INVITE_KEY=params.get('staff');
 
+  // Googleログインに失敗して戻ってきた場合の案内（?login_error=xxx）
+  const LOGIN_ERR_MSG={
+    disabled:'Googleログインはまだ設定されていません。管理者にお問い合わせください。',
+    cancelled:'Googleログインがキャンセルされました。',
+    state:'セッションの有効期限が切れました。もう一度お試しください。',
+    unverified:'このGoogleアカウントはメールアドレスが未確認のため利用できません。',
+    pending:'管理者の承認待ちです。承認までしばらくお待ちください。',
+    inactive:'このアカウントではログインできません。',
+    failed:'Googleログインに失敗しました。時間をおいて再度お試しください。',
+  };
+
   try{
+    // Googleログインボタンを出してよいかを先に確認する（失敗してもメール認証は使えるようにする）
+    try{
+      const cRes=await fetch('/api/auth/config');
+      if(cRes.ok){GOOGLE_LOGIN_AVAILABLE=!!(await cRes.json()).googleLogin;}
+    }catch(e){/* 取得できないときはボタンを出さない */}
+
     const meRes=await fetch('/api/auth/me');
     if(meRes.ok){
       await afterLogin();
@@ -1595,6 +1703,16 @@ function openMailDetail(id){
   }catch(e){
     console.warn('サーバーに接続できません',e);
     renderLogin();
+  }
+
+  const loginParam=params.get('login');
+  const loginErr=params.get('login_error');
+  if(loginParam||loginErr){
+    params.delete('login');params.delete('login_error');
+    const q=params.toString();
+    history.replaceState(null,'',location.pathname+(q?`?${q}`:''));
+    if(loginErr)toast(LOGIN_ERR_MSG[loginErr]||'ログインに失敗しました');
+    else if(loginParam==='google')toast('Googleアカウントでログインしました');
   }
 
   const googleParam=params.get('google');
