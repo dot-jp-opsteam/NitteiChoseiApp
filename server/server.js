@@ -143,6 +143,8 @@ function toPublicUser(row) {
     // Googleでログインしたばかりで所属支部が未設定のとき、フロント側で初回設定画面を出すための目印。
     // 管理者は特定の支部に属さない運用のため対象外
     needs_profile: row.role !== 'admin' && !row.branch_id,
+    // パスワード変更画面で「現在のパスワード」欄を出すかの判定に使う（値そのものは返さない）
+    has_password: !!row.password_hash,
   };
 }
 async function findUserByEmail(email) {
@@ -236,6 +238,8 @@ async function requireAuth(req, res, next) {
     const user = await getUserBySessionToken(token);
     if (!user || user.status !== 'active') return res.status(401).json({ error: '認証が必要です' });
     req.authUser = user;
+    // パスワード変更時に「今使っている端末だけ残す」判定に使う
+    req.authSessionTokenHash = auth.hashToken(token);
     next();
   } catch (e) {
     console.error('認証チェックに失敗しました', e);
@@ -539,6 +543,39 @@ app.post('/api/auth/complete-profile', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('プロフィール設定に失敗しました', e);
     res.status(500).json({ error: '保存に失敗しました' });
+  }
+});
+
+/* パスワード変更。Googleだけで登録した人はパスワードを持たないため、
+   その場合に限り現在のパスワードなしで初回設定できるようにしている */
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  if (!new_password || String(new_password).length < 8) {
+    return res.status(400).json({ error: '新しいパスワードは8文字以上で入力してください' });
+  }
+  try {
+    const row = await findUserById(req.authUser.id);
+    if (!row) return res.status(404).json({ error: 'ユーザーが見つかりません' });
+    if (row.password_hash) {
+      if (!current_password) return res.status(400).json({ error: '現在のパスワードを入力してください' });
+      if (!(await auth.verifyPassword(current_password, row.password_hash))) {
+        return res.status(401).json({ error: '現在のパスワードが正しくありません' });
+      }
+    }
+    await client.execute({
+      sql: 'UPDATE users SET password_hash = ? WHERE id = ?',
+      args: [await auth.hashPassword(String(new_password)), req.authUser.id],
+    });
+    // 変更前に発行済みのセッションを無効化する（漏れていた場合に他の端末を追い出すため）。
+    // 今使っている端末だけは残し、ログインし直さずに済むようにする
+    await client.execute({
+      sql: 'DELETE FROM sessions WHERE user_id = ? AND token_hash != ?',
+      args: [req.authUser.id, req.authSessionTokenHash || ''],
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('パスワード変更に失敗しました', e);
+    res.status(500).json({ error: '変更に失敗しました' });
   }
 });
 

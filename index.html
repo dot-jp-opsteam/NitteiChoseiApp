@@ -458,8 +458,43 @@ function openUserMenu(){
   openSheet(`<h3>${esc(ME.nickname)}</h3>
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>
     <div class="btn-row" style="margin-top:14px">
+      <button class="btn block" onclick="openPasswordChange()">パスワードを変更</button>
       <button class="btn block" onclick="closeSheet();logout()">ログアウト</button>
     </div>`);
+}
+
+/* パスワード変更。Googleだけで登録した人はまだパスワードを持たないので、
+   その場合は「現在のパスワード」欄を出さずに新規設定として扱う */
+function openPasswordChange(){
+  const hasPassword=ME.has_password!==false;
+  openSheet(`<h3>${hasPassword?'パスワードを変更':'パスワードを設定'}</h3>
+    <p class="page-sub">${hasPassword?'変更すると、他の端末のログインは解除されます。':'設定すると、Googleを使わずメールアドレスでもログインできるようになります。'}</p>
+    ${hasPassword?`<label class="fl">現在のパスワード<span class="req">*</span></label>
+    <input id="pwCur" type="password" autocomplete="current-password">`:''}
+    <label class="fl">新しいパスワード<span class="req">*</span></label>
+    <input id="pwNew" type="password" autocomplete="new-password" placeholder="8文字以上">
+    <label class="fl">新しいパスワード（確認）<span class="req">*</span></label>
+    <input id="pwNew2" type="password" autocomplete="new-password">
+    <div class="field-err" id="pwErr"></div>
+    <button class="btn pri block" style="margin-top:18px" onclick="doChangePassword()">変更する</button>`);
+}
+async function doChangePassword(){
+  const cur=document.getElementById('pwCur');
+  const np=document.getElementById('pwNew').value;
+  const np2=document.getElementById('pwNew2').value;
+  const err=document.getElementById('pwErr');
+  err.classList.remove('show');
+  const fail=m=>{err.textContent=m;err.classList.add('show');};
+  if(np.length<8)return fail('新しいパスワードは8文字以上で入力してください');
+  if(np!==np2)return fail('新しいパスワードが一致しません');
+  try{
+    const res=await fetch('/api/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({current_password:cur?cur.value:'',new_password:np})});
+    const data=await res.json();
+    if(!res.ok)return fail(data.error||'変更に失敗しました');
+    closeSheet();
+    toast('パスワードを変更しました');
+  }catch(e){fail('通信に失敗しました。時間をおいて再度お試しください。');}
 }
 
 /* =========================================================
