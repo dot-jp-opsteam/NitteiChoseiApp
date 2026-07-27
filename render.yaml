@@ -29,3 +29,9 @@ services:
       # 2026-07-27 に Google Cloud Console へ登録済み。OAuth同意画面も公開済みのため有効化
       - key: GOOGLE_LOGIN_ENABLED
         value: "true"
+      # パスワード再設定メールの送信元。SMTP_PASS はGoogleの「アプリパスワード」16文字
+      # （ログインパスワードではない）。両方そろったときだけ再設定機能が有効になる
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false

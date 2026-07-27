@@ -22,8 +22,11 @@ const { createClient } = require('@libsql/client');
 const express = require('express');
 const google = require('./google');
 const auth = require('./auth');
+const mail = require('./mail');
 
 const PORT = process.env.PORT || 8080;
+/* パスワード再設定リンクの有効時間。長すぎると危険、短すぎるとメール到着前に切れるため60分 */
+const RESET_TOKEN_MINUTES = 60;
 const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.TOKEN_ENCRYPTION_KEY && process.env.PUBLIC_BASE_URL);
 /* 「Googleでログイン」はカレンダー連携と同じ資格情報を使うが、Google Cloud Console 側に
    ログイン用のリダイレクトURI（/api/auth/google/login/callback）を登録し終えるまでは
@@ -83,6 +86,15 @@ async function initDB() {
       user_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT
     )
   `);
   // 既存DBへの追加カラム（Googleでログイン用）。既に存在する場合のエラーは無視する
@@ -471,7 +483,7 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 // ログイン画面が「Googleでログイン」ボタンを出してよいかを判断するための設定。認証不要
 app.get('/api/auth/config', (req, res) => {
-  res.json({ googleLogin: GOOGLE_LOGIN_ENABLED });
+  res.json({ googleLogin: GOOGLE_LOGIN_ENABLED, passwordReset: mail.MAIL_ENABLED });
 });
 
 /* ---------- Googleでログイン（OpenID Connect） ----------
@@ -578,6 +590,96 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
     res.status(500).json({ error: '変更に失敗しました' });
   }
 });
+
+/* ---------- パスワードを忘れたとき ---------- */
+/* 申請。メールアドレスが登録済みかどうかに関わらず必ず同じ応答を返す。
+   「そのアドレスは登録されていません」と答えると、誰が登録しているかを外部から
+   調べられてしまうため */
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'メールアドレスを入力してください' });
+  if (!mail.MAIL_ENABLED) {
+    return res.status(503).json({ error: 'メール送信が未設定のため、この機能は現在ご利用いただけません。管理者にお問い合わせください。' });
+  }
+  const ok = { ok: true, message: 'ご入力のメールアドレス宛に再設定用のメールをお送りしました。届かない場合は迷惑メールフォルダもご確認ください。' };
+  try {
+    const row = await findUserByEmail(email);
+    if (!row || row.status !== 'active') return res.json(ok);
+
+    // 同じ人の未使用リンクは無効化してから新しく発行する（古いリンクが生き続けないように）
+    await client.execute({ sql: 'DELETE FROM password_resets WHERE user_id = ?', args: [row.id] });
+
+    const token = auth.newSessionToken();
+    const now = new Date();
+    await client.execute({
+      sql: 'INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
+      args: [
+        auth.hashToken(token), row.id, now.toISOString(),
+        new Date(now.getTime() + RESET_TOKEN_MINUTES * 60 * 1000).toISOString(),
+      ],
+    });
+
+    const base = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
+    await mail.sendPasswordResetMail({
+      to: row.email,
+      nickname: row.nickname,
+      url: `${base}/?reset=${token}`,
+      minutes: RESET_TOKEN_MINUTES,
+    });
+    res.json(ok);
+  } catch (e) {
+    console.error('パスワード再設定メールの送信に失敗しました', e);
+    res.status(500).json({ error: 'メールの送信に失敗しました。時間をおいて再度お試しください。' });
+  }
+});
+
+/* リンクを開いた時点での有効性チェック。無効なら入力画面を出さずに済ませる */
+app.get('/api/auth/reset-check', async (req, res) => {
+  const row = await findValidReset(req.query.token);
+  res.json({ valid: !!row, nickname: row ? row.nickname : null });
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, new_password } = req.body || {};
+  if (!new_password || String(new_password).length < 8) {
+    return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
+  }
+  try {
+    const row = await findValidReset(token);
+    if (!row) {
+      return res.status(400).json({ error: 'このリンクは期限切れか、既に使用済みです。お手数ですが再度お手続きください。' });
+    }
+    await client.execute({
+      sql: 'UPDATE users SET password_hash = ? WHERE id = ?',
+      args: [await auth.hashPassword(String(new_password)), row.user_id],
+    });
+    // リンクは使い捨て。同時に全端末のログインを解除する（乗っ取られていた場合に締め出すため）
+    await client.execute({
+      sql: 'UPDATE password_resets SET used_at = ? WHERE token_hash = ?',
+      args: [new Date().toISOString(), row.token_hash],
+    });
+    await client.execute({ sql: 'DELETE FROM sessions WHERE user_id = ?', args: [row.user_id] });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('パスワード再設定に失敗しました', e);
+    res.status(500).json({ error: '再設定に失敗しました' });
+  }
+});
+
+/* 有効な再設定リンクを1件返す。期限切れ・使用済み・存在しないときはnull */
+async function findValidReset(token) {
+  if (!token) return null;
+  const rs = await client.execute({
+    sql: `SELECT r.token_hash, r.user_id, r.expires_at, u.nickname
+            FROM password_resets r JOIN users u ON u.id = r.user_id
+           WHERE r.token_hash = ? AND r.used_at IS NULL`,
+    args: [auth.hashToken(String(token))],
+  });
+  const row = rs.rows[0];
+  if (!row) return null;
+  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  return row;
+}
 
 /* ---------- 管理者：スタッフ招待URL ---------- */
 app.get('/api/admin/staff-invite-url', requireAuth, requireAdmin, (req, res) => {

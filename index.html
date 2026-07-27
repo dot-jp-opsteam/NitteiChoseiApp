@@ -250,6 +250,7 @@ let LOGIN_VIEW='login'; // 'login' | 'register-intern' | 'register-staff' | 'pen
 let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branchesから取得）
 let STAFF_INVITE_KEY=null; // URLの ?staff=<秘密キー> パラメータ
 let GOOGLE_LOGIN_AVAILABLE=false; // サーバー側でGoogleの資格情報が設定済みか（/api/auth/config）
+let PASSWORD_RESET_AVAILABLE=false; // サーバー側でメール送信が設定済みか（/api/auth/config）
 
 /* Googleブランドガイドラインに沿った公式ロゴ（外部読み込みなしで動くようSVGを直接埋め込む） */
 const GOOGLE_LOGO_SVG=`<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
@@ -318,6 +319,15 @@ function renderLogin(){
       <div class="field-err" id="regsErr"></div>
       <button class="btn pri block" style="margin-top:20px" onclick="doRegisterStaff()">申請する</button>
       <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
+  }else if(LOGIN_VIEW==='forgot'){
+    body.innerHTML=`
+      <p class="page-sub" style="margin-top:0">ご登録のメールアドレスに、パスワード再設定用のリンクをお送りします。</p>
+      <label class="fl">メールアドレス<span class="req">*</span></label>
+      <input id="forgotEmail" type="email" autocomplete="username" placeholder="example@dot-jp.com">
+      <div class="field-err" id="forgotErr"></div>
+      <div class="hint hidden" id="forgotDone" style="margin-top:14px"><span>📮</span><span></span></div>
+      <button class="btn pri block" style="margin-top:18px" id="forgotBtn" onclick="doForgotPassword()">再設定メールを送る</button>
+      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
   }else if(LOGIN_VIEW==='pending'){
     body.innerHTML=`<div class="hint"><span>⏳</span><span>登録を受け付けました。管理者の承認後にログインできるようになります。</span></div>
       <button class="btn ghost block" style="margin-top:14px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
@@ -334,6 +344,7 @@ function renderLogin(){
             <label class="pw-toggle"><input type="checkbox" onchange="toggleLoginPw(this)"><span>パスワードを表示する</span></label>
             <div class="field-err" id="loginErr"></div>
             <button class="btn pri block" style="margin-top:14px" onclick="doLoginAuth()">ログインする</button>
+            ${PASSWORD_RESET_AVAILABLE?`<p class="forgot-link"><a href="javascript:void(0)" onclick="switchLoginView('forgot')">パスワードをお忘れの方</a></p>`:''}
           </div>
           <div class="signup-box">
             <p class="signup-title">アカウントをお持ちでない方</p>
@@ -350,6 +361,78 @@ function renderLogin(){
   if(emailInput&&passInput){
     [emailInput,passInput].forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter')doLoginAuth();}));
   }
+}
+
+async function doForgotPassword(){
+  const email=document.getElementById('forgotEmail').value.trim();
+  const err=document.getElementById('forgotErr');
+  const btn=document.getElementById('forgotBtn');
+  const done=document.getElementById('forgotDone');
+  err.classList.remove('show');
+  if(!email){err.textContent='メールアドレスを入力してください';err.classList.add('show');return;}
+  btn.disabled=true;btn.textContent='送信中…';
+  try{
+    const res=await fetch('/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const data=await res.json();
+    if(!res.ok){
+      err.textContent=data.error||'送信に失敗しました';err.classList.add('show');
+      btn.disabled=false;btn.textContent='再設定メールを送る';return;
+    }
+    // 連打で何通も送られないよう、送信後はボタンを戻さない
+    done.querySelector('span:last-child').textContent=data.message;
+    done.classList.remove('hidden');
+    btn.textContent='送信しました';
+  }catch(e){
+    err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');
+    btn.disabled=false;btn.textContent='再設定メールを送る';
+  }
+}
+
+/* メールのリンク（?reset=...）から開く新パスワード設定画面 */
+async function renderResetPassword(token){
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+  LOGIN_VIEW='reset';
+  document.querySelector('.login-card').classList.remove('wide');
+  const body=document.getElementById('loginBody');
+  body.innerHTML='<p class="page-sub" style="margin-top:0">確認しています…</p>';
+
+  let info={valid:false};
+  try{
+    const res=await fetch('/api/auth/reset-check?token='+encodeURIComponent(token));
+    if(res.ok)info=await res.json();
+  }catch(e){/* 通信できないときは無効扱いにする */}
+
+  if(!info.valid){
+    body.innerHTML=`<div class="hint"><span>⚠️</span><span>このリンクは期限切れか、既に使用済みです。お手数ですが、もう一度お手続きください。</span></div>
+      <button class="btn pri block" style="margin-top:16px" onclick="switchLoginView('forgot')">再設定メールを送り直す</button>
+      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
+    return;
+  }
+  body.innerHTML=`
+    <div class="hint" style="margin-bottom:4px"><span>🔑</span><span>${esc(info.nickname)}さんの新しいパスワードを設定してください。</span></div>
+    <label class="fl">新しいパスワード<span class="req">*</span></label>
+    <input id="rsNew" type="password" autocomplete="new-password" placeholder="8文字以上">
+    <label class="fl">新しいパスワード（確認）<span class="req">*</span></label>
+    <input id="rsNew2" type="password" autocomplete="new-password">
+    <div class="field-err" id="rsErr"></div>
+    <button class="btn pri block" style="margin-top:18px" onclick="doResetPassword('${esc(token)}')">この内容で設定する</button>`;
+}
+async function doResetPassword(token){
+  const np=document.getElementById('rsNew').value;
+  const np2=document.getElementById('rsNew2').value;
+  const err=document.getElementById('rsErr');
+  err.classList.remove('show');
+  const fail=m=>{err.textContent=m;err.classList.add('show');};
+  if(np.length<8)return fail('パスワードは8文字以上で入力してください');
+  if(np!==np2)return fail('パスワードが一致しません');
+  try{
+    const res=await fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,new_password:np})});
+    const data=await res.json();
+    if(!res.ok)return fail(data.error||'再設定に失敗しました');
+    switchLoginView('login');
+    toast('パスワードを設定しました。新しいパスワードでログインしてください');
+  }catch(e){fail('通信に失敗しました。時間をおいて再度お試しください。');}
 }
 
 /* Googleで初回ログインした人にニックネームと所属支部を設定してもらう画面 */
@@ -1748,8 +1831,22 @@ function openMailDetail(id){
     // Googleログインボタンを出してよいかを先に確認する（失敗してもメール認証は使えるようにする）
     try{
       const cRes=await fetch('/api/auth/config');
-      if(cRes.ok){GOOGLE_LOGIN_AVAILABLE=!!(await cRes.json()).googleLogin;}
+      if(cRes.ok){
+        const cfg=await cRes.json();
+        GOOGLE_LOGIN_AVAILABLE=!!cfg.googleLogin;
+        PASSWORD_RESET_AVAILABLE=!!cfg.passwordReset;
+      }
     }catch(e){/* 取得できないときはボタンを出さない */}
+
+    // メールのリンクから来た場合は、ログイン状態を見る前に再設定画面を出す
+    const resetToken=params.get('reset');
+    if(resetToken){
+      params.delete('reset');
+      const q=params.toString();
+      history.replaceState(null,'',location.pathname+(q?`?${q}`:''));
+      await renderResetPassword(resetToken);
+      return;
+    }
 
     const meRes=await fetch('/api/auth/me');
     if(meRes.ok){
