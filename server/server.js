@@ -33,7 +33,9 @@ const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLI
    ボタンを押してもGoogleがエラーを返す。設定完了後に GOOGLE_LOGIN_ENABLED=true を
    指定してもらうことで、中途半端に壊れた状態が本番に出ないようにしている。 */
 const GOOGLE_LOGIN_ENABLED = GOOGLE_ENABLED && process.env.GOOGLE_LOGIN_ENABLED === 'true';
-const STAFF_SIGNUP_SECRET = process.env.STAFF_SIGNUP_SECRET || '';
+/* スタッフ登録を許可するメールアドレスのドメイン。ドットジェイピーから配布される
+   Googleアカウント（例: reandoro_azuma@dot-jp.or.jp）だけがスタッフになれる */
+const STAFF_EMAIL_DOMAIN = process.env.STAFF_EMAIL_DOMAIN || 'dot-jp.or.jp';
 const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@example.com';
 const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'change-me-immediately';
 
@@ -428,23 +430,14 @@ app.post('/api/auth/register-intern', async (req, res) => {
   }
 });
 
+/* 旧・秘密キー付き招待URL（?staff=...）による登録。
+   スタッフ登録は /staff のGoogle確認方式に一本化したため廃止した。
+   古いURLがブックマークやLINEに残っていても、新しい手順へ案内できるように残してある */
 app.post('/api/auth/register-staff', async (req, res) => {
-  const { email, password, nickname, branch_id, inviteKey } = req.body || {};
-  if (!STAFF_SIGNUP_SECRET || !auth.safeEqual(inviteKey, STAFF_SIGNUP_SECRET)) {
-    return res.status(403).json({ error: '招待リンクが無効です' });
-  }
-  if (!email || !password || !nickname) return res.status(400).json({ error: 'email・password・nicknameは必須です' });
-  if (String(password).length < 8) return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
-  try {
-    const existing = await findUserByEmail(email);
-    if (existing) return res.status(409).json({ error: 'このメールアドレスは既に登録されています' });
-    const passwordHash = await auth.hashPassword(password);
-    await insertUser({ email, passwordHash, nickname, role: 'staff', branchId: branch_id, status: 'pending' });
-    res.json({ ok: true, pending: true });
-  } catch (e) {
-    console.error('スタッフ登録に失敗しました', e);
-    res.status(500).json({ error: '登録に失敗しました' });
-  }
+  return res.status(410).json({
+    error: 'スタッフ登録の方法が変わりました。ドットから配布されたGoogleアカウントで、スタッフ登録ページからお手続きください。',
+    staffSignupUrl: `${process.env.PUBLIC_BASE_URL || ''}/staff`,
+  });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -483,7 +476,11 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 // ログイン画面が「Googleでログイン」ボタンを出してよいかを判断するための設定。認証不要
 app.get('/api/auth/config', (req, res) => {
-  res.json({ googleLogin: GOOGLE_LOGIN_ENABLED, passwordReset: mail.MAIL_ENABLED });
+  res.json({
+    googleLogin: GOOGLE_LOGIN_ENABLED,
+    passwordReset: mail.MAIL_ENABLED,
+    staffEmailDomain: STAFF_EMAIL_DOMAIN,
+  });
 });
 
 /* ---------- Googleでログイン（OpenID Connect） ----------
@@ -493,16 +490,36 @@ app.get('/api/auth/google/login', (req, res) => {
   res.redirect(google.getLoginAuthUrl());
 });
 
+/* スタッフ登録の入口。ドットから配布された @dot-jp.or.jp のGoogleアカウントで
+   本人確認してもらってから、氏名と所属支部を入力する画面に進む */
+app.get('/api/auth/staff-signup/google', (req, res) => {
+  if (!GOOGLE_LOGIN_ENABLED) return res.redirect('/staff?staff_error=disabled');
+  res.redirect(google.getLoginAuthUrl('staff'));
+});
+
 app.get('/api/auth/google/login/callback', async (req, res) => {
   if (!GOOGLE_LOGIN_ENABLED) return res.redirect('/?login_error=disabled');
   const { code, state, error } = req.query;
-  if (error) return res.redirect('/?login_error=cancelled');
-  if (!code || google.verifyState(state) !== 'login') return res.redirect('/?login_error=state');
+  const purpose = google.verifyState(state);
+  const isStaffSignup = purpose === 'staff';
+  const fail = (key) => res.redirect(isStaffSignup ? `/staff?staff_error=${key}` : `/?login_error=${key}`);
+  if (error) return fail('cancelled');
+  if (!code || (purpose !== 'login' && purpose !== 'staff')) return fail('state');
   try {
     const tokens = await google.exchangeLoginCode(code);
     const profile = google.parseIdToken(tokens.id_token);
     // 未確認のメールアドレスを信用すると、他人のメールを騙って既存アカウントを乗っ取れてしまう
-    if (!profile.emailVerified) return res.redirect('/?login_error=unverified');
+    if (!profile.emailVerified) return fail('unverified');
+
+    if (isStaffSignup) {
+      // ドットから配布されたアカウント以外はスタッフ登録できない
+      if (!profile.email.endsWith(`@${STAFF_EMAIL_DOMAIN}`)) return fail('domain');
+      const existing = (await findUserByGoogleSub(profile.sub)) || (await findUserByEmail(profile.email));
+      if (existing) return fail(existing.status === 'pending' ? 'already_pending' : 'already');
+      // 氏名と所属支部を入力してもらうため、確認済みの情報を署名付きで持ち回す
+      const t = google.signPayload({ email: profile.email, sub: profile.sub, name: profile.name, picture: profile.picture });
+      return res.redirect(`/staff?verified=${encodeURIComponent(t)}`);
+    }
 
     let user = await findUserByGoogleSub(profile.sub);
     if (!user) {
@@ -526,15 +543,53 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
       }
     }
 
-    if (user.status === 'pending') return res.redirect('/?login_error=pending');
-    if (user.status !== 'active') return res.redirect('/?login_error=inactive');
+    if (user.status === 'pending') return fail('pending');
+    if (user.status !== 'active') return fail('inactive');
 
     const token = await createSessionRow(user.id);
     res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
     res.redirect('/?login=google');
   } catch (e) {
     console.error('Googleログインに失敗しました', e);
-    res.redirect('/?login_error=failed');
+    return fail('failed');
+  }
+});
+
+/* スタッフ登録の完了。Googleで確認済みのメールアドレスに、氏名と所属支部を添えて申請する */
+app.post('/api/auth/staff-signup', async (req, res) => {
+  const { token, full_name, branch_id } = req.body || {};
+  const verified = google.verifyPayload(token);
+  if (!verified) {
+    return res.status(400).json({ error: '確認の有効期限が切れました。お手数ですが、最初からやり直してください。' });
+  }
+  if (!verified.email.endsWith(`@${STAFF_EMAIL_DOMAIN}`)) {
+    return res.status(403).json({ error: `${STAFF_EMAIL_DOMAIN} のアカウントでのみ登録できます` });
+  }
+  if (!full_name || !String(full_name).trim()) return res.status(400).json({ error: '氏名を入力してください' });
+  if (!branch_id) return res.status(400).json({ error: '所属支部を選択してください' });
+  try {
+    const obj = await readDB();
+    if (!(obj?.branches || []).some((b) => b.id === branch_id)) {
+      return res.status(400).json({ error: '選択された支部が存在しません' });
+    }
+    if ((await findUserByGoogleSub(verified.sub)) || (await findUserByEmail(verified.email))) {
+      return res.status(409).json({ error: 'このアカウントは既に登録されています' });
+    }
+    await insertUser({
+      email: verified.email,
+      passwordHash: '',
+      nickname: String(full_name).trim(),
+      role: 'staff',
+      branchId: branch_id,
+      // 管理者が確認してから使えるようにする
+      status: 'pending',
+      googleSub: verified.sub,
+      avatarUrl: verified.picture || null,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('スタッフ登録に失敗しました', e);
+    res.status(500).json({ error: '登録に失敗しました' });
   }
 });
 
@@ -681,11 +736,12 @@ async function findValidReset(token) {
   return row;
 }
 
-/* ---------- 管理者：スタッフ招待URL ---------- */
+/* ---------- 管理者：スタッフ登録URL ----------
+   秘密キー付きの招待URLは廃止。@dot-jp.or.jp のGoogleアカウントを持っている人だけが
+   登録できるため、URL自体は誰に知られても問題ない */
 app.get('/api/admin/staff-invite-url', requireAuth, requireAdmin, (req, res) => {
-  if (!STAFF_SIGNUP_SECRET) return res.status(500).json({ error: 'STAFF_SIGNUP_SECRETが未設定です' });
   const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-  res.json({ url: `${base}/?staff=${encodeURIComponent(STAFF_SIGNUP_SECRET)}` });
+  res.json({ url: `${base}/staff`, domain: STAFF_EMAIL_DOMAIN });
 });
 
 /* ---------- 管理者：ユーザー管理 ---------- */
@@ -943,12 +999,16 @@ const PUBLIC_FILES = {
   '/style.css': 'style.css',
   '/privacy.html': 'privacy.html',
   '/terms.html': 'terms.html',
+  // スタッフ登録ページ。中身はアプリ本体と同じHTMLで、URLを見て画面を切り替えている
+  '/staff': 'index.html',
   // Google Search Console のサイト所有権確認用。確認状態を保つため削除しないこと
   '/googlee6411894890471cb.html': 'googlee6411894890471cb.html',
 };
 app.get('*', (req, res) => {
   let p;
   try { p = decodeURIComponent(req.path); } catch (e) { p = req.path; }
+  // 末尾スラッシュ付きだと style.css の相対パスがずれるため、正規化してから配信する
+  if (p === '/staff/') return res.redirect(301, '/staff');
   const file = PUBLIC_FILES[p];
   if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');
   res.sendFile(path.join(PUBLIC_ROOT, file));

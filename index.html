@@ -246,9 +246,14 @@ function closeSheet(){document.getElementById('scrim').classList.remove('open');
    - 画面上半分：メールアドレス＋パスワード
    - 画面下半分：Googleでログイン（ソーシャルログイン）
    ========================================================= */
-let LOGIN_VIEW='login'; // 'login' | 'register-intern' | 'register-staff' | 'pending'
+// 'login' | 'register-intern' | 'forgot' | 'reset' | 'profile' | 'pending'
+// | 'staff-start' | 'staff-form' | 'staff-done'
+let LOGIN_VIEW='login';
 let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branchesから取得）
-let STAFF_INVITE_KEY=null; // URLの ?staff=<秘密キー> パラメータ
+/* スタッフ登録（/staff）で使う一時情報。Googleで確認できたメールアドレスと、
+   それを裏付ける署名付きトークンを保持する */
+let STAFF_SIGNUP={token:null,email:'',name:''};
+let STAFF_EMAIL_DOMAIN='dot-jp.or.jp'; // サーバー設定で上書きされる（/api/auth/config）
 let GOOGLE_LOGIN_AVAILABLE=false; // サーバー側でGoogleの資格情報が設定済みか（/api/auth/config）
 let PASSWORD_RESET_AVAILABLE=false; // サーバー側でメール送信が設定済みか（/api/auth/config）
 
@@ -305,20 +310,36 @@ function renderLogin(){
       <div class="field-err" id="regErr"></div>
       <button class="btn pri block" style="margin-top:20px" onclick="doRegisterIntern()">登録してはじめる</button>
       <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
-  }else if(LOGIN_VIEW==='register-staff'){
+  }else if(LOGIN_VIEW==='staff-start'){
+    // スタッフ登録の1画面目。ドット配布のGoogleアカウントで本人確認してもらう
     body.innerHTML=`
-      <p class="page-sub" style="margin-top:0">管理者からの招待リンクよりアクセスしています。登録後、管理者の承認をもってログインできるようになります。</p>
-      <label class="fl">メールアドレス<span class="req">*</span></label>
-      <input id="regsEmail" type="email" autocomplete="username">
-      <label class="fl">パスワード<span class="req">*</span></label>
-      <input id="regsPassword" type="password" autocomplete="new-password" placeholder="8文字以上">
-      <label class="fl">ニックネーム<span class="req">*</span></label>
-      <input id="regsNick" autocomplete="off">
-      <label class="fl">所属支部</label>
-      <select id="regsBranch">${branchOptions()}</select>
-      <div class="field-err" id="regsErr"></div>
-      <button class="btn pri block" style="margin-top:20px" onclick="doRegisterStaff()">申請する</button>
-      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
+      <h3 style="margin:0 0 6px;font-size:17px;text-align:center">スタッフ登録</h3>
+      <p class="page-sub" style="margin-top:0">ドットジェイピーから配布された <b>@${esc(STAFF_EMAIL_DOMAIN)}</b> のGoogleアカウントで登録できます。</p>
+      <div class="hint" style="margin-bottom:14px"><span>📋</span><span>登録に必要なのは、メールアドレス・所属支部・氏名の3つだけです。パスワードは設定しません。</span></div>
+      ${GOOGLE_LOGIN_AVAILABLE?`
+        <button class="btn social block" onclick="location.href='/api/auth/staff-signup/google'">
+          <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
+          <span class="social-label">Googleアカウントで続ける</span></button>
+        <p class="fine" style="margin-top:10px;text-align:center">アカウント選択画面で、<b>@${esc(STAFF_EMAIL_DOMAIN)}</b> のアカウントを選んでください。</p>`
+      :`<div class="hint mock"><span>⚠️</span><span>ただいまスタッフ登録を受け付けられません。管理者にお問い合わせください。</span></div>`}
+      <button class="btn ghost block" style="margin-top:14px" onclick="location.href='/'">‹ ログイン画面へ</button>`;
+  }else if(LOGIN_VIEW==='staff-form'){
+    // 2画面目。Googleで確認できたメールアドレスは変更させない
+    body.innerHTML=`
+      <h3 style="margin:0 0 6px;font-size:17px;text-align:center">スタッフ登録</h3>
+      <div class="hint" style="margin-bottom:6px"><span>✅</span><span>${esc(STAFF_SIGNUP.email)} を確認しました。</span></div>
+      <label class="fl">メールアドレス</label>
+      <input value="${esc(STAFF_SIGNUP.email)}" readonly style="background:var(--bg);color:var(--sub)">
+      <label class="fl">氏名（フルネーム）<span class="req">*</span></label>
+      <input id="ssName" autocomplete="name" placeholder="例：東 レアンドロ" value="${esc(STAFF_SIGNUP.name||'')}">
+      <label class="fl">所属支部<span class="req">*</span></label>
+      <select id="ssBranch">${branchOptions()}</select>
+      <div class="field-err" id="ssErr"></div>
+      <button class="btn pri block" style="margin-top:20px" id="ssBtn" onclick="doStaffSignup()">登録を申請する</button>
+      <p class="fine" style="margin-top:10px;text-align:center">申請後、管理者の承認をもってログインできるようになります。</p>`;
+  }else if(LOGIN_VIEW==='staff-done'){
+    body.innerHTML=`<div class="hint"><span>⏳</span><span>登録を申請しました。管理者の承認後、Googleでログインできるようになります。</span></div>
+      <button class="btn ghost block" style="margin-top:14px" onclick="location.href='/'">‹ ログイン画面へ</button>`;
   }else if(LOGIN_VIEW==='forgot'){
     body.innerHTML=`
       <p class="page-sub" style="margin-top:0">ご登録のメールアドレスに、パスワード再設定用のリンクをお送りします。</p>
@@ -349,7 +370,7 @@ function renderLogin(){
           <div class="signup-box">
             <p class="signup-title">アカウントをお持ちでない方</p>
             <button class="btn signup block" onclick="switchLoginView('register-intern')">メールアドレスで会員登録する</button>
-            ${STAFF_INVITE_KEY?`<button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('register-staff')">スタッフとして登録する</button>`:''}
+            <button class="btn ghost block" style="margin-top:8px" onclick="location.href='/staff'">スタッフの方はこちら</button>
           </div>
         </div>
         ${socialLoginBlock()}
@@ -493,21 +514,33 @@ async function doRegisterIntern(){
     await afterLogin();
   }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
 }
-async function doRegisterStaff(){
-  const email=document.getElementById('regsEmail').value.trim();
-  const password=document.getElementById('regsPassword').value;
-  const nickname=document.getElementById('regsNick').value.trim();
-  const branch_id=document.getElementById('regsBranch').value;
-  const err=document.getElementById('regsErr');
-  err.classList.remove('show');
-  if(!email||!password||!nickname){err.textContent='メールアドレス・パスワード・ニックネームは必須です';err.classList.add('show');return;}
-  if(password.length<8){err.textContent='パスワードは8文字以上で入力してください';err.classList.add('show');return;}
+/* 署名付きトークンから、画面に出すためのメールアドレスと氏名を取り出す。
+   ここでの読み取りは表示目的だけ。改ざんされていないかの確認は必ずサーバー側で行う */
+function readVerifiedToken(token){
   try{
-    const res=await fetch('/api/auth/register-staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,nickname,branch_id,inviteKey:STAFF_INVITE_KEY})});
+    const b64=String(token).split('.')[0];
+    const json=decodeURIComponent(escape(atob(b64.replace(/-/g,'+').replace(/_/g,'/'))));
+    const claims=JSON.parse(json);
+    return claims.email?claims:null;
+  }catch(e){return null;}
+}
+async function doStaffSignup(){
+  const full_name=document.getElementById('ssName').value.trim();
+  const branch_id=document.getElementById('ssBranch').value;
+  const err=document.getElementById('ssErr');
+  const btn=document.getElementById('ssBtn');
+  err.classList.remove('show');
+  const fail=m=>{err.textContent=m;err.classList.add('show');btn.disabled=false;btn.textContent='登録を申請する';};
+  if(!full_name)return fail('氏名を入力してください');
+  if(!branch_id)return fail('所属支部を選択してください');
+  btn.disabled=true;btn.textContent='送信中…';
+  try{
+    const res=await fetch('/api/auth/staff-signup',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:STAFF_SIGNUP.token,full_name,branch_id})});
     const data=await res.json();
-    if(!res.ok){err.textContent=data.error||'登録に失敗しました';err.classList.add('show');return;}
-    switchLoginView('pending');
-  }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
+    if(!res.ok)return fail(data.error||'登録に失敗しました');
+    switchLoginView('staff-done');
+  }catch(e){fail('通信に失敗しました。時間をおいて再度お試しください。');}
 }
 async function afterLogin(){
   const meRes=await fetch('/api/auth/me');
@@ -724,8 +757,8 @@ function openSystemSettings(){
       <dt>登録ユーザー</dt><dd>${(DB.users||[]).length}人</dd>
     </dl>
     <div style="margin-top:18px">
-      <div style="font-weight:600;margin-bottom:6px">スタッフ招待URL</div>
-      <div class="page-sub" style="margin-bottom:8px">新しいスタッフにこのURLを共有すると、登録フォームが開きます（登録後は管理者の承認が必要です）</div>
+      <div style="font-weight:600;margin-bottom:6px">スタッフ登録URL</div>
+      <div class="page-sub" style="margin-bottom:8px">新しいスタッフにこのURLを共有してください。ドットから配布された @${esc(STAFF_EMAIL_DOMAIN)} のGoogleアカウントを持つ方だけが登録でき、申請後は管理者の承認が必要です。</div>
       <div id="staffInviteUrlBox" class="hint" style="flex-direction:column;align-items:stretch">読み込み中…</div>
     </div>`);
   loadStaffInviteUrl();
@@ -1863,7 +1896,19 @@ function openMailDetail(id){
    ========================================================= */
 (async()=>{
   const params=new URLSearchParams(location.search);
-  STAFF_INVITE_KEY=params.get('staff');
+  const isStaffPage=location.pathname==='/staff';
+
+  // スタッフ登録でつまずいたときの案内（?staff_error=xxx）
+  const STAFF_ERR_MSG={
+    disabled:'ただいまスタッフ登録を受け付けられません。管理者にお問い合わせください。',
+    cancelled:'登録がキャンセルされました。',
+    state:'有効期限が切れました。もう一度お試しください。',
+    unverified:'このGoogleアカウントはメールアドレスが未確認のため利用できません。',
+    domain:'ドットジェイピーから配布されたアカウントで登録してください。',
+    already:'このアカウントは既に登録されています。ログイン画面からお進みください。',
+    already_pending:'既に申請済みです。管理者の承認をお待ちください。',
+    failed:'登録に失敗しました。時間をおいて再度お試しください。',
+  };
 
   // Googleログインに失敗して戻ってきた場合の案内（?login_error=xxx）
   const LOGIN_ERR_MSG={
@@ -1884,8 +1929,35 @@ function openMailDetail(id){
         const cfg=await cRes.json();
         GOOGLE_LOGIN_AVAILABLE=!!cfg.googleLogin;
         PASSWORD_RESET_AVAILABLE=!!cfg.passwordReset;
+        STAFF_EMAIL_DOMAIN=cfg.staffEmailDomain||STAFF_EMAIL_DOMAIN;
       }
     }catch(e){/* 取得できないときはボタンを出さない */}
+
+    // スタッフ登録ページ（/staff）は、ログイン状態に関わらず専用画面を出す
+    if(isStaffPage){
+      try{
+        const bRes=await fetch('/api/branches');
+        if(bRes.ok){LOGIN_BRANCHES=(await bRes.json()).branches||[];}
+      }catch(e){/* 支部が取れないときは空のまま表示する */}
+      const verified=params.get('verified');
+      const staffErr=params.get('staff_error');
+      history.replaceState(null,'','/staff');
+      if(verified){
+        const claims=readVerifiedToken(verified);
+        if(claims){
+          STAFF_SIGNUP={token:verified,email:claims.email,name:claims.name||''};
+          LOGIN_VIEW='staff-form';
+        }else{
+          LOGIN_VIEW='staff-start';
+          toast('有効期限が切れました。もう一度お試しください');
+        }
+      }else{
+        LOGIN_VIEW='staff-start';
+      }
+      renderLogin();
+      if(staffErr)toast(STAFF_ERR_MSG[staffErr]||'登録に失敗しました');
+      return;
+    }
 
     // メールのリンクから来た場合は、ログイン状態を見る前に再設定画面を出す
     const resetToken=params.get('reset');

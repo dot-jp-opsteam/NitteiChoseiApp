@@ -103,7 +103,9 @@ async function exchangeCode(code) {
 
 /* ---------- Googleでログイン（OpenID Connect） ----------
    カレンダー連携とは別物。カレンダーの権限は要求せず、本人確認（メール・氏名）だけを取得する */
-function getLoginAuthUrl() {
+/* purpose は 'login'（通常のログイン）か 'staff'（スタッフ登録）。
+   戻ってきたときに state から用途を判別して処理を分ける */
+function getLoginAuthUrl(purpose = 'login') {
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: loginRedirectUri(),
@@ -111,9 +113,31 @@ function getLoginAuthUrl() {
     scope: LOGIN_SCOPE,
     // 毎回アカウント選択画面を出す（共用端末で前の人のアカウントに入ってしまうのを防ぐ）
     prompt: 'select_account',
-    state: signState('login'),
+    state: signState(purpose),
   });
   return `${AUTH_URL}?${params.toString()}`;
+}
+
+/* Googleで本人確認が済んだ情報を、フォーム送信まで一時的に持ち回すための署名付きトークン。
+   DBに書かずに済ませるため、内容をHMACで署名してURLに載せる。改ざんすると検証に失敗する */
+function signPayload(obj) {
+  const b64 = Buffer.from(JSON.stringify({ ...obj, ts: Date.now() }), 'utf8').toString('base64url');
+  const sig = crypto.createHmac('sha256', TOKEN_ENCRYPTION_KEY).update(b64).digest('base64url');
+  return `${b64}.${sig}`;
+}
+function verifyPayload(token, maxAgeMs = 30 * 60 * 1000) {
+  const [b64, sig] = String(token || '').split('.');
+  if (!b64 || !sig) return null;
+  const expected = crypto.createHmac('sha256', TOKEN_ENCRYPTION_KEY).update(b64).digest('base64url');
+  if (sig.length !== expected.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
+    if (!payload.ts || Date.now() - payload.ts > maxAgeMs) return null; // 古いものは受け付けない
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 async function exchangeLoginCode(code) {
@@ -257,6 +281,7 @@ module.exports = {
   encrypt, decrypt,
   getAuthUrl, verifyState, exchangeCode, refreshAccessToken, getValidAccessToken,
   getLoginAuthUrl, exchangeLoginCode, parseIdToken, loginRedirectUri,
+  signPayload, verifyPayload,
   startWatch, stopWatch, listChangedEvents,
   createEvent, updateEvent, deleteEvent,
 };
