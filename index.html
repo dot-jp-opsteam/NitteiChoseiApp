@@ -266,11 +266,13 @@ function socialLoginBlock(){
   return `
     <div class="login-col social-col">
       <h3 class="col-title">外部IDでログイン</h3>
-      <button class="btn social block" onclick="goGoogleLogin()">
-        <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
-        <span class="social-label">Googleでログイン</span>
-      </button>
-      <p class="fine social-note">パスワードの入力は不要です。<br>普段お使いのGoogleアカウントでそのまま始められます。</p>
+      <div class="social-box">
+        <button class="btn social block" onclick="goGoogleLogin()">
+          <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
+          <span class="social-label">Googleでログイン</span>
+        </button>
+        <p class="fine social-note">パスワードの入力は不要です。<br>普段お使いのGoogleアカウントで<br>そのまま始められます。</p>
+      </div>
     </div>`;
 }
 function goGoogleLogin(){location.href='/api/auth/google/login';}

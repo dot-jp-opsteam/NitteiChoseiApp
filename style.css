@@ -203,10 +203,12 @@
   /* ---------- ログイン画面の2カラム構成 ---------- */
   /* 左（PC）＝メールアドレスでログイン／右（PC）＝外部IDでログイン。
      スマホでは1カラムに畳まれ、メールが上・外部IDが下に並ぶ */
-  .login-card.wide{max-width:860px}
-  .login-cols{display:grid;grid-template-columns:1fr;gap:26px}
+  .login-card.wide{max-width:820px}
+  .login-cols{display:grid;grid-template-columns:1fr;gap:24px}
+  /* 2カラムにするのは「外部IDでログイン」が実際に表示されるとき（.wide）だけ。
+     ここを .login-cols 全体にかけると、外部IDが無いときに左半分だけ使う細長い見た目になる */
   @media(min-width:760px){
-    .login-cols{grid-template-columns:1.05fr .95fr;gap:34px;align-items:start}
+    .login-card.wide .login-cols{grid-template-columns:1fr 1fr;gap:32px;align-items:stretch}
   }
   .col-title{margin:0 0 14px;font-size:15px;font-weight:700;color:var(--ink);text-align:center}
   /* 入力欄のかたまりを薄いパネルで囲み、右カラムのボタン群と対になるようにする */
@@ -222,7 +224,10 @@
 
   /* ---------- 外部IDでログイン ---------- */
   .social-col{display:flex;flex-direction:column}
-  .social-note{text-align:center;margin-top:12px}
+  /* 左のパネルと同じ見た目の箱に入れ、中身を上下中央に置いて左右の重さを揃える */
+  .social-box{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:14px;
+    padding:18px 16px;display:flex;flex-direction:column;justify-content:center}
+  .social-note{text-align:center;margin-top:14px}
   /* Googleブランドガイドラインに沿って白地＋公式ロゴ。左のロゴ枠は見本デザインに合わせたもの */
   .btn.social{display:flex;align-items:center;gap:0;padding:0;height:48px;
     background:#fff;border:1px solid #dadce0;color:#3c4043;font-weight:700;overflow:hidden}
