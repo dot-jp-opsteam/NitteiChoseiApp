@@ -482,9 +482,23 @@ async function syncInterviewsToGoogle(oldDB, newBody, users) {
    「変更内容の検証（validateDiff）」の3段構えで制限する。
    ========================================================= */
 
+/* 予定のうち、その人が見てよいものだけ。
+   visibility が 'private' のものは作成者本人にしか見せない（全体管理者にも見せない）。
+   visibility が無いのはこの仕組みを入れる前の古いレコードで、
+   これまでどおり支部で共有しているものとして扱う */
+function visibleEventsFor(obj, user) {
+  return (obj.events || []).filter((e) => (e.visibility === 'private'
+    ? e.creator_id === user.id
+    : user.role === 'admin' || e.branch_id === user.branch_id));
+}
+
 /* その人が見てよいデータだけに絞り込む */
 function scopeDBForUser(obj, user, users) {
-  if (user.role === 'admin') return obj;
+  const events = visibleEventsFor(obj, user);
+  const eventIds = new Set(events.map((e) => e.id));
+  const event_responses = (obj.event_responses || []).filter((r) => eventIds.has(r.event_id));
+  // 全体管理者でも、他の人の「自分だけ」の予定は見えない
+  if (user.role === 'admin') return { ...obj, events, event_responses };
   const branchId = user.branch_id;
   const isIntern = user.role === 'intern';
   const userById = new Map(users.map((u) => [u.id, u]));
@@ -495,9 +509,6 @@ function scopeDBForUser(obj, user, users) {
 
   const interviews = (obj.interviews || []).filter((iv) =>
     isIntern ? iv.intern_id === user.id : (iv.staff_id === user.id || inBranch(iv.intern_id)));
-  const events = (obj.events || []).filter((e) => e.branch_id === branchId);
-  const eventIds = new Set(events.map((e) => e.id));
-  const event_responses = (obj.event_responses || []).filter((r) => eventIds.has(r.event_id));
   // メールは当事者だけ。以前は全員が全員分の本文を読めていた
   const emails = (obj.emails || []).filter((m) => m.receiver_id === user.id || m.sender_id === user.id);
   // branch_id を持たない通知は、この仕組みを入れる前の古いレコード
@@ -524,13 +535,22 @@ function scopeDBForUser(obj, user, users) {
    その人には見えていなかった分を元のデータから戻して1つに合成する。
    これをしないと、見えていないデータが保存のたびに消えてしまう */
 function mergeScoped(oldDB, clientDB, user, users) {
-  if (user.role === 'admin') return { ...clientDB, emails: oldDB.emails || [] };
+  const isAdmin = user.role === 'admin';
   const visible = scopeDBForUser(oldDB, user, users);
-  const merged = { ...oldDB };
-  for (const key of ['interviews', 'events', 'event_responses', 'notifications']) {
+  const merged = isAdmin ? { ...clientDB } : { ...oldDB };
+  /* 全体管理者に見えていないのは他の人の「自分だけ」の予定だけなので、
+     そこだけ戻せばよい。戻さないと、管理者が保存するたびに消えてしまう */
+  const keys = isAdmin
+    ? ['events', 'event_responses']
+    : ['interviews', 'events', 'event_responses', 'notifications'];
+  for (const key of keys) {
     const visibleIds = new Set((visible[key] || []).map((x) => x.id));
     const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
     merged[key] = [...hidden, ...(clientDB[key] || [])];
+  }
+  if (isAdmin) {
+    merged.emails = oldDB.emails || [];
+    return merged;
   }
   merged.branches = clientDB.branches || oldDB.branches || [];
   // メール履歴はサーバー（POST /api/mail/send）だけが書き込む
@@ -594,12 +614,15 @@ function validateDiff(oldDB, newDB, actor, users) {
   const newEv = byId(newDB.events);
   for (const [id, ev] of newEv) {
     const prev = oldEv.get(id);
+    // 「自分だけ」の予定は本人しか見られないので、インターン生にも作らせてよい
+    const isPrivate = ev.visibility === 'private';
     if (!prev) {
-      if (actor.role === 'intern') errs.push('イベントを作成する権限がありません');
-      else if (!isAdmin && ev.branch_id !== actor.branch_id) errs.push('他の支部のイベントは作成できません');
+      if (actor.role === 'intern' && !isPrivate) errs.push('インターン生が作れるのは「自分だけ」の予定だけです');
+      else if (!isAdmin && !isPrivate && ev.branch_id !== actor.branch_id) errs.push('他の支部のイベントは作成できません');
       else if (ev.creator_id !== actor.id) errs.push('作成者が不正です');
     } else if (!sameJSON(prev, ev)) {
       if (!isAdmin && prev.creator_id !== actor.id) errs.push('このイベントを編集する権限がありません');
+      else if (actor.role === 'intern' && !isPrivate) errs.push('インターン生が作れるのは「自分だけ」の予定だけです');
     }
   }
   const removedEventIds = new Set([...oldEv.keys()].filter((id) => !newEv.has(id)));

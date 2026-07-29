@@ -1583,11 +1583,13 @@ function eventCard(ev){
   const c={ok:0,may:0,no:0};resp.forEach(r=>c[r.response]++);
   const total=c.ok+c.may+c.no||1;
   const mine=resp.find(r=>r.user_id===ME.id);
+  // 自分だけの予定は、出欠を取る相手がいないので回答欄を出さない
+  const isPrivate=ev.visibility==='private';
   return `<div class="card"><div class="cb">
       <div style="display:flex;align-items:center;gap:8px">
         <span class="legend-dot" style="background:${ev.color||EVENT_COLORS[0].v};margin-right:0"></span>
         <b style="font-size:16px">${esc(ev.title)}</b>
-        <span class="tag" style="margin-left:auto">${branchName(ev.branch_id)}</span>
+        <span class="tag" style="margin-left:auto">${isPrivate?'🔒 自分だけ':branchName(ev.branch_id)}</span>
       </div>
       <div class="meta" style="margin-top:6px">
         <span>🗓 <b>${fmtDT(ev.start_datetime)}</b> 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}</span>
@@ -1596,6 +1598,7 @@ function eventCard(ev){
       ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
       ${(ev.meet_url||ev.zoom_url)?`<div class="meta" style="margin-top:6px">${ev.meet_url?`<span>🔗 <a href="${esc(ev.meet_url)}" target="_blank" rel="noopener">Meet</a></span>`:''}${ev.zoom_url?`<span>🔗 <a href="${esc(ev.zoom_url)}" target="_blank" rel="noopener">Zoom</a></span>`:''}</div>`:''}
 
+      ${isPrivate?'':`
       <div class="votebar">
         <i class="vb-ok" style="width:${c.ok/total*100}%"></i>
         <i class="vb-may" style="width:${c.may/total*100}%"></i>
@@ -1609,10 +1612,10 @@ function eventCard(ev){
         <div class="v ${mine?.response==='ok'?'on-ok':''}" onclick="vote('${ev.id}','ok')"><span class="em">○</span>参加</div>
         <div class="v ${mine?.response==='may'?'on-may':''}" onclick="vote('${ev.id}','may')"><span class="em">△</span>未定</div>
         <div class="v ${mine?.response==='no'?'on-no':''}" onclick="vote('${ev.id}','no')"><span class="em">×</span>不参加</div>
-      </div>
-      ${ME.role!=='intern'?`
+      </div>`}
+      ${(ME.role==='admin'||ev.creator_id===ME.id||(!isPrivate&&ME.role!=='intern'))?`
         <div class="btn-row" style="margin-top:10px">
-          <button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>
+          ${isPrivate?'':`<button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>`}
           ${(ME.role==='admin'||ev.creator_id===ME.id)?`<button class="btn sm" onclick="openEventForm('${ev.id}')">編集</button>
           <button class="btn sm bad" onclick="deleteEvent('${ev.id}')">削除</button>`:''}
         </div>`:''}
@@ -1633,9 +1636,9 @@ function ivLabel(iv){const intern=findUser(iv.intern_id),staff=findUser(iv.staff
 function eventsSection(){
   if(!calYM){const t=new Date();calYM={y:t.getFullYear(),m:t.getMonth()};}
   let list=DB.events.slice();
-  if(ME.role!=='admin')list=list.filter(e=>e.branch_id===ME.branch_id);
+  // 自分だけの予定は、どの支部の絞り込みでも自分には見えるようにする
+  if(ME.role!=='admin')list=list.filter(e=>e.branch_id===ME.branch_id||e.creator_id===ME.id);
   const ivs=myInterviewsForCal();
-  const canCreate=ME.role!=='intern';
   const {y,m}=calYM;
   const evByDay={},ivByDay={};
   list.forEach(e=>{const k=ymd(new Date(e.start_datetime));(evByDay[k]=evByDay[k]||[]).push(e);});
@@ -1664,9 +1667,10 @@ function eventsSection(){
         const showN=has>3?2:has;
         const shown=items.slice(0,showN).map(it=>`<span class="chip" style="background:${chipBg(it.color)};color:${chipFg(it.color)}">${esc(it.label)}</span>`).join('');
         const more=has>showN?`<span class="chipmore">+${has-showN}</span>`:'';
-        chipsHtml=`<div class="chips">${shown}${more}</div>`;
+        // 予定そのものを押したときは作成フォームではなく、その日の一覧を開く
+        chipsHtml=`<div class="chips" onclick="event.stopPropagation();calSelect('${key}')">${shown}${more}</div>`;
       }
-      cells+=`<div class="${cls}"${hol?` title="${esc(hol)}"`:''} ${has?`onclick="calSelect('${key}')"`:''}><span class="dn">${d}</span>${chipsHtml}</div>`;
+      cells+=`<div class="${cls} add"${hol?` title="${esc(hol)}"`:''} onclick="openEventForm(null,'${key}')"><span class="dn">${d}</span>${chipsHtml}</div>`;
     }
     const trail=(7-(startDow+daysInMonth)%7)%7;
     for(let i=1;i<=trail;i++)cells+=`<div class="calcell out"></div>`;
@@ -1707,8 +1711,8 @@ function eventsSection(){
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div></div>
-    <p class="page-sub" style="margin-top:-2px">イベント（作成時に選んだ色）と確定面談（紫）を表示。下で各イベントの出欠を回答できます。</p>
-    ${canCreate?`<button class="btn pri block" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しいイベントを作成</button>`:''}
+    <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定を追加できます。予定の帯をクリックすると、その日の一覧が下に出ます。</p>
+    <button class="btn pri block" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しい予定を作成</button>
     ${cal}
     <div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
     ${cards}`;
@@ -1755,22 +1759,35 @@ function openEventResponders(evId){
     :'<div class="empty">まだ回答がありません</div>';
   openSheet(`<h3>回答者一覧</h3><div class="card"><div class="rowlist">${rows}</div></div>`);
 }
-function openEventForm(id){
+/* dateKey（'2026-07-15'）を渡すと、その日の9:00を初期値にして開く。
+   カレンダーの日付を直接クリックしたときに使う */
+function openEventForm(id,dateKey){
   const ev=id?DB.events.find(e=>e.id===id):null;
   const bopts=DB.branches.map(b=>`<option value="${b.id}" ${ev?.branch_id===b.id||(!ev&&b.id===ME.branch_id)?'selected':''}>${esc(b.name)}</option>`).join('');
-  openSheet(`<h3>${ev?'イベントを編集':'イベントを作成'}</h3>
-    <label class="fl">イベント名<span class="req">*</span></label>
+  // 新規は「自分だけ」を既定にする。古い予定は visibility が無いので支部共有として扱う
+  const vis=ev?(ev.visibility==='private'?'private':'branch'):'private';
+  const startVal=ev?toInputDT(ev.start_datetime):(dateKey?dateKey+'T09:00':'');
+  const canShare=ME.role!=='intern';
+  openSheet(`<h3>${ev?'予定を編集':'予定を作成'}</h3>
+    <label class="fl">予定の名前<span class="req">*</span></label>
     <input id="evTitle" value="${esc(ev?.title||'')}"><div class="field-err" id="evTitleE"></div>
     <label class="fl">説明</label>
     <textarea id="evDesc">${esc(ev?.description||'')}</textarea>
     <label class="fl">開催日時<span class="req">*</span></label>
-    <input type="datetime-local" id="evStart" value="${toInputDT(ev?.start_datetime)}"><div class="field-err" id="evStartE"></div>
+    <input type="datetime-local" id="evStart" value="${startVal}"><div class="field-err" id="evStartE"></div>
     <label class="fl">終了日時</label>
     <input type="datetime-local" id="evEnd" value="${toInputDT(ev?.end_datetime)}">
     <label class="fl">開催場所</label>
     <input id="evLoc" value="${esc(ev?.location||'')}" placeholder="例：水戸市民会館／オンライン">
+    <label class="fl">この予定を見られる人</label>
+    ${canShare?`<select id="evVis" onchange="toggleEvBranch()">
+      <option value="private" ${vis==='private'?'selected':''}>自分だけ</option>
+      <option value="branch" ${vis==='branch'?'selected':''}>支部の全員（出欠を取る）</option>
+    </select>`:`<input id="evVis" type="hidden" value="private">
+    <p class="page-sub" style="margin-top:4px">あなたが入れた予定は、ほかの人には見えません。</p>`}
+    <div id="evBranchWrap" style="display:${canShare&&vis==='branch'?'':'none'}">
     <label class="fl">対象支部</label>
-    <select id="evBranch">${bopts}</select>
+    <select id="evBranch">${bopts}</select></div>
     <label class="fl">カレンダーの色</label>
     <div class="colorpick" id="evColorPick">${EVENT_COLORS.map(c=>`<span class="cdot${c.v===(ev?.color||EVENT_COLORS[0].v)?' on':''}" style="background:${c.v}" data-c="${c.v}" title="${c.n}" onclick="pickEvColor('${c.v}')"></span>`).join('')}</div>
     <input type="hidden" id="evColor" value="${esc(ev?.color||EVENT_COLORS[0].v)}">
@@ -1784,6 +1801,11 @@ function pickEvColor(v){
   document.getElementById('evColor').value=v;
   document.querySelectorAll('#evColorPick .cdot').forEach(el=>el.classList.toggle('on',el.dataset.c===v));
 }
+// 対象支部は、支部の全員に共有するときだけ意味があるので、そのときだけ見せる
+function toggleEvBranch(){
+  const wrap=document.getElementById('evBranchWrap');
+  if(wrap)wrap.style.display=document.getElementById('evVis').value==='branch'?'':'none';
+}
 async function saveEvent(id){
   const title=document.getElementById('evTitle').value.trim();
   const start=document.getElementById('evStart').value;
@@ -1793,11 +1815,13 @@ async function saveEvent(id){
   if(!title){te.textContent='イベント名は必須です';te.classList.add('show');valid=false;}
   if(!start){se.textContent='開催日時は必須です';se.classList.add('show');valid=false;}
   if(!valid)return;
+  const visibility=document.getElementById('evVis').value==='branch'?'branch':'private';
   const data={title,description:document.getElementById('evDesc').value.trim(),
     start_datetime:new Date(start).toISOString(),
     end_datetime:document.getElementById('evEnd').value?new Date(document.getElementById('evEnd').value).toISOString():new Date(start).toISOString(),
     location:document.getElementById('evLoc').value.trim(),
     branch_id:document.getElementById('evBranch').value,
+    visibility,
     color:document.getElementById('evColor').value||EVENT_COLORS[0].v,
     meet_url:document.getElementById('evMeet').value.trim(),
     zoom_url:document.getElementById('evZoom').value.trim()};
@@ -1808,7 +1832,8 @@ async function saveEvent(id){
       if(ev)Object.assign(ev,data);
     }else{
       db.events.push({id:newId,creator_id:ME.id,...data});
-      pushNotification(db,'イベント作成',`「${title}」が作成されました`);
+      // 自分だけの予定を支部の全員に知らせても仕方がないので、共有するときだけ通知する
+      if(visibility==='branch')pushNotification(db,'イベント作成',`「${title}」が作成されました`);
     }
   });
   if(!ok)return;
