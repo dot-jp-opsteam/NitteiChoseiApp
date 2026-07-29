@@ -1030,10 +1030,10 @@ function hexgrid(items){
   const cols=Math.max(top,1);
   const row1=items.slice(0,top).join('');
   const row2=items.slice(top).join('');
-  return `<div class="hexgrid" style="--cols:${cols};--off:${row2?'.5':'0'}">
+  return `<div class="hexwrap"><div class="hexgrid" style="--cols:${cols};--off:${row2?'.5':'0'}">
     <div class="hexrow">${row1}</div>
     ${row2?`<div class="hexrow off">${row2}</div>`:''}
-  </div>`;
+  </div></div>`;
 }
 
 function viewHome(){
