@@ -122,10 +122,11 @@ async function initDB() {
       updated_at TEXT NOT NULL
     )
   `);
-  // 既存DBへの追加カラム（Googleでログイン用）。既に存在する場合のエラーは無視する
+  // 既存DBへの追加カラム。既に存在する場合のエラーは無視する
   for (const ddl of [
-    'ALTER TABLE users ADD COLUMN google_sub TEXT',
-    'ALTER TABLE users ADD COLUMN avatar_url TEXT',
+    'ALTER TABLE users ADD COLUMN google_sub TEXT',   // Googleでログイン用
+    'ALTER TABLE users ADD COLUMN avatar_url TEXT',   // Googleでログイン用
+    'ALTER TABLE users ADD COLUMN staff_id TEXT',     // インターン生の担当スタッフ
   ]) {
     try {
       await client.execute(ddl);
@@ -177,6 +178,8 @@ function toPublicUser(row) {
     branch_id: row.branch_id, status: row.status,
     created_at: row.created_at, approved_at: row.approved_at,
     avatar_url: row.avatar_url || null,
+    // インターン生の担当スタッフ。未設定なら null
+    staff_id: row.staff_id || null,
     // Googleでログインしたばかりで所属支部が未設定のとき、フロント側で初回設定画面を出すための目印。
     // 管理者は特定の支部に属さない運用のため対象外
     needs_profile: row.role !== 'admin' && !row.branch_id,
@@ -207,23 +210,28 @@ async function listActiveUsers() {
   const rs = await client.execute({ sql: "SELECT * FROM users WHERE status = 'active'" });
   return rs.rows.map(toPublicUser);
 }
-async function insertUser({ email, passwordHash, nickname, role, branchId, status, googleSub, avatarUrl }) {
+async function insertUser({ email, passwordHash, nickname, role, branchId, status, googleSub, avatarUrl, staffId }) {
   const id = 'u_' + crypto.randomBytes(6).toString('hex');
   await client.execute({
-    sql: `INSERT INTO users (id, email, password_hash, nickname, role, branch_id, status, created_at, google_sub, avatar_url)
-          VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    sql: `INSERT INTO users (id, email, password_hash, nickname, role, branch_id, status, created_at, google_sub, avatar_url, staff_id)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     // Googleでログインしたユーザーはパスワードを持たない。空文字は verifyPassword が必ず false を返すため、
     // パスワードログインの経路からは入れない
     args: [id, String(email).toLowerCase(), passwordHash || '', nickname, role, branchId || null, status,
-      new Date().toISOString(), googleSub || null, avatarUrl || null],
+      new Date().toISOString(), googleSub || null, avatarUrl || null, staffId || null],
   });
   return findUserById(id);
 }
-async function updateUserRow(id, { nickname, branchId, role }) {
+/* staffId は「渡されたときだけ」書き換える。
+   undefined と null を区別しないと、担当を触らない更新のたびに消えてしまう */
+async function updateUserRow(id, { nickname, branchId, role, staffId }) {
   await client.execute({
     sql: 'UPDATE users SET nickname=?, branch_id=?, role=? WHERE id=?',
     args: [nickname, branchId || null, role, id],
   });
+  if (staffId !== undefined) {
+    await client.execute({ sql: 'UPDATE users SET staff_id=? WHERE id=?', args: [staffId || null, id] });
+  }
 }
 async function deleteUserRow(id) {
   await client.execute({ sql: 'DELETE FROM users WHERE id=?', args: [id] });
@@ -687,15 +695,71 @@ app.get('/api/branches', async (req, res) => {
 });
 
 /* ---------- 認証 ---------- */
+/* 担当スタッフに選べる人だけを返す。ログイン前の登録画面から呼ぶので認証は不要。
+   返すのは id と表示名だけで、メールアドレスなどは含めない。
+   支部の指定は必須にして、全支部の一覧をまとめて取り出せないようにしている */
+app.get('/api/auth/staff-options', async (req, res) => {
+  const branchId = req.query.branch;
+  if (!branchId) return res.json({ staff: [] });
+  try {
+    const rs = await client.execute({
+      sql: `SELECT id, nickname FROM users
+            WHERE status = 'active' AND branch_id = ? AND role IN ('staff','branch_admin')
+            ORDER BY nickname`,
+      args: [String(branchId)],
+    });
+    res.json({ staff: rs.rows.map((r) => ({ id: r.id, nickname: r.nickname })) });
+  } catch (e) {
+    console.error('担当スタッフ候補の取得に失敗しました', e);
+    res.status(500).json({ error: '取得に失敗しました' });
+  }
+});
+
+/* 招待URL（?staff=xxx）を開いたときに、誰の紹介かを表示するために引く。
+   見つからないときもエラーにせず空で返し、登録自体は続けられるようにする */
+app.get('/api/auth/invite', async (req, res) => {
+  const staffId = req.query.staff;
+  if (!staffId) return res.json({ staff: null });
+  try {
+    const rs = await client.execute({
+      sql: `SELECT id, nickname, branch_id FROM users
+            WHERE id = ? AND status = 'active' AND role IN ('staff','branch_admin')`,
+      args: [String(staffId)],
+    });
+    const r = rs.rows[0];
+    res.json({ staff: r ? { id: r.id, nickname: r.nickname, branch_id: r.branch_id } : null });
+  } catch (e) {
+    console.error('招待リンクの確認に失敗しました', e);
+    res.status(500).json({ error: '取得に失敗しました' });
+  }
+});
+
+/* 担当スタッフとして指定してよい相手かを確かめる。
+   でたらめなIDや、他支部の人・インターン生が入るのを防ぐ */
+async function validStaffIdFor(staffId, branchId) {
+  if (!staffId) return null;
+  const rs = await client.execute({
+    sql: `SELECT id, branch_id FROM users
+          WHERE id = ? AND status = 'active' AND role IN ('staff','branch_admin')`,
+    args: [String(staffId)],
+  });
+  const row = rs.rows[0];
+  if (!row) return null;
+  if (branchId && row.branch_id && row.branch_id !== branchId) return null;
+  return row.id;
+}
+
 app.post('/api/auth/register-intern', async (req, res) => {
-  const { email, password, nickname, branch_id } = req.body || {};
+  const { email, password, nickname, branch_id, staff_id } = req.body || {};
   if (!email || !password || !nickname) return res.status(400).json({ error: 'email・password・nicknameは必須です' });
   if (String(password).length < 8) return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
   try {
     const existing = await findUserByEmail(email);
     if (existing) return res.status(409).json({ error: 'このメールアドレスは既に登録されています' });
     const passwordHash = await auth.hashPassword(password);
-    const user = await insertUser({ email, passwordHash, nickname, role: 'intern', branchId: branch_id, status: 'active' });
+    // 担当スタッフは任意。指定が不正なら黙って未設定にする（登録自体は通す）
+    const staffId = await validStaffIdFor(staff_id, branch_id);
+    const user = await insertUser({ email, passwordHash, nickname, role: 'intern', branchId: branch_id, status: 'active', staffId });
     // 登録直後はそのタブ限りのログイン。自動ログインはログイン画面のチェックで選んでもらう
     const token = await createSessionRow(user.id, false);
     res.json({ ok: true, token, user: toPublicUser(user) });
@@ -1045,9 +1109,22 @@ app.get('/api/admin/staff-invite-url', requireAuth, requireBranchAdmin, (req, re
   res.json({ url: `${base}/staff`, domain: STAFF_EMAIL_DOMAIN });
 });
 
+/* ---------- スタッフ：インターン生を招くURL ----------
+   自分のIDを付けただけのURL。開いた学生が会員登録に進むと、
+   担当スタッフの欄にこの人が入る。秘密の値ではないので期限も持たせない
+   （このURLが無くても、これまでどおり誰でもインターン生登録はできる） */
+app.get('/api/staff/intern-invite-url', requireAuth, (req, res) => {
+  const me = req.authUser;
+  if (!['staff', 'branch_admin', 'admin'].includes(me.role)) {
+    return res.status(403).json({ error: 'インターン生を招けるのはスタッフだけです' });
+  }
+  const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  res.json({ url: `${base}/?staff=${encodeURIComponent(me.id)}`, nickname: me.nickname });
+});
+
 /* ---------- 管理者：ユーザー管理 ---------- */
 app.patch('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, res) => {
-  const { nickname, branch_id, role } = req.body || {};
+  const { nickname, branch_id, role, staff_id } = req.body || {};
   if (!nickname || !['intern', 'staff', 'branch_admin', 'admin'].includes(role)) {
     return res.status(400).json({ error: 'nickname・roleは必須です' });
   }
@@ -1064,11 +1141,37 @@ app.patch('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, r
         return res.status(403).json({ error: '他の支部へは移動できません' });
       }
     }
-    await updateUserRow(req.params.id, { nickname, branchId: branch_id, role });
+    /* 担当スタッフはインターン生にだけ意味がある。
+       staff_id が送られてこなかったときは今の値のままにする（undefined を渡す） */
+    let staffId;
+    if (staff_id !== undefined) {
+      staffId = role === 'intern' ? await validStaffIdFor(staff_id, branch_id) : null;
+    } else if (role !== 'intern' && target.staff_id) {
+      staffId = null; // インターン生でなくなったら担当は外す
+    }
+    await updateUserRow(req.params.id, { nickname, branchId: branch_id, role, staffId });
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: '更新に失敗しました' });
+  }
+});
+
+/* インターン生が自分の担当スタッフを自分で変える */
+app.patch('/api/me/staff', requireAuth, async (req, res) => {
+  const me = req.authUser;
+  if (me.role !== 'intern') return res.status(403).json({ error: '担当スタッフを持つのはインターン生だけです' });
+  try {
+    const staffId = await validStaffIdFor(req.body?.staff_id, me.branch_id);
+    // 指定があったのに該当しない相手なら、黙って外さずエラーで知らせる
+    if (req.body?.staff_id && !staffId) {
+      return res.status(400).json({ error: 'その担当スタッフは選べません' });
+    }
+    await client.execute({ sql: 'UPDATE users SET staff_id=? WHERE id=?', args: [staffId, me.id] });
+    res.json({ ok: true, user: toPublicUser(await findUserById(me.id)) });
+  } catch (e) {
+    console.error('担当スタッフの変更に失敗しました', e);
+    res.status(500).json({ error: '変更に失敗しました' });
   }
 });
 app.delete('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, res) => {

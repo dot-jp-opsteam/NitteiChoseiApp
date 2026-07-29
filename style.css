@@ -459,6 +459,11 @@
   .calcell .chip{width:100%;font-size:9px;font-weight:600;line-height:1.6;padding:1px 4px;
     border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
   .calcell .chipmore{font-size:9.5px;color:var(--mut);font-weight:700;padding:0 2px;line-height:1.4}
+  /* インターン生に渡す登録リンク。長いので折り返して全文を見せる */
+  .invite-url{margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--panel2);color:var(--brand);font-size:12.5px;font-weight:600;
+    word-break:break-all;line-height:1.5;user-select:all}
+
   /* 昔の予定の公開範囲を見直す一覧 */
   .vislist{max-height:46vh;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius)}
   .visrow{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;
