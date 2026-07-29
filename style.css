@@ -363,6 +363,10 @@
   .col-title{margin:0 0 14px;font-size:15px;font-weight:700;color:var(--ink);text-align:center}
   /* 入力欄のかたまりを薄いパネルで囲み、右カラムのボタン群と対になるようにする */
   .login-panel{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:18px 16px 20px}
+  /* ダークでは --bg が純黒なので、そのまま敷くと大きな黒い塊に見える。
+     枠線だけ残して地は透かし、背後のガラス板を活かす */
+  :root:not([data-theme="light"]) .login-panel,
+  :root:not([data-theme="light"]) .social-box{background:transparent}
   .login-panel label.fl:first-of-type{margin-top:0}
   .pw-toggle{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12px;color:var(--sub);cursor:pointer}
   .pw-toggle input{width:auto;margin:0;accent-color:var(--brand)}
