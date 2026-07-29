@@ -840,6 +840,13 @@ function drawerHTML(){
       <span class="mark">OPS</span><span>日調アプリ</span>
       <button class="dw-close" onclick="closeDrawer()" aria-label="メニューを閉じる">✕</button>
     </div>
+    <div class="dw-me stag" style="--i:0">
+      <span class="av hexav">${esc(initials(ME.nickname))}</span>
+      <span class="dw-me-t">
+        <b>${esc(ME.nickname)}</b>
+        <small>${esc(branchName(ME.branch_id))} ・ ${ROLE_JP[ME.role]}</small>
+      </span>
+    </div>
     <nav class="dw-nav">${navBtns}</nav>
     <div class="dw-sep stag" style="--i:${++i}"></div>
     <div class="dw-act">

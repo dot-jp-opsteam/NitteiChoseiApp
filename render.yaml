@@ -8,7 +8,13 @@ services:
     startCommand: npm start
     # rootDir を指定すると、Renderは server/ の中が変わらないpushでは
     # ビルドをスキップしてしまう。画面まわりのファイルはリポジトリ直下に
-    # あるため、それらもビルド対象として明示しておく
+    # あるため、それらもビルド対象として明示する必要がある。
+    #
+    # ※ このサービスはBlueprint管理ではないため、下の buildFilter は
+    #   実際には効いていない（envVars が反映されないのと同じ理由）。
+    #   実際に効いているのは、Renderダッシュボードの
+    #   Settings → Build Filters → Included Paths に登録した同じ内容
+    #   （2026-07-29に設定済み）。ここは設定内容の控えとして残している。
     buildFilter:
       paths:
         - server/**

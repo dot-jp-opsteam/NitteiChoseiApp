@@ -670,6 +670,15 @@
   .dw-close{margin-left:auto;width:38px;height:38px;flex:none;border-radius:999px;cursor:pointer;
     border:1px solid var(--line);background:transparent;color:var(--ink);font-size:17px;font-family:inherit}
   .dw-close:hover{border-color:var(--line-h);color:var(--brand)}
+  /* 誰でログインしているか。狭い画面では上部バーから所属と権限を
+     省いているので、その情報はここで確認できるようにしている */
+  .dw-me{display:flex;align-items:center;gap:10px;margin:0 0 26px}
+  .dw-me .av{flex:none;background:var(--brand-soft);color:var(--brand-d);
+    display:grid;place-items:center;font-weight:800;font-size:13px}
+  .dw-me-t{min-width:0;line-height:1.35}
+  .dw-me-t b{display:block;font-size:15px;font-weight:800;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dw-me-t small{display:block;font-size:12px;color:var(--mut)}
   .dw-nav{display:flex;flex-direction:column}
   .dw-nav button{background:none;border:0;text-align:left;padding:8px 0;cursor:pointer;font-family:inherit;
     font-size:28px;font-weight:900;letter-spacing:-.035em;line-height:1.25;color:var(--ink);
