@@ -9,10 +9,18 @@
      CSSより先に data-theme を確定させないと、一瞬だけ違う配色が見えてしまう -->
 <script>
 (function(){
+  var el=document.documentElement;
   try{
     var t=localStorage.getItem('ops_theme_v1');
-    document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');
-  }catch(e){document.documentElement.setAttribute('data-theme','dark');}
+    el.setAttribute('data-theme',t==='light'?'light':'dark');
+  }catch(e){el.setAttribute('data-theme','dark');}
+  /* 左メニューの開閉。保存された指定が無ければ、スマホは細い帯・PCは広げた状態にする。
+     ここで確定させないと、一瞬だけ違う幅で描かれて中身が横にずれる */
+  try{
+    var s=localStorage.getItem('ops_sidebar_v1');
+    if(s!=='expanded'&&s!=='collapsed')s=window.innerWidth<=760?'collapsed':'expanded';
+    el.setAttribute('data-sb',s);
+  }catch(e){el.setAttribute('data-sb','expanded');}
 })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -48,30 +56,38 @@
 
 <!-- ========== APP ========== -->
 <div id="app" class="hidden">
-  <header class="topbar">
-    <div class="logo"><span class="mark">OPS</span><span>日調アプリ<small>ドットジェイピー</small></span></div>
-    <div class="spacer"></div>
-    <button class="bell" id="bell" onclick="openNotifications()" aria-label="通知">🔔<span class="badge hidden" id="bellBadge">0</span></button>
-    <div class="userchip" onclick="openUserMenu()">
-      <span class="av" id="chipAv">–</span>
-      <span>
-        <span id="chipName" style="font-weight:600"></span>
-        <span class="rolebadge" id="chipRole"></span>
-      </span>
+  <!-- 左端の縦メニュー。上＝ロゴ／中＝画面ナビと設定／下＝本人と通知 -->
+  <aside id="sidebar">
+    <div class="sb-top">
+      <span class="mark">OPS</span>
+      <span class="sb-brand">日調アプリ<small>ドットジェイピー</small></span>
+      <button class="sb-toggle" id="sbToggle" onclick="toggleSidebar()" aria-label="メニューを開閉" aria-expanded="true">
+        <i></i><i></i><i></i>
+      </button>
     </div>
-    <button class="burger" id="burger" onclick="toggleDrawer()" aria-label="メニュー" aria-expanded="false" aria-controls="drawer">
-      <i></i><i></i><i></i>
-    </button>
-  </header>
+
+    <nav class="sb-nav" id="sbNav"></nav>
+    <div class="sb-sep"></div>
+    <div class="sb-act" id="sbAct"></div>
+
+    <div class="sb-foot">
+      <div class="sb-me">
+        <span class="av hexav" id="chipAv">–</span>
+        <span class="sb-me-t"><b id="chipName"></b><small id="chipRole"></small></span>
+        <button class="bell" id="bell" onclick="openNotifications()" aria-label="通知">🔔<span class="badge hidden" id="bellBadge">0</span></button>
+      </div>
+      <div class="sb-links">
+        <a href="/terms.html">利用規約</a>
+        <a href="/privacy.html">プライバシーポリシー</a>
+        <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer">ドットジェイピー公式 ↗</a>
+      </div>
+    </div>
+  </aside>
 
   <main id="main"></main>
-
-  <nav class="bottomnav" id="nav"></nav>
 </div>
-
-<!-- 右上☰から開くドロワー。中身は openDrawer() が組み立てる -->
-<div id="drawerScrim" onclick="closeDrawer()"></div>
-<aside id="drawer" role="dialog" aria-modal="true" aria-label="メニュー"></aside>
+<!-- スマホでメニューを広げたときだけ出る覆い -->
+<div id="sbScrim" onclick="collapseSidebar()"></div>
 
 <!-- 保存に失敗したときだけ出る帯。黙って消えるのを防ぐ -->
 <div id="savebar" class="hidden">
@@ -788,21 +804,12 @@ async function logout(){
   location.reload();
 }
 
+/* 左メニュー最下部の「誰でログインしているか」 */
 function renderChip(){
   document.getElementById('chipAv').textContent=initials(ME.nickname);
   document.getElementById('chipName').textContent=ME.nickname;
-  const r=document.getElementById('chipRole');
-  r.textContent=ROLE_JP[ME.role];r.className='rolebadge '+ROLE_CLS[ME.role];
+  document.getElementById('chipRole').textContent=branchName(ME.branch_id)+' ・ '+ROLE_JP[ME.role];
   updateBell();
-}
-
-function openUserMenu(){
-  openSheet(`<h3>${esc(ME.nickname)}</h3>
-    <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>
-    <div class="btn-row" style="margin-top:14px">
-      <button class="btn block" onclick="openPasswordChange()">パスワードを変更</button>
-      <button class="btn block" onclick="closeSheet();logout()">ログアウト</button>
-    </div>`);
 }
 
 /* =========================================================
@@ -820,79 +827,41 @@ function setTheme(t){
 }
 function toggleTheme(){
   setTheme(currentTheme()==='light'?'dark':'light');
-  const v=document.querySelector('#dwTheme .dwv');
+  const v=document.querySelector('#sbTheme .sv');
   if(v)v.textContent=currentTheme()==='light'?'ライト':'ダーク';
   // カレンダーの予定チップは明暗で色の計算式が変わるので、開いている画面を描き直す
   if(ME&&!document.getElementById('app').classList.contains('hidden'))render();
 }
 
 /* =========================================================
-   右上☰のドロワー
+   左端の縦メニュー（サイドバー）
+   広い画面では中身を左に押し出し、狭い画面ではアイコンだけの細い帯にする。
+   広げた状態はスマホでは中身の上に重ねる（押し出すと本文が読めなくなるため）
    ========================================================= */
-let DRAWER_OPEN=false;
-function drawerHTML(){
-  const tabs=NAV[ME.role]||[];
-  let i=0;
-  const navBtns=tabs.map(t=>
-    `<button class="stag${t.id===currentTab?' on':''}" style="--i:${++i}" onclick="drawerGo('${t.id}')">${t.label}</button>`
-  ).join('');
-  return `<div class="dw-top stag" style="--i:0">
-      <span class="mark">OPS</span><span>日調アプリ</span>
-      <button class="dw-close" onclick="closeDrawer()" aria-label="メニューを閉じる">✕</button>
-    </div>
-    <div class="dw-me stag" style="--i:0">
-      <span class="av hexav">${esc(initials(ME.nickname))}</span>
-      <span class="dw-me-t">
-        <b>${esc(ME.nickname)}</b>
-        <small>${esc(branchName(ME.branch_id))} ・ ${ROLE_JP[ME.role]}</small>
-      </span>
-    </div>
-    <nav class="dw-nav">${navBtns}</nav>
-    <div class="dw-sep stag" style="--i:${++i}"></div>
-    <div class="dw-act">
-      <button class="stag" id="dwTheme" style="--i:${++i}" onclick="toggleTheme()">
-        <span class="dwi">◐</span><span>テーマ</span>
-        <span class="dwv">${currentTheme()==='light'?'ライト':'ダーク'}</span></button>
-      <button class="stag" style="--i:${++i}" onclick="closeDrawer();openPasswordChange()">
-        <span class="dwi">🔑</span><span>パスワードを変更</span></button>
-      <button class="stag" style="--i:${++i}" onclick="closeDrawer();logout()">
-        <span class="dwi">⏻</span><span>ログアウト</span></button>
-    </div>
-    <div class="dw-foot stag" style="--i:${++i}">
-      <a href="/terms.html">利用規約</a>
-      <a href="/privacy.html">プライバシーポリシー</a>
-      <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer">ドットジェイピー公式 ↗</a>
-    </div>`;
+const SB_KEY='ops_sidebar_v1';
+const sbState=()=>document.documentElement.getAttribute('data-sb')==='collapsed'?'collapsed':'expanded';
+const isNarrow=()=>window.matchMedia('(max-width:760px)').matches;
+function setSidebar(state){
+  document.documentElement.setAttribute('data-sb',state);
+  try{localStorage.setItem(SB_KEY,state);}catch(e){}
+  const t=document.getElementById('sbToggle');
+  if(t)t.setAttribute('aria-expanded',state==='expanded'?'true':'false');
+  // 狭い画面で広げているときだけ、背面を触れないようにする
+  document.getElementById('sbScrim').classList.toggle('open',state==='expanded'&&isNarrow());
+  document.body.style.overflow=(state==='expanded'&&isNarrow())?'hidden':'';
 }
-function openDrawer(){
-  if(!ME)return;
-  const d=document.getElementById('drawer');
-  d.innerHTML=drawerHTML();
-  /* innerHTML を入れた直後に .open を付けると、入れたばかりの項目は
-     初期状態が確定していないので最終状態で描かれ、スタッガが効かない。
-     ここで一度レイアウトを読んで初期状態を確定させる。
-     requestAnimationFrame でも同じことができるが、描画されていない
-     タブでは発火しないため、同期的に済むこちらを使う */
-  void d.offsetHeight;
-  d.classList.add('open');
-  document.getElementById('drawerScrim').classList.add('open');
-  document.getElementById('burger').classList.add('on');
-  document.getElementById('burger').setAttribute('aria-expanded','true');
-  document.body.style.overflow='hidden';
-  DRAWER_OPEN=true;
-}
-function closeDrawer(){
-  if(!DRAWER_OPEN)return;
-  document.getElementById('drawer').classList.remove('open');
-  document.getElementById('drawerScrim').classList.remove('open');
-  const b=document.getElementById('burger');
-  b.classList.remove('on');b.setAttribute('aria-expanded','false');
-  document.body.style.overflow='';
-  DRAWER_OPEN=false;
-}
-function toggleDrawer(){DRAWER_OPEN?closeDrawer():openDrawer();}
-function drawerGo(tab){closeDrawer();go(tab);}
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&DRAWER_OPEN)closeDrawer();});
+function toggleSidebar(){setSidebar(sbState()==='expanded'?'collapsed':'expanded');}
+function collapseSidebar(){setSidebar('collapsed');}
+/* 画面の幅が変わったとき、スマホで広げっぱなしだと本文が隠れるので畳む */
+window.addEventListener('resize',()=>{
+  if(!isNarrow())document.getElementById('sbScrim').classList.remove('open');
+  else if(sbState()==='expanded')setSidebar('collapsed');
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&isNarrow()&&sbState()==='expanded')collapseSidebar();
+});
+/* 画面ナビを選んだとき、狭い画面では広げたままだと中身が見えないので畳む */
+function sbGo(tab){ if(isNarrow())collapseSidebar(); go(tab); }
 
 /* =========================================================
    スクロール連動フェードアップ
@@ -995,10 +964,22 @@ const HOLIDAYS={
   '2026-11-3':'文化の日','2026-11-23':'勤労感謝の日'};
 function holidayName(y,m,d){return HOLIDAYS[`${y}-${m+1}-${d}`];} // m=0-11
 function defaultTab(){return 'home';}
+/* 左メニューの中身を組み立てる。
+   上段＝画面ナビ、下段＝設定系。畳んだときはアイコンだけになるので、
+   title を付けてマウスを乗せれば名前が分かるようにしている */
 function buildNav(){
-  const nav=document.getElementById('nav');
-  nav.innerHTML=NAV[ME.role].map(t=>`<button data-tab="${t.id}" onclick="go('${t.id}')">
-    <span class="ni">${t.ic}</span>${t.label}</button>`).join('');
+  document.getElementById('sbNav').innerHTML=NAV[ME.role].map(t=>
+    `<button class="sb-item" data-tab="${t.id}" onclick="sbGo('${t.id}')" title="${t.label}">
+      <span class="si">${t.ic}</span><span class="sl">${t.label}</span></button>`).join('');
+
+  document.getElementById('sbAct').innerHTML=`
+    <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="テーマを切り替える">
+      <span class="si">◐</span><span class="sl">テーマ</span>
+      <span class="sv">${currentTheme()==='light'?'ライト':'ダーク'}</span></button>
+    <button class="sb-item" onclick="openPasswordChange()" title="パスワードを変更">
+      <span class="si">🔑</span><span class="sl">パスワードを変更</span></button>
+    <button class="sb-item" onclick="logout()" title="ログアウト">
+      <span class="si">⏻</span><span class="sl">ログアウト</span></button>`;
 }
 function go(tab){
   currentTab=tab;
@@ -1006,7 +987,7 @@ function go(tab){
   if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
   if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
-  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   window.scrollTo(0,0);
   render();
 }
@@ -1041,7 +1022,19 @@ function hex(act,ic,t,d,badge){
     <span class="hxt">${t}</span>
     <span class="hxd">${d}</span></button>`;
 }
-const hexgrid=items=>`<div class="hexgrid">${items.join('')}</div>`;
+/* 六角形を2行に分けて、下の行を半個ずらして噛み合わせる（ハニカム）。
+   上の行を多めにし、6個なら3＋3、4個なら2＋2、3個なら2＋1になる。
+   1個あたりの幅は --cols から計算するので、行数が変わってもCSSは触らずに済む */
+function hexgrid(items){
+  const top=Math.ceil(items.length/2);
+  const cols=Math.max(top,1);
+  const row1=items.slice(0,top).join('');
+  const row2=items.slice(top).join('');
+  return `<div class="hexgrid" style="--cols:${cols};--off:${row2?'.5':'0'}">
+    <div class="hexrow">${row1}</div>
+    ${row2?`<div class="hexrow off">${row2}</div>`:''}
+  </div>`;
+}
 
 function viewHome(){
   const hi=`<h1 class="page">こんにちは、${esc(ME.nickname)}さん</h1>

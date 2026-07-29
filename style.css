@@ -28,13 +28,16 @@
     --ease:cubic-bezier(.16,1,.3,1);
     --aurora-op:1;
     /* 上下のバーとドロワー。背後のオーロラを透かすため半透明にする */
-    --glass:rgba(0,0,0,.72); --drawer-bg:rgba(0,0,0,.94);
+    --glass:rgba(0,0,0,.72);
     /* ベタ塗り（brand/ok/warn/bad）の上に載せる文字色。
        ダークでは塗りが明るい色なので、文字は黒に寄せないと読めない */
     --on-fill:#05171a;
     /* 六角形の輪郭。地の色との差が小さいと形が見えなくなる */
     --hex-line:#262626;
+    /* 左端の縦メニューの幅。data-sb で切り替える */
+    --sb-w:236px;
   }
+  :root[data-sb="collapsed"]{--sb-w:68px}
 
   /* ---------- ライトテーマ ----------
      シアン #43e7df は白地では文字コントラストが足りないため、
@@ -59,7 +62,7 @@
     --shadow:0 1px 2px rgba(16,40,32,.06),0 1px 3px rgba(16,40,32,.08);
     --glow:0 0 0 1px var(--brand-soft),0 10px 28px rgba(11,143,149,.10);
     --aurora-op:.3;
-    --glass:rgba(255,255,255,.82); --drawer-bg:rgba(255,255,255,.95);
+    --glass:rgba(255,255,255,.82);
     /* ライトでは塗りが暗い色なので、こちらは白でよい */
     --on-fill:#ffffff;
     --hex-line:#cbd8db;
@@ -114,47 +117,19 @@
   #savebar button:disabled{opacity:.6;cursor:default}
 
   /* ---------- App shell ----------
-     #app は背景を敷かない。背後の #aurora を透かすため */
-  #app{min-height:100vh;display:flex;flex-direction:column;max-width:960px;margin:0 auto}
-  header.topbar{
-    position:sticky;top:0;z-index:20;background:var(--glass);border-bottom:1px solid var(--line);
-    backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
-    display:flex;align-items:center;gap:10px;padding:10px 14px;
-  }
-  .logo{display:flex;align-items:center;gap:8px;font-weight:800;letter-spacing:-.01em;
-    white-space:nowrap;flex:none}
-  .logo .mark{width:26px;height:26px;flex:none;border-radius:7px;
-    background:linear-gradient(135deg,var(--brand),var(--brand-lite));
-    display:grid;place-items:center;color:#04211f;font-size:13px;font-weight:900}
-  .logo small{font-weight:600;color:var(--sub);font-size:11px;display:block;line-height:1.1}
-  .topbar .spacer{flex:1}
-  /* ☰を足したぶん上部が窮屈になるので、狭い画面では情報を間引く。
-     ここで隠す内容（所属・権限・ログアウト等）は☰の中に入っている */
-  @media(max-width:560px){
-    header.topbar{gap:8px;padding:10px 12px}
-    .logo{font-size:14px}
-    .logo small{display:none}
-    .userchip{padding:4px 6px}
-    .userchip .rolebadge{display:none}
-    .userchip #chipName{display:inline-block;vertical-align:middle;max-width:76px;
-      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  }
-  @media(max-width:400px){
-    .logo>span:last-child{display:none}   /* マークだけにする */
-  }
+     #app は背景を敷かない。背後の #aurora を透かすため。
+     左端の縦メニューぶんだけ中身を右に寄せる */
+  #app{min-height:100vh;padding-left:var(--sb-w);transition:padding-left .28s var(--ease)}
+  #app>main{max-width:1040px;margin:0 auto}
 
-  /* role/user chip */
-  .userchip{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
-    border-radius:999px;padding:4px 6px 4px 10px;font-size:13px;cursor:pointer}
-  .userchip .av{width:24px;height:24px;border-radius:50%;background:var(--brand-soft);color:var(--brand-d);
-    display:grid;place-items:center;font-weight:700;font-size:12px}
+  /* 役割バッジ（ユーザー管理の一覧などで使う） */
   .rolebadge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
   .role-intern{background:var(--brand-soft);color:var(--brand-d)}
   .role-staff{background:var(--ok-soft);color:var(--ok-ink)}
   .role-admin{background:var(--iv-soft);color:var(--iv-ink)}
   .role-branch-admin{background:var(--warn-soft);color:var(--warn-ink)}
 
-  main{flex:1;padding:16px 14px 92px}
+  main{padding:20px 18px 40px}
   .view{animation:fade .18s ease}
   @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
@@ -286,23 +261,6 @@
   .slots{display:flex;flex-wrap:wrap;gap:6px}
   .slot{font-size:12px;padding:5px 9px;border-radius:8px;background:var(--ok-soft);color:var(--ok-ink);font-weight:600}
   .slot.busy{background:var(--panel2);color:var(--mut);text-decoration:line-through}
-
-  /* ---------- Bottom nav ---------- */
-  nav.bottomnav{
-    position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:960px;
-    background:var(--glass);border-top:1px solid var(--line);display:flex;z-index:30;
-    backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
-    padding-bottom:env(safe-area-inset-bottom)}
-  nav.bottomnav button{position:relative;flex:1;background:none;border:0;padding:10px 4px 9px;min-height:56px;
-    cursor:pointer;color:var(--mut);font-family:inherit;
-    display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:700;
-    transition:color .2s var(--ease)}
-  nav.bottomnav button .ni{font-size:20px;line-height:1}
-  nav.bottomnav button.active{color:var(--brand)}
-  /* 選択中のタブの上に、参考サイトのアクセントと同じシアンの短い線を出す */
-  nav.bottomnav button::after{content:"";position:absolute;top:0;left:50%;width:0;height:2px;
-    background:var(--brand);transition:width .3s var(--ease),margin-left .3s var(--ease)}
-  nav.bottomnav button.active::after{width:36px;margin-left:-18px}
 
   /* ---------- Modal / sheet ---------- */
   .scrim{position:fixed;inset:0;background:rgba(16,24,40,.42);z-index:50;display:none;align-items:flex-end;justify-content:center}
@@ -622,98 +580,140 @@
   .reveal{opacity:0;transform:translateY(24px);
     transition:opacity .7s var(--ease),transform .7s var(--ease)}
   .reveal.in{opacity:1;transform:none}
-  /* 六角形は左上から順に湧き上がらせる（参考サイトのグリッドと同じ出方） */
-  .hexgrid>.hex:nth-child(2){transition-delay:60ms}
-  .hexgrid>.hex:nth-child(3){transition-delay:120ms}
-  .hexgrid>.hex:nth-child(4){transition-delay:180ms}
-  .hexgrid>.hex:nth-child(5){transition-delay:240ms}
-  .hexgrid>.hex:nth-child(6){transition-delay:300ms}
-  .hexgrid>.hex:nth-child(7){transition-delay:360ms}
-  .hexgrid>.hex:nth-child(n+8){transition-delay:420ms}
+  /* 六角形は左上から順に湧き上がらせる（参考サイトのグリッドと同じ出方）。
+     行で包む形にしたので、行ごと・その中の位置ごとに遅らせる */
+  .hexrow>.hex:nth-child(2){transition-delay:60ms}
+  .hexrow>.hex:nth-child(3){transition-delay:120ms}
+  .hexrow>.hex:nth-child(4){transition-delay:180ms}
+  .hexrow>.hex:nth-child(n+5){transition-delay:240ms}
+  .hexrow.off>.hex{transition-delay:180ms}
+  .hexrow.off>.hex:nth-child(2){transition-delay:240ms}
+  .hexrow.off>.hex:nth-child(3){transition-delay:300ms}
+  .hexrow.off>.hex:nth-child(n+4){transition-delay:360ms}
 
-  /* ---------- ハンバーガーボタン ---------- */
-  .burger{position:relative;width:40px;height:40px;flex:none;padding:0;cursor:pointer;
-    border:1px solid var(--line);border-radius:999px;background:var(--panel);
-    transition:border-color .2s var(--ease),box-shadow .3s var(--ease)}
-  .burger:hover{border-color:var(--line-h);box-shadow:var(--glow)}
-  .burger i{position:absolute;left:10px;width:18px;height:2px;border-radius:2px;background:var(--ink);
-    transition:transform .3s var(--ease),opacity .2s var(--ease)}
-  .burger i:nth-child(1){top:12px}
-  .burger i:nth-child(2){top:18px}
-  .burger i:nth-child(3){top:24px}
-  .burger.on i:nth-child(1){transform:translateY(6px) rotate(45deg)}
-  .burger.on i:nth-child(2){opacity:0}
-  .burger.on i:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
-
-  /* ---------- 右からのドロワー ---------- */
-  #drawerScrim{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.6);
-    opacity:0;pointer-events:none;transition:opacity .35s var(--ease)}
-  #drawerScrim.open{opacity:1;pointer-events:auto}
-  #drawer{
-    position:fixed;top:0;right:0;bottom:0;z-index:71;width:min(82vw,440px);
-    background:var(--drawer-bg);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
-    border-left:1px solid var(--line-h);
-    transform:translateX(100%);transition:transform .42s var(--ease);
-    display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain;
-    padding:18px 26px calc(26px + env(safe-area-inset-bottom));
+  /* ---------- 左端の縦メニュー ---------- */
+  #sbScrim{position:fixed;inset:0;z-index:39;background:rgba(0,0,0,.6);
+    opacity:0;pointer-events:none;transition:opacity .3s var(--ease)}
+  #sbScrim.open{opacity:1;pointer-events:auto}
+  #sidebar{
+    position:fixed;top:0;left:0;bottom:0;z-index:40;width:var(--sb-w);
+    background:var(--glass);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    border-right:1px solid var(--line);
+    display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;
+    padding:0 0 calc(10px + env(safe-area-inset-bottom));
+    transition:width .28s var(--ease);
   }
-  #drawer.open{transform:none}
-  /* 中の項目は開いてから順番に湧き上がらせる（参考サイトと同じスタッガ） */
-  #drawer .stag{opacity:0;transform:translateY(18px)}
-  #drawer.open .stag{opacity:1;transform:none;
-    transition:opacity .5s var(--ease),transform .5s var(--ease);
-    transition-delay:calc(.08s + var(--i,0) * 40ms)}
-  .dw-top{display:flex;align-items:center;gap:9px;margin-bottom:30px;font-weight:800}
-  .dw-top .mark{width:30px;height:30px;border-radius:8px;flex:none;
+  /* 畳んだときはアイコンだけにする。文字は幅ごと消さないと横スクロールが出る */
+  [data-sb="collapsed"] .sl,
+  [data-sb="collapsed"] .sv,
+  [data-sb="collapsed"] .sb-brand,
+  [data-sb="collapsed"] .sb-links,
+  [data-sb="collapsed"] .sb-me-t{display:none}
+
+  /* 上：ロゴと開閉ボタン */
+  .sb-top{display:flex;align-items:center;gap:9px;padding:14px 14px 18px;min-height:64px}
+  [data-sb="collapsed"] .sb-top{flex-direction:column;gap:12px;padding:14px 8px 18px}
+  .sb-top .mark{width:30px;height:30px;flex:none;border-radius:8px;
     background:linear-gradient(135deg,var(--brand),var(--brand-lite));
-    display:grid;place-items:center;color:#04211f;font-size:13px;font-weight:900}
-  .dw-close{margin-left:auto;width:38px;height:38px;flex:none;border-radius:999px;cursor:pointer;
-    border:1px solid var(--line);background:transparent;color:var(--ink);font-size:17px;font-family:inherit}
-  .dw-close:hover{border-color:var(--line-h);color:var(--brand)}
-  /* 誰でログインしているか。狭い画面では上部バーから所属と権限を
-     省いているので、その情報はここで確認できるようにしている */
-  .dw-me{display:flex;align-items:center;gap:10px;margin:0 0 26px}
-  .dw-me .av{flex:none;background:var(--brand-soft);color:var(--brand-d);
+    display:grid;place-items:center;color:var(--on-fill);font-size:13px;font-weight:900}
+  .sb-brand{font-weight:800;letter-spacing:-.02em;line-height:1.15;white-space:nowrap}
+  .sb-brand small{display:block;font-weight:600;font-size:11px;color:var(--sub)}
+  .sb-toggle{position:relative;margin-left:auto;width:34px;height:34px;flex:none;padding:0;cursor:pointer;
+    border:1px solid var(--line);border-radius:9px;background:transparent;
+    transition:border-color .2s var(--ease),box-shadow .3s var(--ease)}
+  [data-sb="collapsed"] .sb-toggle{margin-left:0}
+  .sb-toggle:hover{border-color:var(--line-h);box-shadow:var(--glow)}
+  .sb-toggle i{position:absolute;left:9px;width:16px;height:2px;border-radius:2px;background:var(--ink);
+    transition:transform .3s var(--ease),opacity .2s var(--ease)}
+  .sb-toggle i:nth-child(1){top:10px}
+  .sb-toggle i:nth-child(2){top:16px}
+  .sb-toggle i:nth-child(3){top:22px}
+  /* 広げているときは「閉じる」意味の×に、畳んでいるときは三本線に */
+  [data-sb="expanded"] .sb-toggle i:nth-child(1){transform:translateY(6px) rotate(45deg)}
+  [data-sb="expanded"] .sb-toggle i:nth-child(2){opacity:0}
+  [data-sb="expanded"] .sb-toggle i:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
+
+  /* 中：画面ナビと設定 */
+  .sb-nav,.sb-act{display:flex;flex-direction:column;gap:2px;padding:0 8px}
+  .sb-item{position:relative;display:flex;align-items:center;gap:11px;width:100%;
+    background:none;border:0;border-radius:10px;cursor:pointer;font-family:inherit;text-align:left;
+    padding:10px 10px;min-height:44px;color:var(--sub);font-size:14px;font-weight:700;
+    white-space:nowrap;transition:color .2s var(--ease),background .2s var(--ease)}
+  [data-sb="collapsed"] .sb-item{justify-content:center;padding:10px 0}
+  .sb-item:hover{color:var(--ink);background:var(--panel2)}
+  .sb-item .si{width:22px;flex:none;text-align:center;font-size:18px;line-height:1}
+  .sb-item .sv{margin-left:auto;font-size:11px;font-weight:700;color:var(--mut)}
+  .sb-item.active{color:var(--brand);background:var(--brand-soft)}
+  /* 選択中の項目の左に、参考サイトのアクセントと同じシアンの線を出す */
+  .sb-item::before{content:"";position:absolute;left:0;top:50%;width:2px;height:0;
+    background:var(--brand);border-radius:2px;transform:translateY(-50%);
+    transition:height .3s var(--ease)}
+  .sb-item.active::before{height:22px}
+  .sb-sep{height:1px;background:var(--line);margin:14px 12px}
+
+  /* 下：本人と通知、規約リンク */
+  .sb-foot{margin-top:auto;padding:16px 8px 0}
+  .sb-me{display:flex;align-items:center;gap:10px;padding:6px 8px}
+  [data-sb="collapsed"] .sb-me{flex-direction:column;gap:8px;padding:6px 0}
+  .sb-me .av{flex:none;background:var(--brand-soft);color:var(--brand-d);
     display:grid;place-items:center;font-weight:800;font-size:13px}
-  .dw-me-t{min-width:0;line-height:1.35}
-  .dw-me-t b{display:block;font-size:15px;font-weight:800;
+  .sb-me-t{min-width:0;line-height:1.3}
+  .sb-me-t b{display:block;font-size:14px;font-weight:800;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dw-me-t small{display:block;font-size:12px;color:var(--mut)}
-  .dw-nav{display:flex;flex-direction:column}
-  .dw-nav button{background:none;border:0;text-align:left;padding:8px 0;cursor:pointer;font-family:inherit;
-    font-size:28px;font-weight:900;letter-spacing:-.035em;line-height:1.25;color:var(--ink);
-    transition:color .2s var(--ease),transform .3s var(--ease)}
-  .dw-nav button:hover{color:var(--brand);transform:translateX(7px)}
-  .dw-nav button.on{color:var(--brand)}
-  .dw-sep{height:1px;background:var(--line);margin:26px 0 18px}
-  .dw-act{display:flex;flex-direction:column}
-  .dw-act button{background:none;border:0;text-align:left;padding:10px 0;cursor:pointer;font-family:inherit;
-    font-size:15px;font-weight:700;color:var(--sub);display:flex;align-items:center;gap:10px;
-    transition:color .2s var(--ease)}
-  .dw-act button:hover{color:var(--brand)}
-  .dw-act button .dwi{width:22px;text-align:center;flex:none}
-  .dw-act button .dwv{margin-left:auto;font-size:12px;font-weight:700;color:var(--mut)}
-  .dw-foot{margin-top:auto;padding-top:30px;display:flex;flex-wrap:wrap;gap:9px 16px}
-  .dw-foot a{font-size:12px;color:var(--mut);transition:color .2s var(--ease)}
-  .dw-foot a:hover{color:var(--brand)}
+  .sb-me-t small{display:block;font-size:11px;color:var(--mut);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sb-me .bell{margin-left:auto;width:34px;height:34px;font-size:16px}
+  [data-sb="collapsed"] .sb-me .bell{margin-left:0}
+  .sb-links{display:flex;flex-direction:column;gap:5px;padding:14px 10px 0}
+  .sb-links a{font-size:11px;color:var(--mut);transition:color .2s var(--ease)}
+  .sb-links a:hover{color:var(--brand)}
+
+  /* 狭い画面。畳んだ状態がふつうで、広げたときは中身の上に重ねる
+     （押し出すと本文がほとんど読めなくなるため） */
+  @media(max-width:760px){
+    :root{--sb-w:56px}
+    :root[data-sb="expanded"]{--sb-w:56px}   /* 中身は押し出さない */
+    #sidebar{width:236px}
+    [data-sb="collapsed"] #sidebar{width:56px}
+    main{padding:18px 14px 40px}
+  }
 
   /* ---------- 六角形ハニカム ----------
      縦横比 1:1.1547 が正六角形（尖り上）。
-     参考サイトは行を半個ずらして噛み合わせているが、そうすると端の1個が
-     画面外にはみ出す（参考サイトも実際に切れている）。ここはタップできる
-     ボタンなので、はみ出さない整列グリッドにしている */
-  .hexgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin:4px 0 12px;
-    justify-items:center}
-  @media(min-width:520px){.hexgrid{grid-template-columns:repeat(3,1fr)}}
-  @media(min-width:760px){.hexgrid{grid-template-columns:repeat(4,1fr);gap:12px}}
+     2行に分け、下の行を半個ぶん右にずらして噛み合わせる。
+     尖り上の六角形は縦に 3/4 ずつ詰められるので、
+     下の行を「1個の高さの 1/4」だけ引き上げると隙間なく並ぶ。
+       1個の高さ = 幅 × 1.1547 → 引き上げ量 = 幅 × 0.2887
+     列数（--cols）はJS側が中身の数から決めて渡す */
+  .hexgrid{
+    --hgap:8px;
+    /* 幅の基準に 100% ではなく 100cqw（この要素自身の幅）を使う。
+       --hw は子の .hex で使われるため、100% だと「幅が中身で決まる .hexrow」を
+       基準に解決してしまい循環参照になる（実際に六角形が半分の大きさに潰れた）。
+       container-type を付けると 100cqw が .hexgrid の幅に固定される */
+    container-type:inline-size;
+    /* 下の行は半個ぶん右にずれるので、その 0.5 個分（--off）も幅の計算に入れる。
+       入れないと、狭い画面で下の行だけ右にはみ出す */
+    --off:0;
+    --hw:min(166px, calc((100cqw - (var(--cols) - 1 + var(--off)) * var(--hgap)) / (var(--cols) + var(--off))));
+    display:flex;flex-direction:column;align-items:flex-start;margin:6px 0 16px;
+  }
+  .hexrow{display:flex;gap:var(--hgap)}
+  .hexrow.off{
+    margin-left:calc((var(--hw) + var(--hgap)) / 2);
+    margin-top:calc(var(--hw) * -0.2887 + var(--hgap));
+  }
   /* clip-path は border ごと切り落とすので、輪郭線は
      「外側の六角形＝線の色」＋「1.6px内側の六角形＝面の色」の2枚重ねで作る */
   .hex{
-    /* 画面が広いときに間延びしないよう、1個の大きさに上限を設ける */
-    position:relative;aspect-ratio:1/1.1547;width:100%;max-width:200px;padding:14px 12px;border:0;cursor:pointer;
+    position:relative;width:var(--hw);aspect-ratio:1/1.1547;flex:none;
+    /* 六角形は上下が細くなるので、左右に余白を取って文字を「太い帯」に収める。
+       ここを % にすると親（.hexrow）の幅を基準にしてしまい、
+       行の幅が中身で決まるため循環参照になって潰れる。--hw から直接計算する */
+    padding:0 calc(var(--hw) * 0.15);border:0;cursor:pointer;
     clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
     background:var(--hex-line);color:var(--ink);font-family:inherit;text-align:center;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
     transition:transform .3s var(--ease),background .3s var(--ease),filter .3s var(--ease);
   }
   .hex::before{content:"";position:absolute;inset:1.6px;z-index:0;pointer-events:none;
@@ -724,13 +724,17 @@
     filter:drop-shadow(0 10px 26px rgba(67,231,223,.22))}
   .hex:hover::before{background:var(--panel2)}
   .hex:active{transform:translateY(-1px)}
-  .hex .hxi{font-size:26px;line-height:1}
-  .hex .hxt{font-size:13px;font-weight:800;letter-spacing:-.01em;line-height:1.3}
-  .hex .hxd{font-size:10.5px;color:var(--sub);line-height:1.35;
+  .hex .hxi{font-size:20px;line-height:1}
+  .hex .hxt{font-size:12px;font-weight:800;letter-spacing:-.03em;line-height:1.2}
+  .hex .hxd{font-size:9.5px;color:var(--sub);line-height:1.25;letter-spacing:-.02em;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .hex .hxb{position:absolute;top:12%;right:14%;min-width:20px;height:20px;padding:0 6px;
-    border-radius:999px;background:var(--brand);color:#04211f;
-    font-size:11px;font-weight:900;display:grid;place-items:center}
+  /* 小さいときは説明文まで入れると潰れるので、アイコンと名前だけにする */
+  /* 六角形が小さいと説明文が形からはみ出すので、
+     画面幅ではなく .hexgrid 自身の幅（＝六角形の大きさ）で出し分ける */
+  @container (max-width:480px){.hex .hxd{display:none}.hex{gap:4px}}
+  .hex .hxb{position:absolute;top:14%;right:16%;min-width:18px;height:18px;padding:0 5px;
+    border-radius:999px;background:var(--brand);color:var(--on-fill);
+    font-size:10px;font-weight:900;display:grid;place-items:center}
   /* ユーザー一覧のアバターを六角形にする */
   .av.hexav{border-radius:0;width:34px;height:39px;
     clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
