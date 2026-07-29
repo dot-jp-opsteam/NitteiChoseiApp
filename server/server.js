@@ -198,16 +198,6 @@ async function listActiveUsers() {
   const rs = await client.execute({ sql: "SELECT * FROM users WHERE status = 'active'" });
   return rs.rows.map(toPublicUser);
 }
-async function listPendingStaff(branchId) {
-  // branchId を渡すとその支部の申請だけを返す（支部管理者用）
-  const rs = branchId
-    ? await client.execute({
-      sql: "SELECT * FROM users WHERE role = 'staff' AND status = 'pending' AND branch_id = ? ORDER BY created_at",
-      args: [branchId],
-    })
-    : await client.execute({ sql: "SELECT * FROM users WHERE role = 'staff' AND status = 'pending' ORDER BY created_at" });
-  return rs.rows.map(toPublicUser);
-}
 async function insertUser({ email, passwordHash, nickname, role, branchId, status, googleSub, avatarUrl }) {
   const id = 'u_' + crypto.randomBytes(6).toString('hex');
   await client.execute({
@@ -219,15 +209,6 @@ async function insertUser({ email, passwordHash, nickname, role, branchId, statu
       new Date().toISOString(), googleSub || null, avatarUrl || null],
   });
   return findUserById(id);
-}
-async function approveStaffRow(id, approvedBy) {
-  await client.execute({
-    sql: "UPDATE users SET status='active', approved_at=?, approved_by=? WHERE id=? AND role='staff' AND status='pending'",
-    args: [new Date().toISOString(), approvedBy, id],
-  });
-}
-async function rejectStaffRow(id) {
-  await client.execute({ sql: "DELETE FROM users WHERE id=? AND role='staff' AND status='pending'", args: [id] });
 }
 async function updateUserRow(id, { nickname, branchId, role }) {
   await client.execute({
@@ -537,7 +518,6 @@ app.post('/api/auth/login', async (req, res) => {
     if (!row || !(await auth.verifyPassword(password, row.password_hash))) {
       return res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' });
     }
-    if (row.status === 'pending') return res.status(403).json({ error: '管理者の承認待ちです。承認までしばらくお待ちください。' });
     if (row.status !== 'active') return res.status(403).json({ error: 'このアカウントではログインできません' });
     const token = await createSessionRow(row.id);
     res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
@@ -600,7 +580,7 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
       // ドットから配布されたアカウント以外はスタッフ登録できない
       if (!profile.email.endsWith(`@${STAFF_EMAIL_DOMAIN}`)) return fail('domain');
       const existing = (await findUserByGoogleSub(profile.sub)) || (await findUserByEmail(profile.email));
-      if (existing) return fail(existing.status === 'pending' ? 'already_pending' : 'already');
+      if (existing) return fail('already');
       // 氏名と所属支部を入力してもらうため、確認済みの情報を署名付きで持ち回す
       const t = google.signPayload({ email: profile.email, sub: profile.sub, name: profile.name, picture: profile.picture });
       return res.redirect(`/staff?verified=${encodeURIComponent(t)}`);
@@ -628,7 +608,6 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
       }
     }
 
-    if (user.status === 'pending') return fail('pending');
     if (user.status !== 'active') return fail('inactive');
 
     const token = await createSessionRow(user.id);
@@ -660,18 +639,20 @@ app.post('/api/auth/staff-signup', async (req, res) => {
     if ((await findUserByGoogleSub(verified.sub)) || (await findUserByEmail(verified.email))) {
       return res.status(409).json({ error: 'このアカウントは既に登録されています' });
     }
-    await insertUser({
+    // 承認フローは廃止。ドット配布アカウントで本人確認済みのため、登録と同時に即アクティブにする
+    const user = await insertUser({
       email: verified.email,
       passwordHash: '',
       nickname: String(full_name).trim(),
       role: 'staff',
       branchId: branch_id,
-      // 管理者が確認してから使えるようにする
-      status: 'pending',
+      status: 'active',
       googleSub: verified.sub,
       avatarUrl: verified.picture || null,
     });
-    res.json({ ok: true });
+    const token = await createSessionRow(user.id);
+    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
+    res.json({ ok: true, user: toPublicUser(user) });
   } catch (e) {
     console.error('スタッフ登録に失敗しました', e);
     res.status(500).json({ error: '登録に失敗しました' });
@@ -830,47 +811,6 @@ app.get('/api/admin/staff-invite-url', requireAuth, requireBranchAdmin, (req, re
 });
 
 /* ---------- 管理者：ユーザー管理 ---------- */
-// 支部管理者には自分の支部の分だけを見せる
-function scopeBranch(user) {
-  return user.role === 'admin' ? null : user.branch_id;
-}
-
-app.get('/api/admin/pending-staff', requireAuth, requireBranchAdmin, async (req, res) => {
-  try {
-    res.json({ pending: await listPendingStaff(scopeBranch(req.authUser)) });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: '取得に失敗しました' });
-  }
-});
-app.post('/api/admin/approve-staff', requireAuth, requireBranchAdmin, async (req, res) => {
-  const { userId } = req.body || {};
-  if (!userId) return res.status(400).json({ error: 'userIdが必要です' });
-  try {
-    if (!canManageUser(req.authUser, await findUserById(userId))) {
-      return res.status(403).json({ error: '他の支部のユーザーは操作できません' });
-    }
-    await approveStaffRow(userId, req.authUser.id);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: '承認に失敗しました' });
-  }
-});
-app.post('/api/admin/reject-staff', requireAuth, requireBranchAdmin, async (req, res) => {
-  const { userId } = req.body || {};
-  if (!userId) return res.status(400).json({ error: 'userIdが必要です' });
-  try {
-    if (!canManageUser(req.authUser, await findUserById(userId))) {
-      return res.status(403).json({ error: '他の支部のユーザーは操作できません' });
-    }
-    await rejectStaffRow(userId);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: '却下に失敗しました' });
-  }
-});
 app.patch('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, res) => {
   const { nickname, branch_id, role } = req.body || {};
   if (!nickname || !['intern', 'staff', 'branch_admin', 'admin'].includes(role)) {

@@ -250,7 +250,7 @@ function closeSheet(){document.getElementById('scrim').classList.remove('open');
    - 画面下半分：Googleでログイン（ソーシャルログイン）
    ========================================================= */
 // 'login' | 'register-intern' | 'forgot' | 'reset' | 'profile' | 'pending'
-// | 'staff-start' | 'staff-form' | 'staff-done'
+// | 'staff-start' | 'staff-form'
 let LOGIN_VIEW='login';
 let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branchesから取得）
 /* スタッフ登録（/staff）で使う一時情報。Googleで確認できたメールアドレスと、
@@ -338,11 +338,8 @@ function renderLogin(){
       <label class="fl">所属支部<span class="req">*</span></label>
       <select id="ssBranch">${branchOptions()}</select>
       <div class="field-err" id="ssErr"></div>
-      <button class="btn pri block" style="margin-top:20px" id="ssBtn" onclick="doStaffSignup()">登録を申請する</button>
-      <p class="fine" style="margin-top:10px;text-align:center">申請後、管理者の承認をもってログインできるようになります。</p>`;
-  }else if(LOGIN_VIEW==='staff-done'){
-    body.innerHTML=`<div class="hint"><span>⏳</span><span>登録を申請しました。管理者の承認後、Googleでログインできるようになります。</span></div>
-      <button class="btn ghost block" style="margin-top:14px" onclick="location.href='/'">‹ ログイン画面へ</button>`;
+      <button class="btn pri block" style="margin-top:20px" id="ssBtn" onclick="doStaffSignup()">登録する</button>
+      <p class="fine" style="margin-top:10px;text-align:center">登録するとすぐに利用できます。</p>`;
   }else if(LOGIN_VIEW==='forgot'){
     body.innerHTML=`
       <p class="page-sub" style="margin-top:0">ご登録のメールアドレスに、パスワード再設定用のリンクをお送りします。</p>
@@ -533,7 +530,7 @@ async function doStaffSignup(){
   const err=document.getElementById('ssErr');
   const btn=document.getElementById('ssBtn');
   err.classList.remove('show');
-  const fail=m=>{err.textContent=m;err.classList.add('show');btn.disabled=false;btn.textContent='登録を申請する';};
+  const fail=m=>{err.textContent=m;err.classList.add('show');btn.disabled=false;btn.textContent='登録する';};
   if(!full_name)return fail('氏名を入力してください');
   if(!branch_id)return fail('所属支部を選択してください');
   btn.disabled=true;btn.textContent='送信中…';
@@ -542,7 +539,7 @@ async function doStaffSignup(){
       body:JSON.stringify({token:STAFF_SIGNUP.token,full_name,branch_id})});
     const data=await res.json();
     if(!res.ok)return fail(data.error||'登録に失敗しました');
-    switchLoginView('staff-done');
+    await afterLogin();
   }catch(e){fail('通信に失敗しました。時間をおいて再度お試しください。');}
 }
 async function afterLogin(){
@@ -670,7 +667,7 @@ function go(tab){
   if(tab==='apply')APPLY=null;      // 申請画面は毎回リセット
   if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
   if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
-  if(tab==='users'&&isAdminLike()){loadPendingStaff();loadDirectoryStatus();} // 承認待ち・名簿状況を非同期取得
+  if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   window.scrollTo(0,0);
   render();
@@ -772,7 +769,7 @@ function openSystemSettings(){
     </dl>
     <div style="margin-top:18px">
       <div style="font-weight:600;margin-bottom:6px">スタッフ登録URL</div>
-      <div class="page-sub" style="margin-bottom:8px">新しいスタッフにこのURLを共有してください。ドットから配布された @${esc(STAFF_EMAIL_DOMAIN)} のGoogleアカウントを持つ方だけが登録でき、申請後は管理者の承認が必要です。</div>
+      <div class="page-sub" style="margin-bottom:8px">新しいスタッフにこのURLを共有してください。ドットから配布された @${esc(STAFF_EMAIL_DOMAIN)} のGoogleアカウントを持つ方だけが登録でき、登録後すぐに利用できます。</div>
       <div id="staffInviteUrlBox" class="hint" style="flex-direction:column;align-items:stretch">読み込み中…</div>
     </div>`);
   loadStaffInviteUrl();
@@ -1735,17 +1732,6 @@ function deleteBranch(id){
 /* =========================================================
    ユーザー管理（管理者）
    ========================================================= */
-let ADMIN_PENDING=[]; // 承認待ちスタッフ一覧（管理者のみ）
-async function loadPendingStaff(){
-  try{
-    const res=await fetch('/api/admin/pending-staff');
-    if(!res.ok)return;
-    const {pending}=await res.json();
-    ADMIN_PENDING=pending;
-    if(isAdminLike()&&currentTab==='users')render();
-  }catch(e){/* オフライン時は無視 */}
-}
-
 /* ---------- スタッフ名簿から検索して支部に追加 ---------- */
 let DIR_STATUS={count:0,updated_at:null,domain:'dot-jp.or.jp'};
 let DIR_QUERY='';      // 検索欄の入力内容（再描画で消えないよう保持する）
@@ -1880,25 +1866,7 @@ function directoryCard(){
 }
 async function refreshUsersAfterAdminChange(){
   try{const remote=await apiGetDB();if(remote&&remote.users)DB.users=remote.users;}catch(e){}
-  await loadPendingStaff();
   render();
-}
-async function approveStaff(id){
-  try{
-    const res=await fetch('/api/admin/approve-staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id})});
-    if(!res.ok)throw new Error();
-    toast('承認しました');
-    await refreshUsersAfterAdminChange();
-  }catch(e){toast('承認に失敗しました');}
-}
-async function rejectStaff(id){
-  if(!confirm('この申請を却下しますか？'))return;
-  try{
-    const res=await fetch('/api/admin/reject-staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id})});
-    if(!res.ok)throw new Error();
-    toast('却下しました');
-    await loadPendingStaff();
-  }catch(e){toast('却下に失敗しました');}
 }
 function viewUsers(){
   const byBranch={};(DB.users||[]).forEach(u=>{(byBranch[u.branch_id]=byBranch[u.branch_id]||[]).push(u);});
@@ -1907,19 +1875,8 @@ function viewUsers(){
   let html=`<h1 class="page">ユーザー管理</h1><p class="page-sub">${isFullAdmin()
     ?'全支部のユーザーと権限を管理します。'
     :esc(branchName(ME.branch_id))+'のユーザーと権限を管理します。'}
-    名簿から検索して追加するか、ご本人にスタッフ登録ページから申請してもらえます。</p>`;
+    名簿から検索して追加するか、ご本人にスタッフ登録ページから登録してもらえます。</p>`;
   html+=directoryCard();
-  if(ADMIN_PENDING.length){
-    html+=`<div class="card"><div class="ch"><h3>承認待ちスタッフ</h3><span class="tag" style="margin-left:auto">${ADMIN_PENDING.length}件</span></div>
-      <div class="rowlist">${ADMIN_PENDING.map(u=>`
-        <div class="row" style="cursor:default">
-          <span class="av">${esc(initials(u.nickname))}</span>
-          <span class="rmain"><span class="rt">${esc(u.nickname)}</span>
-          <span class="rs">${esc(u.email)} ・ ${branchName(u.branch_id)}</span></span>
-          <button class="btn sm pri" onclick="approveStaff('${u.id}')">承認</button>
-          <button class="btn sm bad" onclick="rejectStaff('${u.id}')">却下</button>
-        </div>`).join('')}</div></div>`;
-  }
   branches.forEach(b=>{
     const us=byBranch[b.id]||[];
     html+=`<div class="card"><div class="ch"><h3>${esc(b.name)}</h3><span class="tag" style="margin-left:auto">${us.length}人</span></div>
@@ -2062,7 +2019,6 @@ function openMailDetail(id){
     unverified:'このGoogleアカウントはメールアドレスが未確認のため利用できません。',
     domain:'ドットジェイピーから配布されたアカウントで登録してください。',
     already:'このアカウントは既に登録されています。ログイン画面からお進みください。',
-    already_pending:'既に申請済みです。管理者の承認をお待ちください。',
     failed:'登録に失敗しました。時間をおいて再度お試しください。',
   };
 
@@ -2072,7 +2028,6 @@ function openMailDetail(id){
     cancelled:'Googleログインがキャンセルされました。',
     state:'セッションの有効期限が切れました。もう一度お試しください。',
     unverified:'このGoogleアカウントはメールアドレスが未確認のため利用できません。',
-    pending:'管理者の承認待ちです。承認までしばらくお待ちください。',
     inactive:'このアカウントではログインできません。',
     failed:'Googleログインに失敗しました。時間をおいて再度お試しください。',
   };
