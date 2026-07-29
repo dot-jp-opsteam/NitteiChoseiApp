@@ -1639,6 +1639,7 @@ function eventsSection(){
   // 自分だけの予定は、どの支部の絞り込みでも自分には見えるようにする
   if(ME.role!=='admin')list=list.filter(e=>e.branch_id===ME.branch_id||e.creator_id===ME.id);
   const ivs=myInterviewsForCal();
+  const unreviewed=myUnreviewedEvents();
   const {y,m}=calYM;
   const evByDay={},ivByDay={};
   list.forEach(e=>{const k=ymd(new Date(e.start_datetime));(evByDay[k]=evByDay[k]||[]).push(e);});
@@ -1712,6 +1713,9 @@ function eventsSection(){
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div></div>
     <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定を追加できます。予定の帯をクリックすると、その日の一覧が下に出ます。</p>
+    ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">
+      <span>🔒</span><span>公開範囲を選べるようになる前に作った予定が <b>${unreviewed.length}件</b> あります。
+      いまも支部の全員に見えているので、<b>個人的なものを「自分だけ」に変えられます</b>。タップして見直す。</span></div>`:''}
     <button class="btn pri block" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しい予定を作成</button>
     ${cal}
     <div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
@@ -1758,6 +1762,54 @@ function openEventResponders(evId){
       <span class="tag">${label[r.response]}</span></div>`;}).join('')
     :'<div class="empty">まだ回答がありません</div>';
   openSheet(`<h3>回答者一覧</h3><div class="card"><div class="rowlist">${rows}</div></div>`);
+}
+/* 公開範囲の仕組みを入れる前に作られた、自分の予定。
+   visibility を持たないので支部の全員に見えている状態のもの */
+function myUnreviewedEvents(){
+  return DB.events
+    .filter(e=>e.creator_id===ME.id&&e.visibility===undefined)
+    .sort((a,b)=>new Date(a.start_datetime)-new Date(b.start_datetime));
+}
+/* 昔の予定を1件ずつ見て、個人的なものだけ「自分だけ」に変える。
+   チェックしなかったものは支部共有のままで確定させ、この案内をもう出さないようにする */
+function openVisibilityCleanup(){
+  const evs=myUnreviewedEvents();
+  if(!evs.length){toast('見直しが必要な予定はありません');return;}
+  const rows=evs.map((e,i)=>`<label class="visrow">
+      <input type="checkbox" data-id="${e.id}" ${i===0?'':''}>
+      <span class="visrow-b">
+        <b>${esc(e.title)}</b>
+        <span class="tile-d">${fmtDT(e.start_datetime)}${e.location?' ・ '+esc(e.location):''}</span>
+      </span>
+    </label>`).join('');
+  openSheet(`<h3>昔の予定の公開範囲を見直す</h3>
+    <div class="hint"><span>💡</span><span>下の予定は、いまも <b>${esc(branchName(ME.branch_id))}の全員</b> に見えています。
+      ほかの人に見せたくないものにチェックを入れてください。チェックしたものだけ「自分だけ」になります。</span></div>
+    <div class="btn-row" style="margin:10px 0">
+      <button class="btn sm" onclick="visCleanupAll(true)">すべて選ぶ</button>
+      <button class="btn sm" onclick="visCleanupAll(false)">すべて外す</button>
+    </div>
+    <div class="vislist" id="visList">${rows}</div>
+    <button class="btn pri block" style="margin-top:16px" onclick="saveVisibilityCleanup()">この内容で確定する（${evs.length}件）</button>
+    <p class="page-sub" style="margin-top:8px">チェックを入れなかった予定は、これまでどおり支部の全員に見えたままになります。</p>`);
+}
+function visCleanupAll(on){
+  document.querySelectorAll('#visList input[type=checkbox]').forEach(c=>{c.checked=on;});
+}
+async function saveVisibilityCleanup(){
+  const boxes=[...document.querySelectorAll('#visList input[type=checkbox]')];
+  const priv=new Set(boxes.filter(c=>c.checked).map(c=>c.dataset.id));
+  const all=new Set(boxes.map(c=>c.dataset.id));
+  const ok=await mutate(db=>{
+    db.events.forEach(e=>{
+      if(!all.has(e.id))return;
+      // チェックの有無にかかわらず確定させる。そうしないと毎回この案内が出続ける
+      e.visibility=priv.has(e.id)?'private':'branch';
+    });
+  });
+  if(!ok)return;
+  closeSheet();render();
+  toast(priv.size?`${priv.size}件を「自分だけ」にしました`:'公開範囲を確定しました');
 }
 /* dateKey（'2026-07-15'）を渡すと、その日の9:00を初期値にして開く。
    カレンダーの日付を直接クリックしたときに使う */
