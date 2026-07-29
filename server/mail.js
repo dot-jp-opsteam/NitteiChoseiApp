@@ -8,41 +8,76 @@
      https://myaccount.google.com/apppasswords で発行する（2段階認証が必要）。
 */
 const nodemailer = require('nodemailer');
+const dns = require('node:dns').promises;
 
 const SMTP_USER = process.env.SMTP_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || '';
 const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME || 'OPS日調アプリ';
 const MAIL_ENABLED = !!(SMTP_USER && SMTP_PASS);
 
+const SMTP_HOST = 'smtp.gmail.com';
+const SMTP_PORT = 465;
+
+/* 【なぜIPアドレスで接続しているか】
+   nodemailer は smtp.gmail.com のIPv4とIPv6の候補を集めたうえで、
+   そこから「ランダムに1つ」選んで接続する
+   （node_modules/nodemailer/lib/shared/index.js の formatDNSValue）。
+   ところがRenderの無料プランは外向きのIPv6が使えないため、
+   IPv6を引いた回だけ ENETUNREACH で失敗する。
+   つまり「送れたり送れなかったりする」状態になる（2026-07-29に判明）。
+
+   createTransport の family:4 はこの選択には効かない。
+   そこで自分でIPv4に解決し、ホストにはIPアドレスを渡している。
+   nodemailer はIPリテラルを渡すとDNSを引き直さない（net.isIP による分岐）。
+   証明書の検証に使うホスト名は tls.servername で別途渡す必要がある */
 let transporter = null;
-function getTransporter() {
-  if (!MAIL_ENABLED) return null;
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: { user: SMTP_USER, pass: SMTP_PASS },
-      /* smtp.gmail.com はIPv6アドレスも返すが、Renderの無料プランは
-         外向きのIPv6が使えず ENETUNREACH で失敗する。
-         IPv4に固定しないとメールが1通も送れない（2026-07-29に判明） */
-      family: 4,
-      /* 接続できないときに延々と待たせない。既定では数分固まることがある */
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000,
-    });
+
+async function buildTransporter() {
+  let host = SMTP_HOST;
+  try {
+    /* resolve4 ではなく lookup を使う。resolve4 はDNSサーバーに直接問い合わせるため
+       環境によっては ECONNREFUSED で失敗する（開発機で実際に失敗した）。
+       lookup はOSの名前解決を通すのでどの環境でも引ける */
+    const { address } = await dns.lookup(SMTP_HOST, { family: 4 });
+    if (address) host = address;
+  } catch (e) {
+    // 解決できなければホスト名のまま繋ぐ（IPv4が選ばれれば成功する）
+    console.warn('smtp.gmail.com のIPv4解決に失敗しました:', e.message);
   }
+  return nodemailer.createTransport({
+    host,
+    port: SMTP_PORT,
+    secure: true,
+    tls: { servername: SMTP_HOST },
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+    /* 接続できないときに延々と待たせない。既定では数分固まることがある */
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+  });
+}
+
+async function getTransporter() {
+  if (!MAIL_ENABLED) return null;
+  if (!transporter) transporter = await buildTransporter();
   return transporter;
 }
 
 async function sendMail({ to, subject, text, html }) {
-  const t = getTransporter();
+  const t = await getTransporter();
   if (!t) throw new Error('メール送信が未設定です（SMTP_USER / SMTP_PASS）');
-  return t.sendMail({
-    from: `"${MAIL_FROM_NAME}" <${SMTP_USER}>`,
-    to, subject, text, html,
-  });
+  const msg = { from: `"${MAIL_FROM_NAME}" <${SMTP_USER}>`, to, subject, text, html };
+  try {
+    return await t.sendMail(msg);
+  } catch (e) {
+    // GoogleのIPは入れ替わる。接続まわりの失敗のときだけ、
+    // 引き直したIPで一度だけやり直す（認証エラー等はそのまま投げる）
+    const code = String(e.code || e.message || '');
+    if (!/ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ESOCKET/.test(code)) throw e;
+    console.warn('SMTP接続に失敗したため、IPを引き直して再試行します:', code);
+    transporter = await buildTransporter();
+    return transporter.sendMail(msg);
+  }
 }
 
 /* パスワード再設定の案内メール。
