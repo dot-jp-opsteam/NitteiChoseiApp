@@ -1390,7 +1390,23 @@ app.get('/api/google/status', requireAuth, async (req, res) => {
   if (staffId !== req.authUser.id) return res.status(403).json({ error: '本人以外は確認できません' });
   try {
     const row = await getTokenRow(staffId);
-    res.json({ connected: !!row, enabled: GOOGLE_ENABLED });
+    if (!row) return res.json({ connected: false, expired: false, enabled: GOOGLE_ENABLED });
+    /* 行があるだけでは「連携できている」とは言えない。
+       Googleのリフレッシュトークンは、本人がアクセス権を取り消したときや
+       同意画面が「テスト中」だった頃に発行されたものだと失効する。
+       それに気づけないと、画面には「連携済み」と出ているのに予定が反映されず、
+       埋まっているはずの時間にインターン生が予約できてしまう。
+       そこで実際にアクセストークンを取り直せるか確かめる。
+       期限内のトークンが残っていればGoogleへの通信は起きないので、
+       正常な人にとっては今までと変わらない速さで返る */
+    let expired = false;
+    try {
+      await accessTokenFor(row);
+    } catch (e) {
+      if (e.code === 'REFRESH_REVOKED') expired = true;
+      else throw e;
+    }
+    res.json({ connected: true, expired, enabled: GOOGLE_ENABLED });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: '状態取得に失敗しました' });

@@ -188,7 +188,16 @@ async function refreshAccessToken(refreshToken) {
       grant_type: 'refresh_token',
     }),
   });
-  if (!res.ok) throw new Error(`token refresh failed: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    const err = new Error(`token refresh failed: ${body}`);
+    /* invalid_grant は「リフレッシュトークンが失効した／取り消された」状態。
+       何度やり直しても回復しないので、呼び出し側が「連携切れ」として
+       扱えるように印を付ける。ここを普通のエラーと区別しないと、
+       本人は連携済みのつもりなのに予定が反映されない状態が続いてしまう */
+    if (/invalid_grant/.test(body)) err.code = 'REFRESH_REVOKED';
+    throw err;
+  }
   return res.json(); // { access_token, expires_in, ... }
 }
 

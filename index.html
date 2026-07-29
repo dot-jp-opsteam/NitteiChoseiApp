@@ -1143,6 +1143,19 @@ function renderGoogleCalendarSettings(data){
     return;
   }
   const isStaff=ME.role==='staff'||ME.role==='branch_admin';
+  /* 連携は残っているが、Google側でアクセス権が取り消された状態。
+     「連携済み」と出したままにすると、予定が反映されていないことに
+     気づけないため、はっきり切れていると伝えて再連携に誘導する */
+  if(data.connected&&data.expired){
+    openSheet(`<h3>Googleカレンダー連携</h3>
+      <div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">
+        <span>⚠️</span><span><b>連携が切れています。</b>${isStaff
+          ?'いまはGoogleカレンダーの予定が「面談不可」に反映されていません。予定が入っている時間にも面談を入れられてしまうため、下のボタンから連携し直してください。'
+          :'いまは確定した面談がGoogleカレンダーに登録されません。下のボタンから連携し直してください。'}</span></div>
+      <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携し直す</button>
+      ${openCalendarButton()}`);
+    return;
+  }
   if(data.connected){
     openSheet(`<h3>Googleカレンダー連携</h3>
       <div class="hint"><span>✅</span><span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
