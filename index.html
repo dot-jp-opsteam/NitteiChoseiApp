@@ -1022,18 +1022,20 @@ function hex(act,ic,t,d,badge){
     <span class="hxt">${t}</span>
     <span class="hxd">${d}</span></button>`;
 }
-/* 六角形を2行に分けて、下の行を半個ずらして噛み合わせる（ハニカム）。
-   上の行を多めにし、6個なら3＋3、4個なら2＋2、3個なら2＋1になる。
+/* 六角形をハニカム状に並べる。1行は最大4個までで、
+   4個以下なら1行に収める。行が増えたら1つおきに半個ずらして噛み合わせる。
+   4個→4、6個→3＋3、7個→4＋3、10個→4＋4＋2。
    1個あたりの幅は --cols から計算するので、行数が変わってもCSSは触らずに済む */
+const HEX_PER_ROW=4;
 function hexgrid(items){
-  const top=Math.ceil(items.length/2);
-  const cols=Math.max(top,1);
-  const row1=items.slice(0,top).join('');
-  const row2=items.slice(top).join('');
-  return `<div class="hexwrap"><div class="hexgrid" style="--cols:${cols};--off:${row2?'.5':'0'}">
-    <div class="hexrow">${row1}</div>
-    ${row2?`<div class="hexrow off">${row2}</div>`:''}
-  </div></div>`;
+  const n=items.length;
+  const rows=Math.max(1,Math.ceil(n/HEX_PER_ROW));
+  // 行数を決めてから均等に割るので、最後の行だけ極端に少なくならない
+  const per=Math.max(1,Math.ceil(n/rows));
+  const chunks=[];
+  for(let i=0;i<n;i+=per)chunks.push(items.slice(i,i+per));
+  const html=chunks.map((c,i)=>`<div class="hexrow${i%2?' off':''}">${c.join('')}</div>`).join('');
+  return `<div class="hexwrap"><div class="hexgrid" style="--cols:${per};--off:${chunks.length>1?'.5':'0'}">${html}</div></div>`;
 }
 
 function viewHome(){

@@ -706,10 +706,10 @@
     width:fit-content;margin:6px auto 16px;
   }
   .hexrow{display:flex;gap:var(--hgap)}
-  .hexrow.off{
-    margin-left:calc((var(--hw) + var(--hgap)) / 2);
-    margin-top:calc(var(--hw) * -0.2887 + var(--hgap));
-  }
+  /* 2行目以降は縦に食い込ませて噛み合わせる（1行のときは何も起きない） */
+  .hexrow+.hexrow{margin-top:calc(var(--hw) * -0.2887 + var(--hgap))}
+  /* 1つおきの行を半個ぶん右にずらす。JS側が奇数番目の行に .off を付ける */
+  .hexrow.off{margin-left:calc((var(--hw) + var(--hgap)) / 2)}
   /* clip-path は border ごと切り落とすので、輪郭線は
      「外側の六角形＝線の色」＋「1.6px内側の六角形＝面の色」の2枚重ねで作る */
   .hex{
