@@ -3,10 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#000000">
 <title>OPS日調アプリ</title>
+<!-- テーマは端末設定ではなくアプリ側の設定に従う。既定はダーク。
+     CSSより先に data-theme を確定させないと、一瞬だけ違う配色が見えてしまう -->
+<script>
+(function(){
+  try{
+    var t=localStorage.getItem('ops_theme_v1');
+    document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');
+  }catch(e){document.documentElement.setAttribute('data-theme','dark');}
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Noto+Sans+JP:wght@400;700;900&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- 背景のオーロラ。CSSだけで動く装飾なので、中身は空のspan3枚でよい -->
+<div id="aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span></div>
 
 <!-- 起動中の表示。読み込みが終わったら hideBoot() が取り除く。
      これが無いと、サーバーが起きるまでの間まっ白な画面になり「壊れた」と誤解される -->
@@ -17,11 +35,12 @@
 
 <!-- ========== LOGIN ========== -->
 <div id="login">
-  <div class="login-card">
-    <div class="mark">OPS</div>
-    <h2>OPS日調アプリ</h2>
-    <p>ドットジェイピー 日程調整・面談管理</p>
-
+  <div class="login-hero">
+    <div class="mark reveal">OPS</div>
+    <h1 class="hero-title reveal">日調アプリ</h1>
+    <p class="hero-sub reveal">ドットジェイピー 日程調整・面談管理</p>
+  </div>
+  <div class="login-card reveal">
     <div id="loginBody" style="text-align:left"></div>
     <p class="fine">データはこのアプリのサーバーに保存されます（同じサーバーを見る端末間で共有されます）。</p>
   </div>
@@ -40,12 +59,19 @@
         <span class="rolebadge" id="chipRole"></span>
       </span>
     </div>
+    <button class="burger" id="burger" onclick="toggleDrawer()" aria-label="メニュー" aria-expanded="false" aria-controls="drawer">
+      <i></i><i></i><i></i>
+    </button>
   </header>
 
   <main id="main"></main>
 
   <nav class="bottomnav" id="nav"></nav>
 </div>
+
+<!-- 右上☰から開くドロワー。中身は openDrawer() が組み立てる -->
+<div id="drawerScrim" onclick="closeDrawer()"></div>
+<aside id="drawer" role="dialog" aria-modal="true" aria-label="メニュー"></aside>
 
 <!-- 保存に失敗したときだけ出る帯。黙って消えるのを防ぐ -->
 <div id="savebar" class="hidden">
@@ -272,14 +298,15 @@ function isAdminLike(u){u=u||ME;return !!u&&(u.role==='admin'||u.role==='branch_
 function isFullAdmin(u){u=u||ME;return !!u&&u.role==='admin';}
 const STATUS={none:{t:'未申請',c:'st-none'},applied:{t:'申請中',c:'st-applied'},fixed:{t:'確定済み',c:'st-fixed'},failed:{t:'不成立',c:'st-failed'}};
 const MTYPE={meet:'Google Meet',zoom:'Zoom'};
+/* 黒地でも沈まない色に統一。黄色系は使わない方針のため外してある */
 const EVENT_COLORS=[
-  {v:'#0ea678',n:'グリーン'},{v:'#2563eb',n:'ブルー'},{v:'#6366f1',n:'インディゴ'},{v:'#db2777',n:'ピンク'},
-  {v:'#e11d48',n:'レッド'},{v:'#f59e0b',n:'オレンジ'},{v:'#06b6d4',n:'ティール'},{v:'#64748b',n:'グレー'},
+  {v:'#43e7df',n:'シアン'},{v:'#3ddc97',n:'グリーン'},{v:'#6aa9f0',n:'ブルー'},{v:'#a98bf5',n:'パープル'},
+  {v:'#f47ab0',n:'ピンク'},{v:'#f4706f',n:'レッド'},{v:'#5fd0e8',n:'スカイ'},{v:'#9aa5ad',n:'グレー'},
 ];
 /* カレンダーのチップ色。イベント作成時に選んだ色から地色と文字色を作る。
-   ライトモードは「白に寄せた薄い地色＋濃い文字」、
-   ダークモードは逆に「黒に寄せた濃い地色＋明るい文字」にしないと読めなくなる */
-const isDarkMode=()=>window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;
+   ライトは「白に寄せた薄い地色＋濃い文字」、ダークは逆に「黒に寄せた濃い地色＋
+   明るい文字」にしないと読めなくなる。判定は端末設定ではなくアプリのテーマに合わせる */
+const isDarkMode=()=>document.documentElement.getAttribute('data-theme')!=='light';
 function _hexRgb(v){const s=v.replace('#','');return [parseInt(s.slice(0,2),16),parseInt(s.slice(2,4),16),parseInt(s.slice(4,6),16)];}
 function chipBg(v){
   if(v.startsWith('var'))return 'var(--iv-soft)';
@@ -564,6 +591,7 @@ function renderLogin(){
   if(emailInput&&passInput){
     [emailInput,passInput].forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter')doLoginAuth();}));
   }
+  bindReveal(document.getElementById('login'));
 }
 
 async function doForgotPassword(){
@@ -777,6 +805,111 @@ function openUserMenu(){
     </div>`);
 }
 
+/* =========================================================
+   テーマ切替（ダーク⇄ライト）
+   端末のOS設定ではなくアプリ側の設定に従う。同じキーを <head> の先頭でも
+   読んでいて、CSSが当たる前に data-theme を確定させている
+   ========================================================= */
+const THEME_KEY='ops_theme_v1';
+const currentTheme=()=>document.documentElement.getAttribute('data-theme')==='light'?'light':'dark';
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme',t);
+  try{localStorage.setItem(THEME_KEY,t);}catch(e){}
+  const m=document.querySelector('meta[name="theme-color"]');
+  if(m)m.setAttribute('content',t==='light'?'#f7fafb':'#000000');
+}
+function toggleTheme(){
+  setTheme(currentTheme()==='light'?'dark':'light');
+  const v=document.querySelector('#dwTheme .dwv');
+  if(v)v.textContent=currentTheme()==='light'?'ライト':'ダーク';
+  // カレンダーの予定チップは明暗で色の計算式が変わるので、開いている画面を描き直す
+  if(ME&&!document.getElementById('app').classList.contains('hidden'))render();
+}
+
+/* =========================================================
+   右上☰のドロワー
+   ========================================================= */
+let DRAWER_OPEN=false;
+function drawerHTML(){
+  const tabs=NAV[ME.role]||[];
+  let i=0;
+  const navBtns=tabs.map(t=>
+    `<button class="stag${t.id===currentTab?' on':''}" style="--i:${++i}" onclick="drawerGo('${t.id}')">${t.label}</button>`
+  ).join('');
+  return `<div class="dw-top stag" style="--i:0">
+      <span class="mark">OPS</span><span>日調アプリ</span>
+      <button class="dw-close" onclick="closeDrawer()" aria-label="メニューを閉じる">✕</button>
+    </div>
+    <nav class="dw-nav">${navBtns}</nav>
+    <div class="dw-sep stag" style="--i:${++i}"></div>
+    <div class="dw-act">
+      <button class="stag" id="dwTheme" style="--i:${++i}" onclick="toggleTheme()">
+        <span class="dwi">◐</span><span>テーマ</span>
+        <span class="dwv">${currentTheme()==='light'?'ライト':'ダーク'}</span></button>
+      <button class="stag" style="--i:${++i}" onclick="closeDrawer();openPasswordChange()">
+        <span class="dwi">🔑</span><span>パスワードを変更</span></button>
+      <button class="stag" style="--i:${++i}" onclick="closeDrawer();logout()">
+        <span class="dwi">⏻</span><span>ログアウト</span></button>
+    </div>
+    <div class="dw-foot stag" style="--i:${++i}">
+      <a href="/terms.html">利用規約</a>
+      <a href="/privacy.html">プライバシーポリシー</a>
+      <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer">ドットジェイピー公式 ↗</a>
+    </div>`;
+}
+function openDrawer(){
+  if(!ME)return;
+  const d=document.getElementById('drawer');
+  d.innerHTML=drawerHTML();
+  /* innerHTML を入れた直後に .open を付けると、入れたばかりの項目は
+     初期状態が確定していないので最終状態で描かれ、スタッガが効かない。
+     ここで一度レイアウトを読んで初期状態を確定させる。
+     requestAnimationFrame でも同じことができるが、描画されていない
+     タブでは発火しないため、同期的に済むこちらを使う */
+  void d.offsetHeight;
+  d.classList.add('open');
+  document.getElementById('drawerScrim').classList.add('open');
+  document.getElementById('burger').classList.add('on');
+  document.getElementById('burger').setAttribute('aria-expanded','true');
+  document.body.style.overflow='hidden';
+  DRAWER_OPEN=true;
+}
+function closeDrawer(){
+  if(!DRAWER_OPEN)return;
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawerScrim').classList.remove('open');
+  const b=document.getElementById('burger');
+  b.classList.remove('on');b.setAttribute('aria-expanded','false');
+  document.body.style.overflow='';
+  DRAWER_OPEN=false;
+}
+function toggleDrawer(){DRAWER_OPEN?closeDrawer():openDrawer();}
+function drawerGo(tab){closeDrawer();go(tab);}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&DRAWER_OPEN)closeDrawer();});
+
+/* =========================================================
+   スクロール連動フェードアップ
+   画面を描き直すたびに bindReveal() を呼び、まだ見ていない要素だけ監視する
+   ========================================================= */
+const REVEAL_IO=('IntersectionObserver' in window)?new IntersectionObserver(es=>{
+  es.forEach(en=>{
+    if(!en.isIntersecting)return;
+    en.target.classList.add('in');
+    REVEAL_IO.unobserve(en.target); // 一度出したら監視をやめる
+  });
+},{rootMargin:'0px 0px -8% 0px',threshold:.06}):null;
+function bindReveal(root){
+  const scope=root||document;
+  // 明示的に付いた .reveal と、画面ごとの主要な塊を拾う。
+  // 見出し（h1.page）は動かさない。すぐ下の説明文だけ先に出てしまい、
+  // 重なって見えるうえ「読み始めたい場所」が遅れて出るのは邪魔になるため
+  scope.querySelectorAll('.card,.hex,.reveal').forEach(el=>{
+    if(el.classList.contains('in'))return;
+    el.classList.add('reveal');
+    if(REVEAL_IO)REVEAL_IO.observe(el); else el.classList.add('in');
+  });
+}
+
 /* パスワード変更。Googleだけで登録した人はまだパスワードを持たないので、
    その場合は「現在のパスワード」欄を出さずに新規設定として扱う */
 function openPasswordChange(){
@@ -884,18 +1017,25 @@ function render(){
   else if(t==='users')html=viewUsers();
   else html='<div class="empty">画面が見つかりません</div>';
   m.innerHTML='<div class="view">'+html+'</div>';
+  bindReveal(m);
   updateBell();
 }
 
 /* =========================================================
    HOME
    ========================================================= */
-function tile(tab,ic,color,t,d){
-  return `<div class="card click home-tile" onclick="go('${tab}')">
-    <div class="cb"><span class="tile-ic" style="background:${color.bg};color:${color.fg}">${ic}</span>
-      <span><span class="tile-t">${t}</span><br><span class="tile-d">${d}</span></span>
-      <span class="tile-arrow">›</span></div></div>`;
+/* ホームの入口タイル。参考サイトのポートフォリオに合わせて六角形で並べる。
+   act には onclick にそのまま入るJSを渡す（go('apply') でも openXxx() でもよい）。
+   badge は右上に出す件数（0や未指定なら出さない） */
+function hex(act,ic,t,d,badge){
+  return `<button class="hex" onclick="${act}">
+    ${badge?`<span class="hxb">${badge}</span>`:''}
+    <span class="hxi">${ic}</span>
+    <span class="hxt">${t}</span>
+    <span class="hxd">${d}</span></button>`;
 }
+const hexgrid=items=>`<div class="hexgrid">${items.join('')}</div>`;
+
 function viewHome(){
   const hi=`<h1 class="page">こんにちは、${esc(ME.nickname)}さん</h1>
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
@@ -906,56 +1046,36 @@ function viewHome(){
     if(latest){const s=STATUS[latest.status];
       statusCard=`<div class="hint"><span>💡</span><span>あなたの面談は現在 <b>「${s.t}」</b> です。${latest.status==='failed'?'再申請をお願いします。':''}</span></div>`;}
     const inbox=DB.emails.filter(m=>m.receiver_id===ME.id).length;
-    return hi+statusCard+
-      tile('apply','📝',{bg:'#e2f5ec',fg:'#0b8a63'},'面談を申請する','希望日時を3つ提出して面談を予約')+
-      tile('my','📋',{bg:'#fdf1e0',fg:'#d97706'},'面談状況を確認','申請中・確定済みの面談を確認')+
-      `<div class="card click home-tile" onclick="openMailHistory()">
-        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">✉️</span>
-        <span><span class="tile-t">受信メール</span><br><span class="tile-d">面談確定・リンクなどの通知メール${inbox?`（${inbox}件）`:''}</span></span>
-        <span class="tile-arrow">›</span></div></div>`+
-      `<div class="card click home-tile" onclick="openGoogleCalendarSettings()">
-        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">📅</span>
-        <span><span class="tile-t">Googleカレンダー連携</span><br><span class="tile-d">確定した面談を自分のカレンダーに自動登録</span></span>
-        <span class="tile-arrow">›</span></div></div>`+
-      eventsSection();
+    return hi+statusCard+hexgrid([
+      hex("go('apply')",'📝','面談を申請','希望日時を3つ提出'),
+      hex("go('my')",'📋','面談状況','申請中・確定済みを確認'),
+      hex('openMailHistory()','✉️','受信メール','面談確定などの通知',inbox),
+      hex('openGoogleCalendarSettings()','📅','カレンダー連携','確定面談を自動登録'),
+    ])+eventsSection();
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
   if(ME.role==='staff'||ME.role==='branch_admin'){
     const pend=DB.interviews.filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
+    const items=[];
+    if(ME.role==='branch_admin')items.push(hex("go('users')",'👥','ユーザー管理','スタッフ追加・権限'));
+    items.push(
+      hex("go('interviews')",'📋','面談一覧・確定','担当インターン生の面談',pend),
+      hex("go('avail')",'🕒','空き日程','カレンダーから確認'),
+      hex('openAvailabilitySettings()','⏰','面談可能時間帯','曜日ごとに設定'),
+      hex("go('avset')",'🚫','面談できない時間','30分枠で登録'),
+      hex('openGoogleCalendarSettings()','📅','カレンダー連携','予定を自動で反映'),
+      hex('openMailHistory()','✉️','メール履歴','送信済みメール'),
+    );
     return hi+
-      (ME.role==='branch_admin'
-        ?tile('users','👥',{bg:'#eaf1ff',fg:'#1f56cf'},'ユーザー管理',`${branchName(ME.branch_id)}のスタッフ追加・権限の管理`)
-        :'')+
       (pend?`<div class="hint"><span>🔔</span><span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
-      tile('interviews','📋',{bg:'#e2f5ec',fg:'#0b8a63'},'面談一覧・確定',`担当インターン生の面談を管理${pend?`（未対応 ${pend}）`:''}`)+
-      tile('avail','🕒',{bg:'#e0f2fe',fg:'#0369a1'},'スタッフ空き日程','Googleカレンダーから空き時間を確認')+
-      `<div class="card click home-tile" onclick="openAvailabilitySettings()">
-        <div class="cb"><span class="tile-ic" style="background:var(--warn-soft);color:var(--warn-ink)">⏰</span>
-        <span><span class="tile-t">面談可能時間帯を設定</span><br><span class="tile-d">曜日ごとに面談を受けられる時間を設定</span></span>
-        <span class="tile-arrow">›</span></div></div>`+
-      `<div class="card click home-tile" onclick="go('avset')">
-        <div class="cb"><span class="tile-ic" style="background:var(--bad-soft);color:var(--bad)">🚫</span>
-        <span><span class="tile-t">面談できない時間を登録</span><br><span class="tile-d">30分枠をタップ、または日時でまとめて指定</span></span>
-        <span class="tile-arrow">›</span></div></div>`+
-      `<div class="card click home-tile" onclick="openGoogleCalendarSettings()">
-        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">📅</span>
-        <span><span class="tile-t">Googleカレンダー連携</span><br><span class="tile-d">予定を自動で面談不可に反映／確定した面談を自動登録</span></span>
-        <span class="tile-arrow">›</span></div></div>`+
-      `<div class="card click home-tile" onclick="openMailHistory()">
-        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">✉️</span>
-        <span><span class="tile-t">メール履歴</span><br><span class="tile-d">インターン生へ送信したメールの履歴</span></span>
-        <span class="tile-arrow">›</span></div></div>`+
-      eventsSection();
+      hexgrid(items)+eventsSection();
   }
   // admin
-  return hi+
-    tile('branches','🏢',{bg:'#efeafe',fg:'#6d28d9'},'支部管理','支部の追加・編集・削除')+
-    tile('users','👥',{bg:'#eaf1ff',fg:'#1f56cf'},'ユーザー管理','全支部のユーザーと権限を管理')+
-    `<div class="card click home-tile" onclick="openSystemSettings()">
-      <div class="cb"><span class="tile-ic" style="background:var(--chip);color:var(--chip-ink)">⚙️</span>
-      <span><span class="tile-t">システム設定</span><br><span class="tile-d">連携状況の確認</span></span>
-      <span class="tile-arrow">›</span></div></div>`+
-    eventsSection();
+  return hi+hexgrid([
+    hex("go('branches')",'🏢','支部管理','支部の追加・編集'),
+    hex("go('users')",'👥','ユーザー管理','全支部の権限を管理'),
+    hex('openSystemSettings()','⚙️','システム設定','連携状況の確認'),
+  ])+eventsSection();
 }
 function openSystemSettings(){
   openSheet(`<h3>システム設定</h3>
@@ -1987,17 +2107,14 @@ async function delBlock(id){
    支部管理（管理者）
    ========================================================= */
 function viewBranches(){
-  const rows=DB.branches.map(b=>{
+  // 六角形1つが1支部。編集・削除はタップ後のシートにまとめた
+  const cells=DB.branches.map(b=>{
     const uc=DB.users.filter(u=>u.branch_id===b.id).length;
-    return `<div class="row">
-      <span class="av" style="border-radius:10px">🏢</span>
-      <span class="rmain"><span class="rt">${esc(b.name)}</span><span class="rs">ユーザー ${uc}人</span></span>
-      <button class="btn sm" onclick="openBranchForm('${b.id}')">編集</button>
-      <button class="btn sm bad" onclick="deleteBranch('${b.id}')">削除</button>
-    </div>`;}).join('');
-  return `<h1 class="page">支部管理</h1><p class="page-sub">支部の追加・編集・削除ができます。</p>
-    <button class="btn pri block" style="margin-bottom:12px" onclick="openBranchForm()">＋ 支部を追加</button>
-    <div class="card"><div class="rowlist">${rows}</div></div>`;
+    return hex(`openBranchForm('${b.id}')`,'🏢',esc(b.name),`ユーザー ${uc}人`);
+  });
+  cells.push(hex('openBranchForm()','＋','支部を追加','新しい支部をつくる'));
+  return `<h1 class="page">支部管理</h1><p class="page-sub">支部をタップすると編集・削除ができます。</p>
+    ${hexgrid(cells)}`;
 }
 function openBranchForm(id){
   const b=id?DB.branches.find(x=>x.id===id):null;
@@ -2005,7 +2122,10 @@ function openBranchForm(id){
     <label class="fl">支部名<span class="req">*</span></label>
     <input id="brName" value="${esc(b?.name||'')}" placeholder="例：千葉支部">
     <div class="field-err" id="brNameE"></div>
-    <button class="btn pri block" style="margin-top:16px" onclick="saveBranch(${b?`'${b.id}'`:'null'})">${b?'更新する':'追加する'}</button>`);
+    <div class="btn-row" style="margin-top:16px">
+      ${b?`<button class="btn bad" onclick="deleteBranch('${b.id}')">削除</button>`:''}
+      <button class="btn pri" style="flex:1" onclick="saveBranch(${b?`'${b.id}'`:'null'})">${b?'更新する':'追加する'}</button>
+    </div>`);
 }
 async function saveBranch(id){
   const name=document.getElementById('brName').value.trim();const e=document.getElementById('brNameE');
@@ -2185,7 +2305,7 @@ function viewUsers(){
     html+=`<div class="card"><div class="ch"><h3>${esc(b.name)}</h3><span class="tag" style="margin-left:auto">${us.length}人</span></div>
       <div class="rowlist">${us.length?us.map(u=>`
         <div class="row" onclick="openUserForm('${u.id}')">
-          <span class="av">${esc(initials(u.nickname))}</span>
+          <span class="av hexav">${esc(initials(u.nickname))}</span>
           <span class="rmain"><span class="rt">${esc(u.nickname)}</span>
           <span class="rs">${u.id===ME.id?'（あなた）':''}</span></span>
           <span class="rolebadge ${ROLE_CLS[u.role]}">${ROLE_JP[u.role]}</span>
@@ -2251,9 +2371,13 @@ const NOTI_READ_KEY='ops_notiread_v1';
 function getNotiRead(){try{return JSON.parse(localStorage.getItem(NOTI_READ_KEY))||{};}catch(e){return {};}}
 function lastRead(){return getNotiRead()[ME?.id]||'1970-01-01T00:00:00.000Z';}
 function unreadCount(){return (DB.notifications||[]).filter(n=>n.at>lastRead()).length;}
-const NOTI_IC={'面談申請':{e:'📝',bg:'#e2f5ec',fg:'#0b8a63'},'面談確定':{e:'✅',bg:'#e7f6ec',fg:'#0f7a37'},
-  '面談不成立':{e:'⚠️',bg:'#fdecec',fg:'#dc2626'},'イベント作成':{e:'📅',bg:'#f0eafe',fg:'#7c3aed'},
-  'イベント更新':{e:'🔄',bg:'#fdf1e0',fg:'#d97706'}};
+/* 色はCSS変数で持つ。テーマを切り替えても勝手に追従する */
+const NOTI_IC={
+  '面談申請':{e:'📝',bg:'var(--warn-soft)',fg:'var(--warn-ink)'},
+  '面談確定':{e:'✅',bg:'var(--ok-soft)',fg:'var(--ok-ink)'},
+  '面談不成立':{e:'⚠️',bg:'var(--bad-soft)',fg:'var(--bad)'},
+  'イベント作成':{e:'📅',bg:'var(--iv-soft)',fg:'var(--iv-ink)'},
+  'イベント更新':{e:'🔄',bg:'var(--info-soft)',fg:'var(--info-ink)'}};
 function updateBell(){
   const b=document.getElementById('bellBadge');if(!b||!ME)return;
   const n=unreadCount();
@@ -2263,7 +2387,7 @@ function updateBell(){
 function openNotifications(){
   const list=(DB.notifications||[]).slice().sort((a,b)=>new Date(b.at)-new Date(a.at));
   const lr=lastRead();
-  const rows=list.length?list.map(n=>{const ic=NOTI_IC[n.type]||{e:'🔔',bg:'#eef2f6',fg:'#64748b'};
+  const rows=list.length?list.map(n=>{const ic=NOTI_IC[n.type]||{e:'🔔',bg:'var(--chip)',fg:'var(--chip-ink)'};
     return `<div class="noti ${n.at>lr?'unread':''}">
       <span class="nic" style="background:${ic.bg};color:${ic.fg}">${ic.e}</span>
       <span><span class="nt">${esc(n.msg)}</span><br><span class="ns">${esc(n.type)} ・ ${fmtRel(n.at)}</span></span>

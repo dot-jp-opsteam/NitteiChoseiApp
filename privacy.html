@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>プライバシーポリシー｜OPS日調アプリ</title>
+<!-- アプリ本体で選んだテーマ（ダーク／ライト）に合わせる -->
+<script>
+(function(){
+  try{
+    var t=localStorage.getItem('ops_theme_v1');
+    document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');
+  }catch(e){document.documentElement.setAttribute('data-theme','dark');}
+})();
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
