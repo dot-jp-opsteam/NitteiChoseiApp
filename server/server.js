@@ -15,6 +15,15 @@
      - POST /api/auth/google/disconnect {staffId}    連携解除
      - GET  /api/google/status?staffId=xxx           連携状態確認
      - POST /api/webhooks/google-calendar            Googleからのpush通知受信
+
+   【デプロイ時の注意】
+   render.yaml で rootDir: server を指定しているため、Renderは
+   server/ の中が変わらないpushではビルドをスキップする。
+   画面まわり（index.html / style.css）だけを直したときは
+   デプロイが起動しないので、render.yaml の buildFilter で
+   配信対象のファイルもビルド対象に含めている。
+   それでも反映されない場合は、Renderの管理画面から
+   Manual Deploy を実行すること。
    ========================================================= */
 const path = require('node:path');
 const crypto = require('node:crypto');

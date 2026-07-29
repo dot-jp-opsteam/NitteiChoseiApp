@@ -6,6 +6,16 @@ services:
     rootDir: server
     buildCommand: npm install
     startCommand: npm start
+    # rootDir を指定すると、Renderは server/ の中が変わらないpushでは
+    # ビルドをスキップしてしまう。画面まわりのファイルはリポジトリ直下に
+    # あるため、それらもビルド対象として明示しておく
+    buildFilter:
+      paths:
+        - server/**
+        - index.html
+        - style.css
+        - privacy.html
+        - terms.html
     envVars:
       - key: TURSO_DATABASE_URL
         sync: false
