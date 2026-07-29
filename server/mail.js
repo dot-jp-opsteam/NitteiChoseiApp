@@ -15,8 +15,24 @@ const SMTP_PASS = process.env.SMTP_PASS || '';
 const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME || 'OPS日調アプリ';
 const MAIL_ENABLED = !!(SMTP_USER && SMTP_PASS);
 
-const SMTP_HOST = 'smtp.gmail.com';
-const SMTP_PORT = 465;
+/* 【重要】Renderの無料プランは2025年9月から、SMTPポート（25 / 465 / 587）への
+   外向き通信を全面的に遮断している。有料インスタンスなら465/587は使えるが、
+   このアプリは「料金が発生する方法は禁止」が前提のため選べない。
+   → Gmailの smtp.gmail.com:465 は、無料プランでは接続タイムアウトになり永久に送れない。
+     https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports
+
+   回避策は、遮断されていないポート2525を提供しているメール配信サービスを使うこと。
+   Brevo（無料300通/日・カード登録不要）なら次の設定で動く：
+     SMTP_HOST=smtp-relay.brevo.com
+     SMTP_PORT=2525
+     SMTP_USER / SMTP_PASS はBrevoが発行するSMTPキー
+   送信元の表示アドレスは MAIL_FROM で別に指定できる（Brevoで認証済みのアドレス）。 */
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+/* 465は接続時点からTLS、587と2525はSTARTTLSで途中から暗号化する */
+const SMTP_SECURE = SMTP_PORT === 465;
+/* 差出人として表示するアドレス。未指定ならログイン用のユーザー名をそのまま使う */
+const MAIL_FROM = process.env.MAIL_FROM || SMTP_USER;
 
 /* 【なぜIPアドレスで接続しているか】
    nodemailer は smtp.gmail.com のIPv4とIPv6の候補を集めたうえで、
@@ -47,7 +63,7 @@ async function buildTransporter() {
   return nodemailer.createTransport({
     host,
     port: SMTP_PORT,
-    secure: true,
+    secure: SMTP_SECURE,
     tls: { servername: SMTP_HOST },
     auth: { user: SMTP_USER, pass: SMTP_PASS },
     /* 接続できないときに延々と待たせない。既定では数分固まることがある */
@@ -66,7 +82,7 @@ async function getTransporter() {
 async function sendMail({ to, subject, text, html }) {
   const t = await getTransporter();
   if (!t) throw new Error('メール送信が未設定です（SMTP_USER / SMTP_PASS）');
-  const msg = { from: `"${MAIL_FROM_NAME}" <${SMTP_USER}>`, to, subject, text, html };
+  const msg = { from: `"${MAIL_FROM_NAME}" <${MAIL_FROM}>`, to, subject, text, html };
   try {
     return await t.sendMail(msg);
   } catch (e) {

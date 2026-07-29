@@ -43,8 +43,23 @@ services:
       # 2026-07-27 に Google Cloud Console へ登録済み。OAuth同意画面も公開済みのため有効化
       - key: GOOGLE_LOGIN_ENABLED
         value: "true"
-      # パスワード再設定メールの送信元。SMTP_PASS はGoogleの「アプリパスワード」16文字
-      # （ログインパスワードではない）。両方そろったときだけ再設定機能が有効になる
+      # メール送信の接続先。SMTP_USER と SMTP_PASS の両方がそろったときだけ
+      # 再設定メール・面談メールが有効になる。
+      #
+      # ※ Renderの無料プランは2025年9月から、SMTPポート（25/465/587）への
+      #   外向き通信を遮断している。Gmailの smtp.gmail.com:465 は無料プランでは
+      #   接続タイムアウトになり、絶対に送れない。
+      #   遮断されていないポート2525を提供している配信サービスを使うこと。
+      #   例）Brevo（無料300通/日・カード登録不要）
+      #     SMTP_HOST=smtp-relay.brevo.com / SMTP_PORT=2525
+      #     SMTP_USER・SMTP_PASS はBrevoが発行するSMTPキー
+      #     MAIL_FROM に、Brevoで認証済みの差出人アドレスを入れる
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: MAIL_FROM
+        sync: false
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
