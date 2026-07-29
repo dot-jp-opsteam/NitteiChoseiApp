@@ -1,11 +1,52 @@
+  /* 色はすべてここで定義する。個々のルールに直接色を書かないこと。
+     ダークモードは下の @media で、この変数だけを差し替えて実現している */
   :root{
-    --bg:#f2f7f5; --panel:#ffffff; --line:#e0e9e5; --line2:#eef3f1;
-    --ink:#16302a; --sub:#5f7169; --mut:#93a49c;
+    --bg:#f2f7f5; --panel:#ffffff; --panel2:#f7faf9; --line:#e0e9e5; --line2:#eef3f1;
+    --line-h:#cdd7e3;
+    --ink:#16302a; --sub:#5f7169; --mut:#93a49c; --disabled:#c2cad3;
     --brand:#0ea678; --brand-d:#0b8a63; --brand-soft:#e2f5ec; --brand-lite:#34d399;
-    --ok:#16a34a; --ok-soft:#e7f6ec; --warn:#d97706; --warn-soft:#fdf1e0;
-    --bad:#dc2626; --bad-soft:#fdecec; --info:#0891b2;
-    --iv:#7c3aed; --iv-soft:#f0eafe; /* 面談カレンダー用 */
+    --brand-ink:#0b5e45; --hint-line:#bfe8d5;
+    --ok:#16a34a; --ok-soft:#e7f6ec; --ok-ink:#0f7a37;
+    --warn:#d97706; --warn-soft:#fdf1e0; --warn-ink:#b45309;
+    --bad:#dc2626; --bad-soft:#fdecec; --bad-line:#f2b8b8; --info:#0891b2;
+    --iv:#7c3aed; --iv-soft:#f0eafe; --iv-ink:#6d28d9; /* 面談カレンダー用 */
+    --info-soft:#eaf1ff; --info-ink:#1f56cf;
+    --chip:#eef2f6; --chip-ink:#64748b;
+    --mock-bg:#fff8e6; --mock-line:#f3e2b0; --mock-ink:#7a5b13;
+    --sun:#dc2626; --sat:#2563eb;
+    --toast-bg:#1f2a37;
+    /* Googleログインボタン。ブランドガイドラインに沿って明背景／暗背景を出し分ける */
+    --gbtn-bg:#ffffff; --gbtn-ink:#3c4043; --gbtn-line:#dadce0;
     --radius:12px; --shadow:0 1px 2px rgba(16,40,32,.06),0 1px 3px rgba(16,40,32,.08);
+  }
+
+  /* ---------- ダークモード ----------
+     端末の設定に追従する。変数の差し替えだけで済むよう、
+     個別のルールから直接の色指定は取り除いてある */
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1a17; --panel:#16241f; --panel2:#1b2c26; --line:#27392f; --line2:#1f312a;
+      --line-h:#3a5347;
+      --ink:#e6efea; --sub:#a3b5ac; --mut:#7d918a; --disabled:#55665f;
+      --brand:#2fbf8e; --brand-d:#4dd3a6; --brand-soft:#17322a; --brand-lite:#34d399;
+      --brand-ink:#7fdcb6; --hint-line:#23503f;
+      --ok:#3cc46f; --ok-soft:#15301f; --ok-ink:#6cd894;
+      --warn:#e0a33f; --warn-soft:#2f2513; --warn-ink:#e8bd6e;
+      --bad:#f4706f; --bad-soft:#331a1b; --bad-line:#6b3434;
+      --info:#3ab5cf;
+      --iv:#a98bf5; --iv-soft:#251d3c; --iv-ink:#c3adfa;
+      --info-soft:#152437; --info-ink:#7fb0f2;
+      --chip:#23342d; --chip-ink:#9fb2aa;
+      --mock-bg:#2e2712; --mock-line:#4a3f1c; --mock-ink:#dcc17c;
+      --sun:#f4706f; --sat:#6ea8f5;
+      --toast-bg:#2a3a33;
+      --gbtn-bg:#1d2f28; --gbtn-ink:#e6efea; --gbtn-line:#3a5347;
+      --shadow:0 1px 2px rgba(0,0,0,.45),0 1px 3px rgba(0,0,0,.35);
+    }
+    /* ログイン画面の外周の影は、暗い背景では浮いて見えるので弱める */
+    .login-card{box-shadow:0 10px 40px rgba(0,0,0,.45)}
+    /* バッジの縁取りは「背景を切り抜く」役なので、地の色に合わせる */
+    .bell .badge,.wkrow .sw i{border-color:var(--panel)}
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
@@ -17,6 +58,37 @@
   button{font-family:inherit}
   a{color:var(--brand);text-decoration:none}
   .hidden{display:none !important}
+
+  /* ---------- 起動中の表示 ---------- */
+  #boot{
+    position:fixed;inset:0;z-index:100;background:var(--bg);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+  }
+  #boot .mark{
+    width:56px;height:56px;border-radius:15px;
+    background:linear-gradient(135deg,var(--brand),var(--brand-lite));
+    display:grid;place-items:center;color:#fff;font-size:19px;font-weight:800;letter-spacing:.04em;
+    animation:bootpulse 1.4s ease-in-out infinite;
+  }
+  #boot p{margin:0;color:var(--sub);font-size:13px;text-align:center;padding:0 24px;max-width:340px}
+  @keyframes bootpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.94)}}
+  @media (prefers-reduced-motion:reduce){#boot .mark{animation:none}}
+
+  /* ---------- 保存失敗の警告帯 ----------
+     保存できていないことに気づかないままデータを失うのを防ぐため、
+     画面最上部に固定で出す（トーストと違って自動では消えない） */
+  #savebar{
+    position:fixed;top:0;left:0;right:0;z-index:60;
+    display:flex;align-items:center;gap:10px;padding:10px 14px;
+    background:var(--bad);color:#fff;font-size:13px;font-weight:600;
+    box-shadow:0 2px 8px rgba(0,0,0,.18);
+  }
+  #savebar .sb-msg{flex:1;min-width:0}
+  #savebar button{
+    flex:none;border:1px solid rgba(255,255,255,.7);background:transparent;color:#fff;
+    border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;
+  }
+  #savebar button:disabled{opacity:.6;cursor:default}
 
   /* ---------- App shell ---------- */
   #app{min-height:100vh;display:flex;flex-direction:column;max-width:960px;margin:0 auto;background:var(--bg)}
@@ -37,9 +109,9 @@
     display:grid;place-items:center;font-weight:700;font-size:12px}
   .rolebadge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
   .role-intern{background:var(--brand-soft);color:var(--brand-d)}
-  .role-staff{background:var(--ok-soft);color:#0f7a37}
-  .role-admin{background:#efeafe;color:#6d28d9}
-  .role-branch-admin{background:#fdf1e0;color:#b45309}
+  .role-staff{background:var(--ok-soft);color:var(--ok-ink)}
+  .role-admin{background:var(--iv-soft);color:var(--iv-ink)}
+  .role-branch-admin{background:var(--warn-soft);color:var(--warn-ink)}
 
   main{flex:1;padding:16px 14px 92px}
   .view{animation:fade .18s ease}
@@ -55,7 +127,7 @@
   .card .ch h3{margin:0;font-size:15px}
   .card .cb{padding:14px 16px}
   .card.click{cursor:pointer;transition:border-color .15s,transform .05s}
-  .card.click:hover{border-color:#cdd7e3}
+  .card.click:hover{border-color:var(--line-h)}
   .card.click:active{transform:scale(.997)}
 
   .home-tile .cb{display:flex;align-items:center;gap:14px}
@@ -68,12 +140,12 @@
   .btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--ink);
     border-radius:10px;padding:11px 16px;min-height:44px;font-size:14px;font-weight:600;cursor:pointer;
     display:inline-flex;align-items:center;gap:7px;justify-content:center;transition:.12s}
-  .btn:hover{border-color:#cdd7e3}
+  .btn:hover{border-color:var(--line-h)}
   .btn:active{transform:scale(.98)}
   .btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
   .btn.pri:hover{background:var(--brand-d);border-color:var(--brand-d)}
   .btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
-  .btn.bad{background:#fff;border-color:#f2b8b8;color:var(--bad)}
+  .btn.bad{background:var(--panel);border-color:var(--bad-line);color:var(--bad)}
   .btn.bad:hover{background:var(--bad-soft)}
   .btn.ghost{background:transparent;border-color:transparent;color:var(--brand);padding-left:6px;padding-right:6px}
   .btn.sm{padding:8px 12px;min-height:38px;font-size:13px;border-radius:8px}
@@ -86,7 +158,7 @@
   label.fl .req{color:var(--bad);font-weight:700;margin-left:3px}
   input,select,textarea{
     width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;
-    background:#fff;color:var(--ink);font-family:inherit}
+    background:var(--panel);color:var(--ink);font-family:inherit}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
   textarea{resize:vertical;min-height:96px;line-height:1.6}
   .field-err{color:var(--bad);font-size:12px;margin-top:5px;display:none}
@@ -95,22 +167,22 @@
   .seg label{flex:1;min-width:120px;position:relative}
   .seg input{position:absolute;opacity:0;pointer-events:none}
   .seg .segb{display:block;text-align:center;padding:11px;border:1px solid var(--line);border-radius:10px;
-    cursor:pointer;font-weight:600;color:var(--sub);transition:.12s;background:#fff}
+    cursor:pointer;font-weight:600;color:var(--sub);transition:.12s;background:var(--panel)}
   .seg input:checked + .segb{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
 
   /* ---------- Status pills ---------- */
   .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
   .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.9}
-  .st-none{background:#eef2f6;color:#64748b}
+  .st-none{background:var(--chip);color:var(--chip-ink)}
   .st-applied{background:var(--warn-soft);color:var(--warn)}
-  .st-fixed{background:var(--ok-soft);color:#0f7a37}
+  .st-fixed{background:var(--ok-soft);color:var(--ok-ink)}
   .st-failed{background:var(--bad-soft);color:var(--bad)}
 
   /* ---------- List rows ---------- */
   .rowlist{display:flex;flex-direction:column}
   .rowlist .row{padding:13px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;cursor:pointer;transition:background .1s}
   .rowlist .row:last-child{border-bottom:0}
-  .rowlist .row:hover{background:#fafbfc}
+  .rowlist .row:hover{background:var(--panel2)}
   .row .av{width:36px;height:36px;border-radius:50%;background:var(--brand-soft);color:var(--brand-d);display:grid;place-items:center;font-weight:700;flex:none}
   .row .rmain{flex:1;min-width:0}
   .row .rt{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -132,11 +204,11 @@
   .empty .ei{font-size:34px;opacity:.5}
 
   .divider{height:1px;background:var(--line2);margin:16px 0}
-  .hint{background:var(--brand-soft);border:1px solid #bfe8d5;color:#0b5e45;border-radius:10px;padding:10px 12px;font-size:13px;display:flex;gap:8px}
-  .hint.mock{background:#fff8e6;border-color:#f3e2b0;color:#7a5b13}
+  .hint{background:var(--brand-soft);border:1px solid var(--hint-line);color:var(--brand-ink);border-radius:10px;padding:10px 12px;font-size:13px;display:flex;gap:8px}
+  .hint.mock{background:var(--mock-bg);border-color:var(--mock-line);color:var(--mock-ink)}
 
   /* event vote bars */
-  .votebar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:#eef2f6;margin:8px 0}
+  .votebar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--chip);margin:8px 0}
   .votebar i{display:block}
   .vb-ok{background:var(--ok)} .vb-may{background:var(--warn)} .vb-no{background:var(--bad)}
   .votekeys{display:flex;gap:14px;font-size:12px;color:var(--sub)}
@@ -144,7 +216,7 @@
   .vote3{display:flex;gap:8px}
   .vote3 .v{flex:1;text-align:center;padding:12px 6px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-weight:700}
   .vote3 .v .em{font-size:20px;display:block}
-  .vote3 .v.on-ok{border-color:var(--ok);background:var(--ok-soft);color:#0f7a37}
+  .vote3 .v.on-ok{border-color:var(--ok);background:var(--ok-soft);color:var(--ok-ink)}
   .vote3 .v.on-may{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
   .vote3 .v.on-no{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
 
@@ -153,8 +225,8 @@
   .avail .staff{border:1px solid var(--line);border-radius:10px;padding:12px}
   .avail .sname{font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between}
   .slots{display:flex;flex-wrap:wrap;gap:6px}
-  .slot{font-size:12px;padding:5px 9px;border-radius:8px;background:var(--ok-soft);color:#0f7a37;font-weight:600}
-  .slot.busy{background:#f1f3f6;color:var(--mut);text-decoration:line-through}
+  .slot{font-size:12px;padding:5px 9px;border-radius:8px;background:var(--ok-soft);color:var(--ok-ink);font-weight:600}
+  .slot.busy{background:var(--panel2);color:var(--mut);text-decoration:line-through}
 
   /* ---------- Bottom nav ---------- */
   nav.bottomnav{
@@ -169,9 +241,9 @@
   /* ---------- Modal / sheet ---------- */
   .scrim{position:fixed;inset:0;background:rgba(16,24,40,.42);z-index:50;display:none;align-items:flex-end;justify-content:center}
   .scrim.open{display:flex}
-  .sheet{background:#fff;width:100%;max-width:960px;border-radius:18px 18px 0 0;padding:8px 16px 22px;max-height:88vh;overflow:auto;animation:up .22s ease}
+  .sheet{background:var(--panel);width:100%;max-width:960px;border-radius:18px 18px 0 0;padding:8px 16px 22px;max-height:88vh;overflow:auto;animation:up .22s ease}
   @keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
-  .sheet .grab{width:40px;height:4px;border-radius:2px;background:#d7dde5;margin:6px auto 12px}
+  .sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--line-h);margin:6px auto 12px}
   .sheet h3{margin:0 0 4px;font-size:17px}
   @media(min-width:640px){
     .scrim{align-items:center}
@@ -180,14 +252,14 @@
 
   /* toast */
   #toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%) translateY(20px);z-index:80;
-    background:#1f2a37;color:#fff;padding:11px 18px;border-radius:999px;font-size:14px;font-weight:600;
+    background:var(--toast-bg);color:#fff;padding:11px 18px;border-radius:999px;font-size:14px;font-weight:600;
     opacity:0;pointer-events:none;transition:.25s;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90%}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
   /* login */
   #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
     background:radial-gradient(120% 100% at 50% 0%,var(--brand-soft) 0%,var(--bg) 55%)}
-  .login-card{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 40px rgba(16,24,40,.08);
+  .login-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 40px rgba(16,24,40,.08);
     padding:28px 24px;width:100%;max-width:380px;text-align:center}
   .login-card .mark{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--brand),var(--brand-lite));
     display:grid;place-items:center;color:#fff;font-size:22px;font-weight:800;margin:0 auto 14px}
@@ -255,32 +327,32 @@
   .social-note{text-align:center;margin-top:14px}
   /* Googleブランドガイドラインに沿って白地＋公式ロゴ。左のロゴ枠は見本デザインに合わせたもの */
   .btn.social{display:flex;align-items:center;gap:0;padding:0;height:48px;
-    background:#fff;border:1px solid #dadce0;color:#3c4043;font-weight:700;overflow:hidden}
-  .btn.social:hover{background:#f8faf9;border-color:#c9ced4}
+    background:var(--gbtn-bg);border:1px solid var(--gbtn-line);color:var(--gbtn-ink);font-weight:700;overflow:hidden}
+  .btn.social:hover{background:var(--panel2);border-color:var(--line-h)}
   .btn.social .social-ico{display:grid;place-items:center;width:48px;height:100%;flex:none;
-    border-right:1px solid #ececec}
+    border-right:1px solid var(--gbtn-line)}
   .btn.social .social-label{flex:1;text-align:center;padding-right:48px}
   .btn.social svg{flex:none}
   /* 押せない状態（未設定のプロバイダ）をグレーアウトして見せる場合に使う */
-  .btn.social:disabled{background:#f4f6f5;color:var(--mut)}
+  .btn.social:disabled{background:var(--panel2);color:var(--mut)}
 
   /* 旧レイアウトの「または」区切り（登録画面などで再利用する場合に備えて残す） */
   .or-sep{display:flex;align-items:center;gap:12px;margin:22px 0 16px;color:var(--mut);font-size:12px}
   .or-sep::before,.or-sep::after{content:"";flex:1;height:1px;background:var(--line)}
   .or-sep span{white-space:nowrap}
 
-  .tag{font-size:11px;background:#eef2f6;color:#64748b;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag{font-size:11px;background:var(--chip);color:var(--chip-ink);padding:2px 8px;border-radius:6px;font-weight:600}
 
   /* ---------- date chips (ホットペッパー風) ---------- */
   .datechips{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 8px;-webkit-overflow-scrolling:touch}
   .datechips::-webkit-scrollbar{height:0}
   .datechip{flex:none;min-width:52px;text-align:center;border:1px solid var(--line);border-radius:12px;
-    padding:8px 6px;cursor:pointer;background:#fff;transition:.12s;position:relative}
+    padding:8px 6px;cursor:pointer;background:var(--panel);transition:.12s;position:relative}
   .datechip .dw{font-size:11px;color:var(--sub);font-weight:600}
   .datechip .dd{font-size:18px;font-weight:800;line-height:1.1;margin-top:1px}
   .datechip .dc{font-size:10px;color:var(--ok);font-weight:700;margin-top:2px}
-  .datechip.sat .dw,.datechip.sat .dd{color:#2563eb}
-  .datechip.sun .dw,.datechip.sun .dd{color:#dc2626}
+  .datechip.sat .dw,.datechip.sat .dd{color:var(--sat)}
+  .datechip.sun .dw,.datechip.sun .dd{color:var(--sun)}
   .datechip.active{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 2px var(--brand-soft)}
   .datechip.active .dw,.datechip.active .dd{color:var(--brand-d)}
 
@@ -288,33 +360,33 @@
   .slotgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px}
   @media(max-width:400px){.slotgrid{grid-template-columns:repeat(2,1fr)}}
   .slotbtn{position:relative;border:1px solid var(--line);border-radius:10px;padding:11px 4px;text-align:center;
-    font-weight:700;font-size:15px;cursor:pointer;background:#fff;transition:.1s;color:var(--ink)}
-  .slotbtn:hover{border-color:#cdd7e3}
-  .slotbtn.off{background:#f5f6f8;color:#c2cad3;cursor:not-allowed;text-decoration:line-through}
-  .slotbtn.off::after{content:"×";position:absolute;top:3px;right:6px;font-size:11px;color:#cbd3dc}
+    font-weight:700;font-size:15px;cursor:pointer;background:var(--panel);transition:.1s;color:var(--ink)}
+  .slotbtn:hover{border-color:var(--line-h)}
+  .slotbtn.off{background:var(--panel2);color:var(--disabled);cursor:not-allowed;text-decoration:line-through}
+  .slotbtn.off::after{content:"×";position:absolute;top:3px;right:6px;font-size:11px;color:var(--disabled)}
   .slotbtn.sel{border-color:var(--brand);background:var(--brand);color:#fff}
   /* スタッフ不可時間エディタ用の状態 */
   .slotbtn.avoff{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
   .slotbtn.avoff::after{content:"×";position:absolute;top:3px;right:6px;font-size:12px;color:var(--bad)}
-  .slotbtn.locked{background:#f1f3f6;color:#aeb7c0;cursor:not-allowed}
+  .slotbtn.locked{background:var(--panel2);color:var(--disabled);cursor:not-allowed}
   .slotbtn .tagm{display:block;font-size:9px;font-weight:700;margin-top:1px;opacity:.85}
 
   /* スクロール式 時間ピッカー */
   .tpick{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;border:1px solid var(--line);
-    border-radius:10px;background:#fff;cursor:pointer;font-size:15px;font-weight:600;min-height:44px}
+    border-radius:10px;background:var(--panel);cursor:pointer;font-size:15px;font-weight:600;min-height:44px}
   .tpick.open{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
   .tpick .tpic{color:var(--sub);font-size:16px}
-  .tpbar{margin-top:6px;border:1px solid var(--line);border-radius:10px;background:#fff;
+  .tpbar{margin-top:6px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
     max-height:190px;overflow-y:auto;-webkit-overflow-scrolling:touch;box-shadow:var(--shadow)}
   .tpbar button{display:block;width:100%;text-align:center;border:0;background:none;padding:11px;
     font-size:15px;font-weight:600;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--line2)}
   .tpbar button:last-child{border-bottom:0}
   .tpbar button.on{background:var(--brand-soft);color:var(--brand-d)}
-  .tpbar button:hover{background:#f2f7f5}
+  .tpbar button:hover{background:var(--panel2)}
   .tp-wrap{display:flex;gap:10px}
   .tp-wrap>div{flex:1;min-width:0}
   .slotbtn.sel .snum{position:absolute;top:-8px;left:-8px;width:22px;height:22px;border-radius:50%;
-    background:var(--warn);color:#fff;font-size:12px;display:grid;place-items:center;border:2px solid #fff}
+    background:var(--warn);color:#fff;font-size:12px;display:grid;place-items:center;border:2px solid var(--panel)}
   .selsummary{display:flex;flex-direction:column;gap:6px;margin-top:6px}
   .selsummary .sr{display:flex;align-items:center;gap:8px;font-size:14px}
   .selsummary .sr .cn{width:22px;height:22px;border-radius:6px;background:var(--warn-soft);color:var(--warn);
@@ -327,7 +399,7 @@
   .cal .calhead .cm-m{font-size:30px;font-weight:800;line-height:1;letter-spacing:-.5px}
   .cal .calhead .cm-y{font-size:15px;font-weight:600;color:var(--mut)}
   .cal .calnav{display:flex;gap:6px}
-  .cal .navbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:#fff;
+  .cal .navbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
     font-size:16px;cursor:pointer;color:var(--sub)}
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:0}
   .caldow{text-align:center;font-size:11px;font-weight:600;color:var(--mut);padding:2px 0 8px}
@@ -339,7 +411,7 @@
     display:grid;place-items:center;font-size:14px}
   .calcell.sel{background:var(--brand-soft)}
   .calcell .dn{font-weight:700;line-height:1;flex:none;color:var(--ink)}
-  .calcell.holiday .dn{color:#dc2626}
+  .calcell.holiday .dn{color:var(--sun)}
   .calcell .chips{display:flex;flex-direction:column;gap:2px;width:100%;overflow:hidden}
   .calcell .chip{width:100%;font-size:9px;font-weight:600;line-height:1.6;padding:1px 4px;
     border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
@@ -353,9 +425,9 @@
   .wkrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line2)}
   .wkrow:last-child{border-bottom:0}
   .wkrow .wd{width:28px;font-weight:700;text-align:center}
-  .wkrow .sw{width:44px;height:26px;border-radius:999px;background:#dfe4ea;position:relative;cursor:pointer;flex:none;transition:.15s}
+  .wkrow .sw{width:44px;height:26px;border-radius:999px;background:var(--line-h);position:relative;cursor:pointer;flex:none;transition:.15s}
   .wkrow .sw.on{background:var(--brand)}
-  .wkrow .sw i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}
+  .wkrow .sw i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--panel);transition:.15s}
   .wkrow .sw.on i{left:21px}
   .wkrow input[type=time]{padding:7px 8px;font-size:14px}
   .wkrow .times{display:flex;align-items:center;gap:5px;flex:1}
@@ -366,9 +438,9 @@
   /* notification bell */
   .bell{position:relative;width:40px;height:40px;border-radius:999px;border:1px solid var(--line);
     background:var(--panel);font-size:18px;cursor:pointer;display:grid;place-items:center;flex:none}
-  .bell:hover{border-color:#cdd7e3}
+  .bell:hover{border-color:var(--line-h)}
   .bell .badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;
-    background:var(--bad);color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid #fff}
+    background:var(--bad);color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid var(--panel)}
   .noti{display:flex;gap:11px;padding:12px 4px;border-bottom:1px solid var(--line2)}
   .noti:last-child{border-bottom:0}
   .noti .nic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:16px;flex:none}
@@ -378,7 +450,7 @@
 
   /* calendar: ビュー切替 */
   .calview-tabs{display:flex;gap:6px}
-  .calview-tabs button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;
+  .calview-tabs button{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;
     font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;min-height:36px}
   .calview-tabs button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
   .agenda{display:flex;flex-direction:column}
@@ -396,7 +468,7 @@
   /* date pager (面談予約) */
   .datepager{display:flex;align-items:center;gap:8px}
   .datepager .datechips{flex:1}
-  .datepager .pg{width:38px;height:52px;border-radius:10px;border:1px solid var(--line);background:#fff;
+  .datepager .pg{width:38px;height:52px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
     font-size:18px;color:var(--sub);cursor:pointer;flex:none}
   .datepager .pg:disabled{opacity:.35;cursor:not-allowed}
   .datechip.full{opacity:.45;cursor:not-allowed}
@@ -404,35 +476,35 @@
 
   /* ---------- week booking table (面談予約：週マトリクス) ---------- */
   .weekpager{display:flex;align-items:center;gap:8px;margin:6px 0 10px}
-  .weekpager .pg{flex:none;border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 10px;
+  .weekpager .pg{flex:none;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:8px 10px;
     font-size:12px;font-weight:700;color:var(--sub);cursor:pointer}
-  .weekpager .pg:hover{border-color:#cdd7e3}
+  .weekpager .pg:hover{border-color:var(--line-h)}
   .weekpager .pg:disabled{opacity:.35;cursor:not-allowed}
   .weekpager .wm{flex:1;text-align:center;font-size:13px;font-weight:800;color:var(--ink)}
   .booktable-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
   .booktable{border-collapse:collapse;width:100%;min-width:520px;font-size:12px}
   .booktable th,.booktable td{border:1px solid var(--line2);text-align:center;padding:0}
-  .booktable thead th{background:#f7faf9;font-weight:700;padding:6px 2px;font-size:12px;color:var(--ink);
+  .booktable thead th{background:var(--panel2);font-weight:700;padding:6px 2px;font-size:12px;color:var(--ink);
     position:sticky;top:0;z-index:1}
   .booktable thead th small{display:block;font-size:10px;font-weight:600;color:var(--sub)}
-  .booktable thead th.sun{color:#dc2626}.booktable thead th.sun small{color:#dc2626}
-  .booktable thead th.sat{color:#2563eb}.booktable thead th.sat small{color:#2563eb}
+  .booktable thead th.sun{color:var(--sun)}.booktable thead th.sun small{color:var(--sun)}
+  .booktable thead th.sat{color:var(--sat)}.booktable thead th.sat small{color:var(--sat)}
   .booktable thead th.today{background:var(--brand-soft);color:var(--brand-d)}
   .booktable thead th.today small{color:var(--brand-d)}
-  .bt-corner{background:#f7faf9;position:sticky;left:0;z-index:2}
-  .bt-t{background:#f7faf9;font-weight:700;color:var(--sub);white-space:nowrap;padding:6px 8px;
+  .bt-corner{background:var(--panel2);position:sticky;left:0;z-index:2}
+  .bt-t{background:var(--panel2);font-weight:700;color:var(--sub);white-space:nowrap;padding:6px 8px;
     position:sticky;left:0;z-index:1;font-size:11px}
-  .bt-c{width:13%;height:30px;cursor:not-allowed;color:#cbd3dc;font-size:12px}
-  .bt-c.off{background:#fafbfc}
-  .bt-c.ok{cursor:pointer;color:var(--ok);font-weight:800;background:#fff;transition:.1s}
+  .bt-c{width:13%;height:30px;cursor:not-allowed;color:var(--disabled);font-size:12px}
+  .bt-c.off{background:var(--panel2)}
+  .bt-c.ok{cursor:pointer;color:var(--ok);font-weight:800;background:var(--panel);transition:.1s}
   .bt-c.ok:hover{background:var(--ok-soft)}
   .bt-c.ok.sel{background:var(--brand);color:#fff}
   .bt-num{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;
-    background:#fff;color:var(--brand-d);font-size:11px;font-weight:800}
+    background:var(--panel);color:var(--brand-d);font-size:11px;font-weight:800}
   /* 不可時間エディタ用の状態セル */
   .bt-c.block{cursor:pointer;background:var(--bad-soft);color:var(--bad);font-weight:800}
-  .bt-c.block:hover{background:#fbdada}
-  .bt-c.locked{cursor:not-allowed;background:#f1f3f6;color:#aeb7c0;font-size:11px;font-weight:700}
+  .bt-c.block:hover{background:var(--bad-soft)}
+  .bt-c.locked{cursor:not-allowed;background:var(--panel2);color:var(--disabled);font-size:11px;font-weight:700}
   /* ドラッグでのまとめて不可・解除操作 */
   .bt-c.ok,.bt-c.block{touch-action:none}
   body.noselect{user-select:none;-webkit-user-select:none}
@@ -441,6 +513,6 @@
   .filterbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .filterbar select,.filterbar input{width:auto;flex:1;min-width:120px;padding:9px 10px;font-size:14px}
   .chipfilter{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-  .chipfilter button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 13px;
+  .chipfilter button{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 13px;
     font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;min-height:36px}
   .chipfilter button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}

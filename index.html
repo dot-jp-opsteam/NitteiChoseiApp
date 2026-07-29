@@ -8,6 +8,13 @@
 </head>
 <body>
 
+<!-- 起動中の表示。読み込みが終わったら hideBoot() が取り除く。
+     これが無いと、サーバーが起きるまでの間まっ白な画面になり「壊れた」と誤解される -->
+<div id="boot">
+  <div class="mark">OPS</div>
+  <p id="bootMsg">読み込んでいます…</p>
+</div>
+
 <!-- ========== LOGIN ========== -->
 <div id="login">
   <div class="login-card">
@@ -40,6 +47,13 @@
   <nav class="bottomnav" id="nav"></nav>
 </div>
 
+<!-- 保存に失敗したときだけ出る帯。黙って消えるのを防ぐ -->
+<div id="savebar" class="hidden">
+  <span>⚠️</span>
+  <span class="sb-msg">変更を保存できていません。通信状況をご確認ください。</span>
+  <button id="savebarBtn" onclick="retrySave()">再試行</button>
+</div>
+
 <!-- generic sheet -->
 <div class="scrim" id="scrim" onclick="if(event.target===this)closeSheet()">
   <div class="sheet" id="sheet"></div>
@@ -56,9 +70,56 @@
    ========================================================= */
 
 /* ---------- storage ---------- */
+// DBキャッシュは sessionStorage（タブごとに独立）に置く。
+// localStorageに置くと、タブAが管理者・タブBがインターン生のときにキャッシュが混ざる
 const DB_KEY='ops_nittyou_v1';
 const nowISO=()=>new Date().toISOString();
 const uid=()=>Math.random().toString(36).slice(2,9);
+
+/* =========================================================
+   セッショントークン
+   - 保管場所は sessionStorage。タブごとに独立しているため、
+     タブを複製して別アカウントでログインしても元のタブは影響を受けない。
+     新しいタブ（＝ショートカットから開いた場合）は空なのでログイン画面になる。
+   - 「次回から自動ログイン」にチェックが入ったときだけ localStorage にも複製し、
+     次に開いたタブが起動時にコピーして使う。
+   ========================================================= */
+const TOKEN_KEY='ops_token_v1';
+const getToken=()=>sessionStorage.getItem(TOKEN_KEY);
+function setToken(t,remember){
+  sessionStorage.setItem(TOKEN_KEY,t);
+  if(remember)localStorage.setItem(TOKEN_KEY,t);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+function clearToken(){
+  sessionStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(DB_KEY);
+}
+/* セッションが切れた（サーバーがcode:'unauthenticated'を返した）ときの後始末。
+   ログイン中だった場合だけ読み込み直して、ログイン画面から入り直してもらう */
+function handleUnauthorized(){
+  clearToken();
+  if(ME){ME=null;location.reload();}
+}
+
+/* すべてのAPI呼び出しの入口。Authorizationヘッダの付与と、
+   セッション切れの検出をここ1か所にまとめている */
+async function api(path,opts={}){
+  const headers={...(opts.headers||{})};
+  const token=getToken();
+  if(token)headers['Authorization']='Bearer '+token;
+  if(opts.body&&!headers['Content-Type'])headers['Content-Type']='application/json';
+  const res=await fetch(path,{...opts,headers});
+  if(res.status===401&&token){
+    // パスワード違いなど、業務上の401と区別するためサーバーの code を見る
+    try{
+      const d=await res.clone().json();
+      if(d&&d.code==='unauthenticated')handleUnauthorized();
+    }catch(e){/* JSONでなければセッション切れとは扱わない */}
+  }
+  return res;
+}
 
 // 初期マスタデータ（支部のみ）。ユーザー・面談等は運用開始時点では空。
 function seed(){
@@ -73,12 +134,12 @@ let DB=null;
 let SYNCING=false;
 
 async function apiGetDB(){
-  const res=await fetch('/api/db');
+  const res=await api('/api/db');
   if(!res.ok)throw new Error('GET /api/db failed');
   return res.json();
 }
 async function apiPutDB(obj){
-  const res=await fetch('/api/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});
+  const res=await api('/api/db',{method:'PUT',body:JSON.stringify(obj)});
   if(!res.ok)throw new Error('PUT /api/db failed');
   return res.json();
 }
@@ -87,26 +148,97 @@ async function apiPutDB(obj){
 async function bootLoad(){
   try{
     const remote=await apiGetDB();
-    if(remote&&remote.branches){localStorage.setItem(DB_KEY,JSON.stringify(remote));return remote;}
+    if(remote&&remote.branches){sessionStorage.setItem(DB_KEY,JSON.stringify(remote));return remote;}
     const s=seed();
     const {updatedAt}=await apiPutDB(s);
     s.updatedAt=updatedAt;
     s.users=(remote&&remote.users)||[];
-    localStorage.setItem(DB_KEY,JSON.stringify(s));
+    sessionStorage.setItem(DB_KEY,JSON.stringify(s));
     return s;
   }catch(e){
-    console.warn('サーバーに接続できません。ローカルキャッシュを使用します。',e);
-    try{const raw=localStorage.getItem(DB_KEY);if(raw)return JSON.parse(raw);}catch(e2){}
+    console.warn('サーバーに接続できません。キャッシュを使用します。',e);
+    try{const raw=sessionStorage.getItem(DB_KEY);if(raw)return JSON.parse(raw);}catch(e2){}
     return seed();
   }
 }
 
-// DBの保存：呼び出し側の同期性を崩さないよう、localStorageへは即時保存し、サーバーへは非同期で反映する
-// users はサーバー側の専用APIでのみ変更するため送信対象から除く
-function save(){
-  localStorage.setItem(DB_KEY,JSON.stringify(DB));
+/* DBを変更して保存する。
+   fn は DB を受け取って書き換える関数。「何をしたか」を関数として受け取ることで、
+   他の人が先に保存していた場合（409）に最新のDBを取り込んでから同じ操作をやり直せる。
+   以前のように DB 全体を無条件に上書きしていると、2人が同時に操作したときに
+   後から保存した方が相手の変更を消してしまう。
+
+   fn の中では、対象を必ず引数の db から引き直すこと（外側で find した参照を使わない）。
+   やり直しのときに古いDBのオブジェクトを触ってしまい、変更が反映されないため。 */
+async function putDB(){
   const {users,...body}=DB;
-  apiPutDB(body).then(({updatedAt})=>{DB.updatedAt=updatedAt;}).catch(e=>console.warn('サーバー保存に失敗しました',e));
+  return api('/api/db',{method:'PUT',body:JSON.stringify({...body,_baseUpdatedAt:DB.updatedAt})});
+}
+async function mutate(fn){
+  fn(DB);
+  sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+  let conflicted=false;
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const res=await putDB();
+      if(res.ok){
+        DB.updatedAt=(await res.json()).updatedAt;
+        sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+        setSaveError(null);
+        if(conflicted&&ME)render(); // 取り込んだ他の人の変更を画面に出す
+        return true;
+      }
+      if(res.status!==409){
+        const d=await res.json().catch(()=>({}));
+        setSaveError(d.error||'変更を保存できませんでした。');
+        return false;
+      }
+      conflicted=true;
+      DB=await apiGetDB();      // 最新を取り込んで
+      fn(DB);                   // 同じ操作をやり直す
+      sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    }catch(e){
+      console.warn('保存に失敗しました',e);
+      setSaveError('変更を保存できていません。通信状況をご確認ください。');
+      return false;
+    }
+  }
+  setSaveError('他の方の操作と重なって保存できませんでした。もう一度お試しください。');
+  return false;
+}
+
+/* 保存できていないことを画面上部の帯で知らせる。
+   以前は保存に失敗しても「保存しました」と表示されており、
+   データが消えたことに気づけないままだった。msg=null で帯を消す */
+function setSaveError(msg){
+  const bar=document.getElementById('savebar');
+  if(!bar)return;
+  bar.classList.toggle('hidden',!msg);
+  if(msg)bar.querySelector('.sb-msg').textContent=msg;
+}
+async function retrySave(){
+  const btn=document.getElementById('savebarBtn');
+  if(btn){btn.disabled=true;btn.textContent='保存中…';}
+  let msg='';
+  try{
+    const res=await putDB();
+    if(res.ok){
+      DB.updatedAt=(await res.json()).updatedAt;
+      sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+      setSaveError(null);msg='保存しました';
+    }else if(res.status===409){
+      // 何をやり直せばよいか分からないため、最新を取り込んで操作し直してもらう
+      DB=await apiGetDB();
+      sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+      setSaveError(null);render();
+      msg='他の方が先に更新していたため、最新の内容に更新しました。お手数ですが操作をやり直してください。';
+    }else{
+      const d=await res.json().catch(()=>({}));
+      msg=d.error||'保存できませんでした';
+    }
+  }catch(e){msg='通信に失敗しました。時間をおいて再度お試しください。';}
+  if(btn){btn.disabled=false;btn.textContent='再試行';}
+  toast(msg);
 }
 
 // 他端末・他ブラウザでの変更をゆるやかに反映する定期ポーリング（30秒間隔）
@@ -118,7 +250,7 @@ function startPolling(){
       const remote=await apiGetDB();
       if(remote&&remote.updatedAt&&remote.updatedAt!==DB.updatedAt){
         DB=remote;
-        localStorage.setItem(DB_KEY,JSON.stringify(DB));
+        sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
         if(ME)render();
       }
     }catch(e){/* オフライン時は無視 */}
@@ -144,10 +276,23 @@ const EVENT_COLORS=[
   {v:'#0ea678',n:'グリーン'},{v:'#2563eb',n:'ブルー'},{v:'#6366f1',n:'インディゴ'},{v:'#db2777',n:'ピンク'},
   {v:'#e11d48',n:'レッド'},{v:'#f59e0b',n:'オレンジ'},{v:'#06b6d4',n:'ティール'},{v:'#64748b',n:'グレー'},
 ];
-// カレンダーチップの淡色地色（ライトモード：薄い地色＋濃い文字）
+/* カレンダーのチップ色。イベント作成時に選んだ色から地色と文字色を作る。
+   ライトモードは「白に寄せた薄い地色＋濃い文字」、
+   ダークモードは逆に「黒に寄せた濃い地色＋明るい文字」にしないと読めなくなる */
+const isDarkMode=()=>window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;
 function _hexRgb(v){const s=v.replace('#','');return [parseInt(s.slice(0,2),16),parseInt(s.slice(2,4),16),parseInt(s.slice(4,6),16)];}
-function chipBg(v){if(v.startsWith('var'))return 'var(--iv-soft)';const[r,g,b]=_hexRgb(v);const t=x=>Math.round(x+(255-x)*0.84);return `rgb(${t(r)},${t(g)},${t(b)})`;}
-function chipFg(v){if(v.startsWith('var'))return 'var(--iv)';const[r,g,b]=_hexRgb(v);const d=x=>Math.round(x*0.72);return `rgb(${d(r)},${d(g)},${d(b)})`;}
+function chipBg(v){
+  if(v.startsWith('var'))return 'var(--iv-soft)';
+  const[r,g,b]=_hexRgb(v);
+  const f=isDarkMode()?(x=>Math.round(x*0.30)):(x=>Math.round(x+(255-x)*0.84));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
+function chipFg(v){
+  if(v.startsWith('var'))return 'var(--iv)';
+  const[r,g,b]=_hexRgb(v);
+  const f=isDarkMode()?(x=>Math.round(x+(255-x)*0.45)):(x=>Math.round(x*0.72));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function initials(name){return (name||'?').slice(0,1);}
@@ -242,14 +387,47 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 /* ---------- sheet ---------- */
 function openSheet(html){const s=document.getElementById('sheet');
   s.innerHTML='<div class="grab"></div>'+html;document.getElementById('scrim').classList.add('open');}
-function closeSheet(){document.getElementById('scrim').classList.remove('open');}
+function closeSheet(){
+  document.getElementById('scrim').classList.remove('open');
+  // 確認ダイアログを背景タップで閉じた場合は「キャンセル」として扱う
+  if(_confirmResolve){const r=_confirmResolve;_confirmResolve=null;r(false);}
+}
+
+/* 確認ダイアログ。ブラウザ標準の confirm() はスマホで見た目が浮いてしまうため、
+   アプリ内のボトムシートに統一する。true/false を返すので await して使う */
+let _confirmResolve=null;
+function confirmSheet(title,message,okLabel='実行する',danger=true){
+  return new Promise(resolve=>{
+    _confirmResolve=resolve;
+    openSheet(`<h3>${esc(title)}</h3>
+      <p class="page-sub">${esc(message).replace(/\n/g,'<br>')}</p>
+      <div class="btn-row" style="margin-top:18px">
+        <button class="btn" style="flex:1" onclick="resolveConfirm(false)">キャンセル</button>
+        <button class="btn ${danger?'bad':'pri'}" style="flex:1" onclick="resolveConfirm(true)">${esc(okLabel)}</button>
+      </div>`);
+  });
+}
+function resolveConfirm(v){
+  const r=_confirmResolve;_confirmResolve=null;
+  closeSheet();
+  if(r)r(v);
+}
+/* 選択肢のないお知らせ。ブラウザ標準の alert() の置き換え */
+function alertSheet(title,message){
+  return new Promise(resolve=>{
+    _confirmResolve=resolve;
+    openSheet(`<h3>${esc(title)}</h3>
+      <p class="page-sub">${esc(message).replace(/\n/g,'<br>')}</p>
+      <button class="btn pri block" style="margin-top:18px" onclick="resolveConfirm(true)">閉じる</button>`);
+  });
+}
 
 /* =========================================================
    LOGIN
    - 画面上半分：メールアドレス＋パスワード
    - 画面下半分：Googleでログイン（ソーシャルログイン）
    ========================================================= */
-// 'login' | 'register-intern' | 'forgot' | 'reset' | 'profile' | 'pending'
+// 'login' | 'register-intern' | 'forgot' | 'reset' | 'profile'
 // | 'staff-start' | 'staff-form'
 let LOGIN_VIEW='login';
 let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branchesから取得）
@@ -284,7 +462,12 @@ function socialLoginBlock(){
       </div>
     </div>`;
 }
-function goGoogleLogin(){location.href='/api/auth/google/login';}
+/* 「次回から自動ログイン」の選択をサーバーに伝えてからGoogleへ送り出す。
+   戻ってきたときはstateに預けた選択が復元され、トークンの有効期限に反映される */
+function goGoogleLogin(){
+  const remember=document.getElementById('loginRemember')?.checked;
+  location.href='/api/auth/google/login'+(remember?'?remember=1':'');
+}
 function toggleLoginPw(cb){
   const el=document.getElementById('loginPassword');
   if(el)el.type=cb.checked?'text':'password';
@@ -349,9 +532,6 @@ function renderLogin(){
       <div class="hint hidden" id="forgotDone" style="margin-top:14px"><span>📮</span><span></span></div>
       <button class="btn pri block" style="margin-top:18px" id="forgotBtn" onclick="doForgotPassword()">再設定メールを送る</button>
       <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
-  }else if(LOGIN_VIEW==='pending'){
-    body.innerHTML=`<div class="hint"><span>⏳</span><span>登録を受け付けました。管理者の承認後にログインできるようになります。</span></div>
-      <button class="btn ghost block" style="margin-top:14px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
   }else{
     body.innerHTML=`
       <div class="login-cols">
@@ -363,6 +543,8 @@ function renderLogin(){
             <label class="fl" for="loginPassword">パスワード<span class="req">*</span></label>
             <input id="loginPassword" type="password" autocomplete="current-password">
             <label class="pw-toggle"><input type="checkbox" onchange="toggleLoginPw(this)"><span>パスワードを表示する</span></label>
+            <label class="pw-toggle"><input type="checkbox" id="loginRemember"><span>次回から自動ログイン</span></label>
+            <p class="fine" style="margin:2px 0 0">チェックを入れないと、タブを閉じるたびに入力が必要になります。共用のパソコンではチェックを外したままにしてください。</p>
             <div class="field-err" id="loginErr"></div>
             <button class="btn pri block" style="margin-top:14px" onclick="doLoginAuth()">ログインする</button>
             ${PASSWORD_RESET_AVAILABLE?`<p class="forgot-link"><a href="javascript:void(0)" onclick="switchLoginView('forgot')">パスワードをお忘れの方</a></p>`:''}
@@ -393,7 +575,7 @@ async function doForgotPassword(){
   if(!email){err.textContent='メールアドレスを入力してください';err.classList.add('show');return;}
   btn.disabled=true;btn.textContent='送信中…';
   try{
-    const res=await fetch('/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const res=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});
     const data=await res.json();
     if(!res.ok){
       err.textContent=data.error||'送信に失敗しました';err.classList.add('show');
@@ -420,7 +602,7 @@ async function renderResetPassword(token){
 
   let info={valid:false};
   try{
-    const res=await fetch('/api/auth/reset-check?token='+encodeURIComponent(token));
+    const res=await api('/api/auth/reset-check?token='+encodeURIComponent(token));
     if(res.ok)info=await res.json();
   }catch(e){/* 通信できないときは無効扱いにする */}
 
@@ -448,7 +630,7 @@ async function doResetPassword(token){
   if(np.length<8)return fail('パスワードは8文字以上で入力してください');
   if(np!==np2)return fail('パスワードが一致しません');
   try{
-    const res=await fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,new_password:np})});
+    const res=await api('/api/auth/reset-password',{method:'POST',body:JSON.stringify({token,new_password:np})});
     const data=await res.json();
     if(!res.ok)return fail(data.error||'再設定に失敗しました');
     switchLoginView('login');
@@ -478,7 +660,7 @@ async function doCompleteProfile(){
   if(!nickname){err.textContent='ニックネームを入力してください';err.classList.add('show');return;}
   if(!branch_id){err.textContent='所属支部を選択してください';err.classList.add('show');return;}
   try{
-    const res=await fetch('/api/auth/complete-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nickname,branch_id})});
+    const res=await api('/api/auth/complete-profile',{method:'POST',body:JSON.stringify({nickname,branch_id})});
     const data=await res.json();
     if(!res.ok){err.textContent=data.error||'保存に失敗しました';err.classList.add('show');return;}
     ME=data.user;
@@ -491,10 +673,12 @@ async function doLoginAuth(){
   const err=document.getElementById('loginErr');
   err.classList.remove('show');
   if(!email||!password){err.textContent='メールアドレスとパスワードを入力してください';err.classList.add('show');return;}
+  const remember=!!document.getElementById('loginRemember')?.checked;
   try{
-    const res=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const res=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password,remember})});
     const data=await res.json();
     if(!res.ok){err.textContent=data.error||'ログインに失敗しました';err.classList.add('show');return;}
+    setToken(data.token,remember);
     await afterLogin();
   }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
 }
@@ -508,9 +692,11 @@ async function doRegisterIntern(){
   if(!email||!password||!nickname){err.textContent='メールアドレス・パスワード・ニックネームは必須です';err.classList.add('show');return;}
   if(password.length<8){err.textContent='パスワードは8文字以上で入力してください';err.classList.add('show');return;}
   try{
-    const res=await fetch('/api/auth/register-intern',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,nickname,branch_id})});
+    const res=await api('/api/auth/register-intern',{method:'POST',body:JSON.stringify({email,password,nickname,branch_id})});
     const data=await res.json();
     if(!res.ok){err.textContent=data.error||'登録に失敗しました';err.classList.add('show');return;}
+    // 登録直後はこのタブ限りのログイン。自動ログインはログイン画面のチェックで選んでもらう
+    setToken(data.token,false);
     await afterLogin();
   }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
 }
@@ -535,18 +721,29 @@ async function doStaffSignup(){
   if(!branch_id)return fail('所属支部を選択してください');
   btn.disabled=true;btn.textContent='送信中…';
   try{
-    const res=await fetch('/api/auth/staff-signup',{method:'POST',headers:{'Content-Type':'application/json'},
+    const res=await api('/api/auth/staff-signup',{method:'POST',
       body:JSON.stringify({token:STAFF_SIGNUP.token,full_name,branch_id})});
     const data=await res.json();
     if(!res.ok)return fail(data.error||'登録に失敗しました');
+    setToken(data.token,false);
     await afterLogin();
   }catch(e){fail('通信に失敗しました。時間をおいて再度お試しください。');}
 }
 async function afterLogin(){
-  const meRes=await fetch('/api/auth/me');
+  const meRes=await api('/api/auth/me');
   const {user}=await meRes.json();
+  await enterAppWith(user,null);
+}
+/* ログイン後の共通処理。起動時は /api/bootstrap で取得済みのDBをそのまま渡せるので、
+   その分だけ通信の往復を減らせる */
+async function enterAppWith(user,preloadedDB){
   ME=user;
-  DB=await bootLoad();
+  if(preloadedDB&&preloadedDB.branches){
+    DB=preloadedDB;
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+  }else{
+    DB=await bootLoad();   // 初回で支部などの初期データがまだ無い場合はここで投入される
+  }
   // 支部の一覧は初回設定画面のプルダウンで使うため、DB取得後に反映しておく
   LOGIN_BRANCHES=DB.branches||LOGIN_BRANCHES;
   if(ME.needs_profile){renderProfileSetup();return;}
@@ -558,7 +755,8 @@ function enterApp(){
   renderChip();buildNav();go(defaultTab());
 }
 async function logout(){
-  try{await fetch('/api/auth/logout',{method:'POST'});}catch(e){}
+  try{await api('/api/auth/logout',{method:'POST'});}catch(e){}
+  clearToken();
   location.reload();
 }
 
@@ -604,7 +802,7 @@ async function doChangePassword(){
   if(np.length<8)return fail('新しいパスワードは8文字以上で入力してください');
   if(np!==np2)return fail('新しいパスワードが一致しません');
   try{
-    const res=await fetch('/api/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},
+    const res=await api('/api/auth/change-password',{method:'POST',
       body:JSON.stringify({current_password:cur?cur.value:'',new_password:np})});
     const data=await res.json();
     if(!res.ok)return fail(data.error||'変更に失敗しました');
@@ -712,11 +910,11 @@ function viewHome(){
       tile('apply','📝',{bg:'#e2f5ec',fg:'#0b8a63'},'面談を申請する','希望日時を3つ提出して面談を予約')+
       tile('my','📋',{bg:'#fdf1e0',fg:'#d97706'},'面談状況を確認','申請中・確定済みの面談を確認')+
       `<div class="card click home-tile" onclick="openMailHistory()">
-        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">✉️</span>
+        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">✉️</span>
         <span><span class="tile-t">受信メール</span><br><span class="tile-d">面談確定・リンクなどの通知メール${inbox?`（${inbox}件）`:''}</span></span>
         <span class="tile-arrow">›</span></div></div>`+
       `<div class="card click home-tile" onclick="openGoogleCalendarSettings()">
-        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">📅</span>
+        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">📅</span>
         <span><span class="tile-t">Googleカレンダー連携</span><br><span class="tile-d">確定した面談を自分のカレンダーに自動登録</span></span>
         <span class="tile-arrow">›</span></div></div>`+
       eventsSection();
@@ -732,19 +930,19 @@ function viewHome(){
       tile('interviews','📋',{bg:'#e2f5ec',fg:'#0b8a63'},'面談一覧・確定',`担当インターン生の面談を管理${pend?`（未対応 ${pend}）`:''}`)+
       tile('avail','🕒',{bg:'#e0f2fe',fg:'#0369a1'},'スタッフ空き日程','Googleカレンダーから空き時間を確認')+
       `<div class="card click home-tile" onclick="openAvailabilitySettings()">
-        <div class="cb"><span class="tile-ic" style="background:#fdf1e0;color:#d97706">⏰</span>
+        <div class="cb"><span class="tile-ic" style="background:var(--warn-soft);color:var(--warn-ink)">⏰</span>
         <span><span class="tile-t">面談可能時間帯を設定</span><br><span class="tile-d">曜日ごとに面談を受けられる時間を設定</span></span>
         <span class="tile-arrow">›</span></div></div>`+
       `<div class="card click home-tile" onclick="go('avset')">
-        <div class="cb"><span class="tile-ic" style="background:#fdecec;color:#dc2626">🚫</span>
+        <div class="cb"><span class="tile-ic" style="background:var(--bad-soft);color:var(--bad)">🚫</span>
         <span><span class="tile-t">面談できない時間を登録</span><br><span class="tile-d">30分枠をタップ、または日時でまとめて指定</span></span>
         <span class="tile-arrow">›</span></div></div>`+
       `<div class="card click home-tile" onclick="openGoogleCalendarSettings()">
-        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">📅</span>
+        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">📅</span>
         <span><span class="tile-t">Googleカレンダー連携</span><br><span class="tile-d">予定を自動で面談不可に反映／確定した面談を自動登録</span></span>
         <span class="tile-arrow">›</span></div></div>`+
       `<div class="card click home-tile" onclick="openMailHistory()">
-        <div class="cb"><span class="tile-ic" style="background:#eaf1ff;color:#1f56cf">✉️</span>
+        <div class="cb"><span class="tile-ic" style="background:var(--info-soft);color:var(--info-ink)">✉️</span>
         <span><span class="tile-t">メール履歴</span><br><span class="tile-d">インターン生へ送信したメールの履歴</span></span>
         <span class="tile-arrow">›</span></div></div>`+
       eventsSection();
@@ -754,7 +952,7 @@ function viewHome(){
     tile('branches','🏢',{bg:'#efeafe',fg:'#6d28d9'},'支部管理','支部の追加・編集・削除')+
     tile('users','👥',{bg:'#eaf1ff',fg:'#1f56cf'},'ユーザー管理','全支部のユーザーと権限を管理')+
     `<div class="card click home-tile" onclick="openSystemSettings()">
-      <div class="cb"><span class="tile-ic" style="background:#f1f3f6;color:#64748b">⚙️</span>
+      <div class="cb"><span class="tile-ic" style="background:var(--chip);color:var(--chip-ink)">⚙️</span>
       <span><span class="tile-t">システム設定</span><br><span class="tile-d">連携状況の確認</span></span>
       <span class="tile-arrow">›</span></div></div>`+
     eventsSection();
@@ -763,7 +961,9 @@ function openSystemSettings(){
   openSheet(`<h3>システム設定</h3>
     <dl class="kv" style="margin-top:14px">
       <dt>Googleカレンダー</dt><dd>スタッフごとに個別設定（スタッフのホーム画面から連携）</dd>
-      <dt>メール送信</dt><dd>アプリ内履歴のみ（実際には送信されません）</dd>
+      <dt>メール送信</dt><dd>${PASSWORD_RESET_AVAILABLE
+        ?'面談の確定・不成立は実際に送信されます（その他は履歴のみ）'
+        :'未設定のため履歴のみ（Renderの SMTP_USER / SMTP_PASS を確認してください）'}</dd>
       <dt>登録支部数</dt><dd>${DB.branches.length}</dd>
       <dt>登録ユーザー</dt><dd>${(DB.users||[]).length}人</dd>
     </dl>
@@ -778,7 +978,7 @@ async function loadStaffInviteUrl(){
   const box=document.getElementById('staffInviteUrlBox');
   if(!box)return;
   try{
-    const res=await fetch('/api/admin/staff-invite-url');
+    const res=await api('/api/admin/staff-invite-url');
     if(!res.ok)throw new Error('failed');
     const {url}=await res.json();
     box.innerHTML=`<input id="staffInviteUrlInput" readonly value="${esc(url)}" style="width:100%;margin-bottom:8px" onclick="this.select()">
@@ -801,12 +1001,12 @@ function copyStaffInviteUrl(){
 async function openGoogleCalendarSettings(){
   openSheet(`<h3>Googleカレンダー連携</h3><p class="page-sub">状態を確認しています…</p>`);
   try{
-    const res=await fetch(`/api/google/status?staffId=${encodeURIComponent(ME.id)}`);
+    const res=await api(`/api/google/status?staffId=${encodeURIComponent(ME.id)}`);
     if(!res.ok)throw new Error('status fetch failed');
     renderGoogleCalendarSettings(await res.json());
   }catch(e){
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <div class="hint mock" style="background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>連携状態の取得に失敗しました。時間をおいて再度お試しください。</span></div>`);
+      <div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)"><span>⚠️</span><span>連携状態の取得に失敗しました。時間をおいて再度お試しください。</span></div>`);
   }
 }
 function renderGoogleCalendarSettings(data){
@@ -821,7 +1021,7 @@ function renderGoogleCalendarSettings(data){
       <div class="hint"><span>✅</span><span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
       <p class="page-sub" style="margin-top:10px">Notion Calendarをお使いの場合も、表示しているアカウントが同じGoogleアカウントであれば自動的に反映されます。iPhone標準カレンダー（iCloud）は別対応が必要です。</p>
       ${openCalendarButton()}
-      <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:#f2b8b8" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
+      <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:var(--bad-line)" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
       <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
@@ -875,11 +1075,13 @@ function openGoogleCalendarTab(){
   }
   window.open(web,'_blank','noopener');
 }
-function disconnectGoogleCalendar(){
-  if(!confirm('Googleカレンダーとの連携を解除します。よろしいですか？'))return;
-  fetch('/api/auth/google/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({staffId:ME.id})})
-    .then(()=>{toast('連携を解除しました');closeSheet();})
-    .catch(()=>toast('解除に失敗しました'));
+async function disconnectGoogleCalendar(){
+  if(!await confirmSheet('Googleカレンダー連携を解除',
+    '連携を解除すると、確定した面談がカレンダーに自動登録されなくなります。あとからいつでも再連携できます。','解除する'))return;
+  try{
+    await api('/api/auth/google/disconnect',{method:'POST',body:JSON.stringify({staffId:ME.id})});
+    closeSheet();toast('連携を解除しました');
+  }catch(e){toast('解除に失敗しました');}
 }
 
 /* =========================================================
@@ -997,15 +1199,19 @@ function toggleSlot(iso){
   else{if(APPLY.sel.length>=3){toast('希望は3つまでです');return;}APPLY.sel.push(iso);}
   render();
 }
-function submitApply(){
+async function submitApply(){
   if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
   // 選択順を第1〜第3希望に。空きスロットのみ選択できるため過去・重複は発生しない。
   const sorted=APPLY.sel.slice(); // 選択順を尊重
   const iv={id:'iv_'+uid(),intern_id:ME.id,staff_id:APPLY.staff||null,status:'applied',
     choice1:sorted[0]||null,choice2:sorted[1]||null,choice3:sorted[2]||null,
     meeting_type:APPLY.mtype,confirmed_datetime:null,note:(APPLY.note||'').trim(),created_at:nowISO()};
-  DB.interviews.push(iv);save();
-  notifyLog('面談申請',`${ME.nickname}さんが面談を申請しました`);
+  const ok=await mutate(db=>{
+    db.interviews.push(iv);
+    pushNotification(db,'面談申請',`${ME.nickname}さんが面談を申請しました`);
+  });
+  if(!ok)return;   // 保存できていないので「申請しました」とは言わない
+  updateBell();
   toast('面談を申請しました');
   go('my');
 }
@@ -1030,7 +1236,7 @@ function viewMyInterviews(){
         ? `<div class="hint" style="margin-top:8px"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>${MTYPE[iv.meeting_type]}のリンクはメールで届きます。</span></div>
            <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px"><span>📆</span><span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（ホーム画面から連携できます）'}</span></div>`
         : iv.status==='failed'
-        ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
+        ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)"><span>⚠️</span><span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
            <button class="btn pri block sm" style="margin-top:10px" onclick="go('apply')">再申請する</button>`
         : `<dl class="kv" style="margin-top:8px">
              ${[iv.choice1,iv.choice2,iv.choice3].filter(Boolean).map((c,i)=>`<dt>第${i+1}希望</dt><dd>${fmtDT(c)}</dd>`).join('')}</dl>`}
@@ -1106,7 +1312,7 @@ function openInterview(id){
       <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px"><span>📆</span><span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
       <button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','${MTYPE[iv.meeting_type]}リンクの送付','お疲れ様です。面談の${MTYPE[iv.meeting_type]}リンクをお送りします。')">${MTYPE[iv.meeting_type]}リンクを送る</button>`;
   }else{
-    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:#f3c0c0;color:#b02525"><span>⚠️</span><span>この面談は不成立として処理されています。</span></div>
+    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)"><span>⚠️</span><span>この面談は不成立として処理されています。</span></div>
       <button class="btn block" style="margin-top:12px" onclick="reopenInterview('${id}')">申請中に戻す</button>`;
   }
   openSheet(`
@@ -1122,15 +1328,21 @@ function openInterview(id){
     ${iv.note?`<div class="hint" style="margin-bottom:12px"><span>💬</span><span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
     ${actions}`);
 }
-function confirmInterview(id,dt){
+async function confirmInterview(id,dt){
   const iv=DB.interviews.find(x=>x.id===id);
-  iv.status='fixed';iv.confirmed_datetime=dt;save();
-  notifyLog('面談確定',`${findUser(iv.intern_id)?.nickname}さんの面談が確定しました`);
-  // auto compose confirmation mail
+  if(!iv)return;
+  const ok=await mutate(db=>{
+    const t=db.interviews.find(x=>x.id===id);
+    if(!t)return;
+    t.status='fixed';t.confirmed_datetime=dt;
+    pushNotification(db,'面談確定',`${findUser(t.intern_id)?.nickname}さんの面談が確定しました`);
+  });
+  if(!ok)return;
+  updateBell();
   closeSheet();
   toast('面談を確定しました（カレンダー登録・通知済み）');
   openSendMail(iv.intern_id,'面談確定のお知らせ',
-    `お疲れ様です。\n面談日程が下記のとおり確定しましたのでお知らせします。\n\n日時：${fmtDT(dt)}\n方法：${MTYPE[iv.meeting_type]}\n\nよろしくお願いいたします。`);
+    `お疲れ様です。\n面談日程が下記のとおり確定しましたのでお知らせします。\n\n日時：${fmtDT(dt)}\n方法：${MTYPE[iv.meeting_type]}\n\nよろしくお願いいたします。`,'fixed');
 }
 function openCustomConfirm(id){
   openSheet(`<h3>別日時で確定</h3>
@@ -1147,44 +1359,85 @@ function doCustomConfirm(id){
   if(new Date(v)<new Date()){e.textContent='過去の日時は指定できません';e.classList.add('show');return;}
   confirmInterview(id,new Date(v).toISOString());
 }
-function failInterview(id){
-  const iv=DB.interviews.find(x=>x.id===id);const intern=findUser(iv.intern_id);
-  if(!confirm(`${intern?.nickname||'この学生'}さんの面談を「不成立」にします。\n再提出依頼メールの作成画面に進みます。よろしいですか？`))return;
-  iv.status='failed';iv.confirmed_datetime=null;save();
-  notifyLog('面談不成立',`${findUser(iv.intern_id)?.nickname}さんの面談が不成立になりました`);
+async function failInterview(id){
+  const iv=DB.interviews.find(x=>x.id===id);
+  if(!iv)return;
+  const intern=findUser(iv.intern_id);
+  if(!await confirmSheet('面談を不成立にする',
+    `${intern?.nickname||'この学生'}さんの面談を「不成立」にします。続けて、再提出依頼メールの作成画面に進みます。`,
+    '不成立にする'))return;
+  const ok=await mutate(db=>{
+    const t=db.interviews.find(x=>x.id===id);
+    if(!t)return;
+    t.status='failed';t.confirmed_datetime=null;
+    pushNotification(db,'面談不成立',`${findUser(t.intern_id)?.nickname}さんの面談が不成立になりました`);
+  });
+  if(!ok)return;
+  updateBell();
   closeSheet();
   // show mail template per spec
   openSendMail(iv.intern_id,'面談日程再提出のお願い',
-    `お疲れ様です。\n\nご提出いただいた候補日では面談日程の調整が難しかったため、お手数ですが再度候補日をご提出いただけますでしょうか。\n\nご迷惑をおかけし申し訳ありません。\n\nよろしくお願いいたします。`);
+    `お疲れ様です。\n\nご提出いただいた候補日では面談日程の調整が難しかったため、お手数ですが再度候補日をご提出いただけますでしょうか。\n\nご迷惑をおかけし申し訳ありません。\n\nよろしくお願いいたします。`,'failed');
 }
-function reopenInterview(id){
-  const iv=DB.interviews.find(x=>x.id===id);iv.status='applied';save();closeSheet();toast('申請中に戻しました');go('interviews');
+async function reopenInterview(id){
+  const ok=await mutate(db=>{
+    const t=db.interviews.find(x=>x.id===id);
+    if(t)t.status='applied';
+  });
+  if(!ok)return;
+  closeSheet();toast('申請中に戻しました');go('interviews');
 }
 
 /* =========================================================
    メール送信（モック）
    ========================================================= */
-function openSendMail(receiverId,subject,body){
+/* kind に 'fixed'（面談確定）／'failed'（不成立）を渡したときだけ、実際にメールが届く。
+   それ以外（Meet/Zoomリンクの送付など）はアプリ内の履歴に残るだけ */
+const REAL_MAIL_KINDS=['fixed','failed'];
+function openSendMail(receiverId,subject,body,kind){
   const r=findUser(receiverId);
+  const real=REAL_MAIL_KINDS.includes(kind);
   openSheet(`<h3>メール送信</h3>
-    <div class="hint mock"><span>✉️</span><span>実際には送信されず、履歴に記録されます。</span></div>
+    ${real
+      ?`<div class="hint"><span>📮</span><span>このメールは <b>${esc(r?.email||'ご本人のメールアドレス')}</b> 宛に実際に送信されます。</span></div>`
+      :`<div class="hint mock"><span>✉️</span><span>このメールは実際には送信されず、アプリ内の履歴に記録されます。</span></div>`}
     <dl class="kv" style="margin:12px 0 4px"><dt>宛先</dt><dd>${esc(r?.nickname||'—')}（インターン生）</dd></dl>
     <label class="fl">件名</label>
     <input id="mailSubj" value="${esc(subject)}">
     <label class="fl">本文</label>
     <textarea id="mailBody" style="min-height:180px">${esc(body)}</textarea>
+    <div class="field-err" id="mailErr"></div>
     <div class="btn-row" style="margin-top:14px">
       <button class="btn" style="flex:1" onclick="closeSheet()">閉じる</button>
-      <button class="btn pri" style="flex:2" onclick="sendMail('${receiverId}')">送信する</button>
+      <button class="btn pri" style="flex:2" id="mailBtn" onclick="sendMail('${receiverId}','${kind||''}')">
+        ${real?'送信する':'履歴に記録する'}</button>
     </div>`);
 }
-function sendMail(receiverId){
+async function sendMail(receiverId,kind){
   const subject=document.getElementById('mailSubj').value.trim();
   const body=document.getElementById('mailBody').value.trim();
-  if(!subject){toast('件名を入力してください');return;}
-  DB.emails.push({id:uid(),sender_id:ME.id,receiver_id:receiverId,subject,body,sent_at:nowISO()});
-  save();closeSheet();toast('メールを送信しました（履歴に記録）');
-  if(currentTab==='interviews')go('interviews');
+  const err=document.getElementById('mailErr');
+  const btn=document.getElementById('mailBtn');
+  err.classList.remove('show');
+  if(!subject){err.textContent='件名を入力してください';err.classList.add('show');return;}
+  btn.disabled=true;btn.textContent='送信中…';
+  try{
+    const res=await api('/api/mail/send',{method:'POST',
+      body:JSON.stringify({receiver_id:receiverId,subject,body,kind})});
+    const data=await res.json();
+    if(!res.ok){
+      err.textContent=data.error||'送信に失敗しました';err.classList.add('show');
+      btn.disabled=false;btn.textContent='送信する';return;
+    }
+    closeSheet();
+    toast(data.warning||(data.sent?'メールを送信しました':'履歴に記録しました'));
+    // 履歴はサーバーが書き込むので、取り直して画面に反映する
+    try{DB=await apiGetDB();sessionStorage.setItem(DB_KEY,JSON.stringify(DB));}catch(e){}
+    render();
+  }catch(e){
+    err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');
+    btn.disabled=false;btn.textContent='送信する';
+  }
 }
 
 /* =========================================================
@@ -1337,7 +1590,7 @@ function agendaView(list,ivs,y,m){
   return `<div class="agenda">`+items.map(it=>{
     const w=WD_JP[it.dt.getDay()];
     return `<div class="ag" ${it.type==='ev'?`style="cursor:pointer" onclick="calSelect('${it.key}')"`:''}>
-      <span class="agd"><span class="agn" style="${it.dt.getDay()===0?'color:#dc2626':it.dt.getDay()===6?'color:#2563eb':''}">${it.dt.getDate()}</span><span class="agw">${w}</span></span>
+      <span class="agd"><span class="agn" style="${it.dt.getDay()===0?'color:var(--sun)':it.dt.getDay()===6?'color:var(--sat)':''}">${it.dt.getDate()}</span><span class="agw">${w}</span></span>
       <span class="agbar ${it.type==='iv'?'iv':''}" ${it.type==='ev'?`style="background:${it.color}"`:''}></span>
       <span style="flex:1"><span class="agt">${esc(it.title)}</span><br><span class="ags">${esc(it.sub)}</span></span>
     </div>`;}).join('')+`</div>`;
@@ -1345,11 +1598,16 @@ function agendaView(list,ivs,y,m){
 function setCalMode(mode){calMode=mode;render();}
 function calShift(delta){let m=calYM.m+delta,y=calYM.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}calYM={y,m};calSel=null;render();}
 function calSelect(key){calSel=(key&&key!==calSel)?key:null;render();}
-function vote(evId,resp){
-  let r=DB.event_responses.find(x=>x.event_id===evId&&x.user_id===ME.id);
-  if(r){r.response=r.response===resp?null:resp; if(!r.response)DB.event_responses=DB.event_responses.filter(x=>x!==r);}
-  else DB.event_responses.push({id:uid(),event_id:evId,user_id:ME.id,response:resp});
-  save();toast('回答を記録しました');render();
+async function vote(evId,resp){
+  const ok=await mutate(db=>{
+    const r=db.event_responses.find(x=>x.event_id===evId&&x.user_id===ME.id);
+    if(!r){db.event_responses.push({id:uid(),event_id:evId,user_id:ME.id,response:resp});return;}
+    // 同じものをもう一度押したら取り消し
+    if(r.response===resp)db.event_responses=db.event_responses.filter(x=>x!==r);
+    else r.response=resp;
+  });
+  render();
+  if(ok)toast('回答を記録しました');
 }
 function openEventResponders(evId){
   const resp=DB.event_responses.filter(r=>r.event_id===evId);
@@ -1391,15 +1649,15 @@ function pickEvColor(v){
   document.getElementById('evColor').value=v;
   document.querySelectorAll('#evColorPick .cdot').forEach(el=>el.classList.toggle('on',el.dataset.c===v));
 }
-function saveEvent(id){
+async function saveEvent(id){
   const title=document.getElementById('evTitle').value.trim();
   const start=document.getElementById('evStart').value;
-  let ok=true;
+  let valid=true;
   const te=document.getElementById('evTitleE'),se=document.getElementById('evStartE');
   te.classList.remove('show');se.classList.remove('show');
-  if(!title){te.textContent='イベント名は必須です';te.classList.add('show');ok=false;}
-  if(!start){se.textContent='開催日時は必須です';se.classList.add('show');ok=false;}
-  if(!ok)return;
+  if(!title){te.textContent='イベント名は必須です';te.classList.add('show');valid=false;}
+  if(!start){se.textContent='開催日時は必須です';se.classList.add('show');valid=false;}
+  if(!valid)return;
   const data={title,description:document.getElementById('evDesc').value.trim(),
     start_datetime:new Date(start).toISOString(),
     end_datetime:document.getElementById('evEnd').value?new Date(document.getElementById('evEnd').value).toISOString():new Date(start).toISOString(),
@@ -1408,15 +1666,29 @@ function saveEvent(id){
     color:document.getElementById('evColor').value||EVENT_COLORS[0].v,
     meet_url:document.getElementById('evMeet').value.trim(),
     zoom_url:document.getElementById('evZoom').value.trim()};
-  if(id){Object.assign(DB.events.find(e=>e.id===id),data);toast('イベントを更新しました');}
-  else{DB.events.push({id:'ev_'+uid(),creator_id:ME.id,...data});notifyLog('イベント作成',`「${title}」が作成されました`);toast('イベントを作成しました');}
-  save();closeSheet();render();
+  const newId=id?null:'ev_'+uid();
+  const ok=await mutate(db=>{
+    if(id){
+      const ev=db.events.find(e=>e.id===id);
+      if(ev)Object.assign(ev,data);
+    }else{
+      db.events.push({id:newId,creator_id:ME.id,...data});
+      pushNotification(db,'イベント作成',`「${title}」が作成されました`);
+    }
+  });
+  if(!ok)return;
+  updateBell();
+  closeSheet();render();
+  toast(id?'イベントを更新しました':'イベントを作成しました');
 }
-function deleteEvent(id){
-  if(!confirm('このイベントを削除しますか？'))return;
-  DB.events=DB.events.filter(e=>e.id!==id);
-  DB.event_responses=DB.event_responses.filter(r=>r.event_id!==id);
-  save();toast('イベントを削除しました');render();
+async function deleteEvent(id){
+  if(!await confirmSheet('イベントを削除','このイベントと、これまでの出欠回答をすべて削除します。元に戻せません。','削除する'))return;
+  const ok=await mutate(db=>{
+    db.events=db.events.filter(e=>e.id!==id);
+    db.event_responses=db.event_responses.filter(r=>r.event_id!==id);
+  });
+  render();
+  if(ok)toast('イベントを削除しました');
 }
 
 /* =========================================================
@@ -1428,7 +1700,7 @@ function viewAvailability(){
     const flat=[];
     genSlots(s.id,7).forEach(d=>d.slots.forEach(x=>{if(x.ok)flat.push(`${fmtDate(d.dateObj.toISOString())} ${x.time}`);}));
     const show=flat.slice(0,16).map(t=>`<span class="slot">${t}</span>`).join('');
-    const more=flat.length>16?`<span class="slot" style="background:#eef2f6;color:#64748b">他${flat.length-16}枠</span>`:'';
+    const more=flat.length>16?`<span class="slot" style="background:var(--chip);color:var(--chip-ink)">他${flat.length-16}枠</span>`:'';
     const slots=flat.length?show+more:'<span class="rs" style="color:var(--mut)">空き枠なし</span>';
     return `<div class="staff">
       <div class="sname"><span>${esc(s.nickname)}</span><span class="tag">空き ${flat.length}枠</span></div>
@@ -1466,7 +1738,7 @@ function toggleWk(d){
   document.querySelector(`#wk${d} .sw`).classList.toggle('on',!cur);
   document.getElementById('wk'+d).classList.toggle('off',cur);
 }
-function saveAvailability(){
+async function saveAvailability(){
   const weekly={};
   [0,1,2,3,4,5,6].forEach(d=>{
     weekly[d]={on:document.querySelector(`#wk${d} .sw`).classList.contains('on'),
@@ -1474,8 +1746,14 @@ function saveAvailability(){
       e:document.getElementById('wke'+d).value||'19:00'};
     if(weekly[d].e<=weekly[d].s)weekly[d].e=weekly[d].s;
   });
-  DB.availability[ME.id]=Object.assign({},DB.availability[ME.id],{weekly});
-  save();closeSheet();toast('面談可能時間帯を保存しました');
+  // weekly だけを差し替える。blocks は触らない
+  // （Googleカレンダー連携のwebhookがサーバー側で blocks を書き足すことがあるため）
+  const ok=await mutate(db=>{
+    db.availability=db.availability||{};
+    db.availability[ME.id]=Object.assign({},db.availability[ME.id],{weekly});
+  });
+  if(!ok)return;
+  closeSheet();toast('面談可能時間帯を保存しました');
 }
 
 /* =========================================================
@@ -1519,7 +1797,7 @@ function viewAvailSet(){
   const listRows=blocks.length?blocks.map(b=>{
     const isSlot=b.kind==='slot';
     return `<div class="row" style="cursor:default">
-      <span class="av" style="border-radius:10px;background:#fdecec;color:#dc2626">🚫</span>
+      <span class="av" style="border-radius:10px;background:var(--bad-soft);color:var(--bad)">🚫</span>
       <span class="rmain"><span class="rt">${fmtDate(b.start)} ${hm(b.start)}〜${hm(b.end)}</span>
       <span class="rs">${esc(b.note||'予定あり')}${isSlot?'（枠タップ）':''}</span></span>
       <button class="btn sm bad" onclick="delBlock('${b.id}')">削除</button>
@@ -1562,9 +1840,9 @@ function viewAvailSet(){
       <label class="fl">時間をタップ（不可 ${blockedCnt}枠）</label>
       ${table}
       <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
-        <span><span class="legend-dot" style="background:#fff;border:1px solid var(--line)"></span>受付中（タップで不可）</span>
+        <span><span class="legend-dot" style="background:var(--panel);border:1px solid var(--line)"></span>受付中（タップで不可）</span>
         <span><span class="legend-dot" style="background:var(--bad)"></span>不可（タップで解除）</span>
-        <span><span class="legend-dot" style="background:#aeb7c0"></span>予定・面談あり</span>
+        <span><span class="legend-dot" style="background:var(--disabled)"></span>予定・面談あり</span>
       </div>
     </div></div>
 
@@ -1576,29 +1854,41 @@ function viewAvailSet(){
     <div class="card"><div class="rowlist">${listRows}</div></div>`;
 }
 function avSetWeek(delta){AVSET.weekOffset=Math.max(0,(AVSET.weekOffset||0)+delta);render();}
-function avBlock(iso,silent){
-  const st=new Date(iso),en=new Date(st.getTime()+30*60000);
-  DB.availability[ME.id]=DB.availability[ME.id]||{};
-  DB.availability[ME.id].blocks=DB.availability[ME.id].blocks||[];
-  const id='blk_'+uid();
-  DB.availability[ME.id].blocks.push({id,start:st.toISOString(),end:en.toISOString(),note:'面談不可',kind:'slot'});
-  if(!silent){save();toast('この枠を面談不可にしました');render();}
-  return id;
+
+/* 自分の不可時間リストを db から取り出す（無ければ作る） */
+function blocksOf(db,userId){
+  db.availability=db.availability||{};
+  db.availability[userId]=db.availability[userId]||{};
+  db.availability[userId].blocks=db.availability[userId].blocks||[];
+  return db.availability[userId];
 }
-function avUnblock(id,silent){
-  const a=DB.availability[ME.id];if(!a)return;
-  a.blocks=(a.blocks||[]).filter(b=>b.id!==id);
-  if(!silent){save();toast('面談可能に戻しました');render();}
+function makeSlotBlock(iso){
+  const st=new Date(iso),en=new Date(st.getTime()+30*60000);
+  return {id:'blk_'+uid(),start:st.toISOString(),end:en.toISOString(),note:'面談不可',kind:'slot'};
+}
+/* 追加・削除をまとめて反映する。ドラッグで一気に操作した分も1回の保存で済ませる。
+   blocks 全体を置き換えるのではなく増減だけを適用することで、
+   保存し直しになったときにGoogleカレンダー由来の予定を消してしまわないようにしている */
+async function applyBlockChanges({added=[],removedIds=[]}={}){
+  return mutate(db=>{
+    const av=blocksOf(db,ME.id);
+    let list=av.blocks;
+    if(removedIds.length)list=list.filter(b=>!removedIds.includes(b.id));
+    for(const b of added){if(!list.some(x=>x.id===b.id))list.push(b);}
+    av.blocks=list;
+  });
 }
 
-/* 枠タップ／ドラッグでまとめて不可・解除する（マウス・タッチ共通） */
+/* 枠タップ／ドラッグでまとめて不可・解除する（マウス・タッチ共通）。
+   ドラッグ中はセルの見た目だけを先に変えて操作内容をためておき、
+   指を離した時点で1回だけ保存する（1マスごとに保存すると通信が大量に発生するため） */
 let AVDRAG=null;
 function avPointerDown(e,iso){
   if(e.button!==undefined&&e.button!==0)return;
   e.preventDefault();
   const cell=e.currentTarget;
   const mode=cell.classList.contains('block')?'unblock':'block';
-  AVDRAG={mode,touched:new Set()};
+  AVDRAG={mode,touched:new Set(),added:[],removedIds:[]};
   document.body.classList.add('noselect');
   avDragApply(cell,iso);
   document.addEventListener('pointermove',avDragMove);
@@ -1614,29 +1904,31 @@ function avDragApply(cell,iso){
   if(!AVDRAG||AVDRAG.touched.has(iso))return;
   if(AVDRAG.mode==='block'){
     if(!cell.classList.contains('ok'))return;
-    const id=avBlock(iso,true);
+    const b=makeSlotBlock(iso);
+    AVDRAG.added.push(b);
     cell.classList.remove('ok');cell.classList.add('block');
-    cell.dataset.blockId=id;cell.textContent='×';
+    cell.dataset.blockId=b.id;cell.textContent='×';
   }else{
     if(!cell.classList.contains('block'))return;
     const bid=cell.dataset.blockId;
-    if(bid)avUnblock(bid,true);
+    if(bid)AVDRAG.removedIds.push(bid);
     cell.classList.remove('block');cell.classList.add('ok');
     delete cell.dataset.blockId;cell.textContent='○';
   }
   AVDRAG.touched.add(iso);
 }
-function avDragEnd(){
+async function avDragEnd(){
   document.removeEventListener('pointermove',avDragMove);
   document.removeEventListener('pointerup',avDragEnd);
   document.removeEventListener('pointercancel',avDragEnd);
   document.body.classList.remove('noselect');
-  if(AVDRAG){
-    const n=AVDRAG.touched.size;
-    AVDRAG=null;
-    if(n){save();toast(n>1?`${n}件を更新しました`:'更新しました');}
-    render();
-  }
+  if(!AVDRAG)return;
+  const {touched,added,removedIds}=AVDRAG;
+  AVDRAG=null;
+  if(!touched.size){render();return;}
+  const ok=await applyBlockChanges({added,removedIds});
+  render();
+  if(ok)toast(touched.size>1?`${touched.size}件を更新しました`:'更新しました');
 }
 
 /* 「日時でまとめて追加」フォーム＋スクロール式 時間ピッカー */
@@ -1671,23 +1963,24 @@ function tpSet(which,v){
   const bar=document.getElementById('tpbar_'+which);bar.innerHTML=timeOptions(which);bar.classList.add('hidden');
   document.getElementById('tpick_'+which).classList.remove('open');
 }
-function addBlock(){
+async function addBlock(){
   const {date,start:s,end:e}=BLKFORM;const note=(BLKFORM.note||'').trim();
   const err=document.getElementById('blkErr');err.classList.remove('show');
   if(!date||!s||!e){err.textContent='日付・開始・終了を入力してください';err.classList.add('show');return;}
   const start=new Date(`${date}T${s}`),end=new Date(`${date}T${e}`);
   if(end<=start){err.textContent='終了は開始より後にしてください';err.classList.add('show');return;}
   if(end<new Date()){err.textContent='過去の時間は登録できません';err.classList.add('show');return;}
-  DB.availability[ME.id]=DB.availability[ME.id]||{};
-  DB.availability[ME.id].blocks=DB.availability[ME.id].blocks||[];
-  DB.availability[ME.id].blocks.push({id:'blk_'+uid(),start:start.toISOString(),end:end.toISOString(),note});
-  save();toast('不可時間を登録しました');
+  const ok=await applyBlockChanges({
+    added:[{id:'blk_'+uid(),start:start.toISOString(),end:end.toISOString(),note}],
+  });
+  if(!ok)return;
+  toast('不可時間を登録しました');
   initBlkForm();render();
 }
-function delBlock(id){
-  const a=DB.availability[ME.id];if(!a)return;
-  a.blocks=(a.blocks||[]).filter(b=>b.id!==id);
-  save();toast('削除しました');render();
+async function delBlock(id){
+  const ok=await applyBlockChanges({removedIds:[id]});
+  render();
+  if(ok)toast('削除しました');
 }
 
 /* =========================================================
@@ -1714,19 +2007,29 @@ function openBranchForm(id){
     <div class="field-err" id="brNameE"></div>
     <button class="btn pri block" style="margin-top:16px" onclick="saveBranch(${b?`'${b.id}'`:'null'})">${b?'更新する':'追加する'}</button>`);
 }
-function saveBranch(id){
+async function saveBranch(id){
   const name=document.getElementById('brName').value.trim();const e=document.getElementById('brNameE');
   e.classList.remove('show');
   if(!name){e.textContent='支部名は必須です';e.classList.add('show');return;}
-  if(id)DB.branches.find(b=>b.id===id).name=name;
-  else DB.branches.push({id:'b_'+uid(),name});
-  save();closeSheet();toast('保存しました');go('branches');
+  const ok=await mutate(db=>{
+    if(id){const b=db.branches.find(x=>x.id===id);if(b)b.name=name;}
+    else db.branches.push({id:'b_'+uid(),name});
+  });
+  if(!ok)return;
+  closeSheet();toast('保存しました');go('branches');
 }
-function deleteBranch(id){
+async function deleteBranch(id){
   const uc=DB.users.filter(u=>u.branch_id===id).length;
-  if(uc>0){alert('この支部には所属ユーザーがいるため削除できません。先にユーザーの支部を変更してください。');return;}
-  if(!confirm('この支部を削除しますか？'))return;
-  DB.branches=DB.branches.filter(b=>b.id!==id);save();toast('削除しました');go('branches');
+  if(uc>0){
+    await alertSheet('削除できません',
+      `この支部には ${uc}人 が所属しています。先に所属ユーザーの支部を変更してください。`);
+    return;
+  }
+  const b=DB.branches.find(x=>x.id===id);
+  if(!await confirmSheet('支部を削除',`「${b?b.name:'この支部'}」を削除します。元に戻せません。`,'削除する'))return;
+  const ok=await mutate(db=>{db.branches=db.branches.filter(x=>x.id!==id);});
+  if(!ok)return;
+  toast('削除しました');go('branches');
 }
 
 /* =========================================================
@@ -1740,7 +2043,7 @@ let DIR_BUSY=false;
 let DIR_ADDING=null;   // 「追加」シートで対象にしているメールアドレス
 async function loadDirectoryStatus(){
   try{
-    const res=await fetch('/api/admin/directory/status');
+    const res=await api('/api/admin/directory/status');
     if(!res.ok)return;
     DIR_STATUS=await res.json();
     if(isAdminLike()&&currentTab==='users')render();
@@ -1752,7 +2055,7 @@ async function searchDirectory(){
   if(!DIR_QUERY){DIR_RESULTS=null;render();return;}
   DIR_BUSY=true;render();
   try{
-    const res=await fetch('/api/admin/directory/search?q='+encodeURIComponent(DIR_QUERY));
+    const res=await api('/api/admin/directory/search?q='+encodeURIComponent(DIR_QUERY));
     const data=await res.json();
     DIR_RESULTS=res.ok?(data.results||[]):[];
     if(!res.ok)toast(data.error||'検索に失敗しました');
@@ -1791,7 +2094,7 @@ async function doAddStaff(){
   const branch=document.getElementById('asBranch').value;
   if(!branch){e.textContent='所属支部を選択してください';e.classList.add('show');return;}
   try{
-    const res=await fetch('/api/admin/staff',{method:'POST',headers:{'Content-Type':'application/json'},
+    const res=await api('/api/admin/staff',{method:'POST',
       body:JSON.stringify({email,full_name:name,branch_id:branch})});
     const data=await res.json();
     if(!res.ok){e.textContent=data.error||'登録に失敗しました';e.classList.add('show');return;}
@@ -1818,7 +2121,7 @@ async function doDirectoryImport(){
   const e=document.getElementById('dirTextE');e.classList.remove('show');
   if(!text.trim()){e.textContent='内容を貼り付けてください';e.classList.add('show');return;}
   try{
-    const res=await fetch('/api/admin/directory/import',{method:'POST',headers:{'Content-Type':'application/json'},
+    const res=await api('/api/admin/directory/import',{method:'POST',
       body:JSON.stringify({text})});
     const data=await res.json();
     if(!res.ok){e.textContent=data.error||'取り込みに失敗しました';e.classList.add('show');return;}
@@ -1916,16 +2219,18 @@ async function saveUser(id){
   const data={nickname:nick,branch_id:document.getElementById('usBranch').value,
     role:document.querySelector('input[name=usRole]:checked').value};
   try{
-    const res=await fetch(`/api/admin/users/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const res=await api(`/api/admin/users/${id}`,{method:'PATCH',body:JSON.stringify(data)});
     if(!res.ok){const d=await res.json().catch(()=>({}));toast(d.error||'保存に失敗しました');return;}
     closeSheet();toast('保存しました');
     await refreshUsersAfterAdminChange();
   }catch(e){toast('保存に失敗しました');}
 }
 async function deleteUser(id){
-  if(!confirm('このユーザーを削除しますか？'))return;
+  const u=findUser(id);
+  if(!await confirmSheet('ユーザーを削除',
+    `${u?u.nickname:'このユーザー'}さんのアカウントを削除します。元に戻せません。`,'削除する'))return;
   try{
-    const res=await fetch(`/api/admin/users/${id}`,{method:'DELETE'});
+    const res=await api(`/api/admin/users/${id}`,{method:'DELETE'});
     if(!res.ok){const d=await res.json().catch(()=>({}));toast(d.error||'削除に失敗しました');return;}
     closeSheet();toast('削除しました');
     await refreshUsersAfterAdminChange();
@@ -1935,10 +2240,12 @@ async function deleteUser(id){
 /* =========================================================
    通知ログ（アプリ内通知の簡易実装）
    ========================================================= */
-function notifyLog(type,msg){
-  DB.notifications=DB.notifications||[];
-  DB.notifications.push({id:uid(),type,msg,at:nowISO()});
-  save();updateBell();
+/* 通知を1件積む。単体では保存せず、通知の原因になった変更と同じ mutate() の中で呼ぶ。
+   別々に保存すると、保存が2回に分かれて競合の機会が増えるため。
+   branch_id は、他支部の通知が見えないようサーバー側で絞り込むために持たせる */
+function pushNotification(db,type,msg){
+  db.notifications=db.notifications||[];
+  db.notifications.push({id:uid(),type,msg,at:nowISO(),branch_id:ME.branch_id||null});
 }
 const NOTI_READ_KEY='ops_notiread_v1';
 function getNotiRead(){try{return JSON.parse(localStorage.getItem(NOTI_READ_KEY))||{};}catch(e){return {};}}
@@ -1987,7 +2294,8 @@ function openMailHistory(){
       <span class="tile-arrow">›</span></div>`;}).join('')
     :`<div class="empty" style="padding:26px"><div class="ei">✉️</div><p>${ME.role==='intern'?'受信したメールはありません。':'送信したメールはありません。'}</p></div>`;
   openSheet(`<h3>${ME.role==='intern'?'受信メール':'メール履歴（送信済み）'}</h3>
-    <div class="hint mock"><span>✉️</span><span>実際には送信されず、アプリ内に記録されたメールの履歴です。</span></div>
+    <div class="hint"><span>✉️</span><span>面談の確定・不成立のお知らせはメールでも届きます。
+      それ以外はアプリ内の記録のみです。</span></div>
     <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>`);
 }
 function openMailDetail(id){
@@ -1998,6 +2306,7 @@ function openMailDetail(id){
       <dt>差出人</dt><dd>${esc(from?.nickname||'—')}</dd>
       <dt>宛先</dt><dd>${esc(to?.nickname||'—')}</dd>
       <dt>送信日時</dt><dd>${m.sent_at?fmtDT(m.sent_at):'—'}</dd>
+      <dt>メール</dt><dd>${m.delivered?'実際に送信済み':'アプリ内の記録のみ'}</dd>
     </dl>
     <div class="divider"></div>
     <div style="white-space:pre-wrap;font-size:14px;line-height:1.7">${esc(m.body)}</div>
@@ -2007,9 +2316,48 @@ function openMailDetail(id){
 /* =========================================================
    BOOT
    ========================================================= */
+/* 起動中の表示を消す。
+   Renderの無料枠は15分アクセスが無いとスリープし、次のアクセスで起動に数十秒かかる。
+   その間ずっと「読み込んでいます…」だけだと故障に見えるため、途中で文言を変える */
+let _bootTimer=null;
+function startBootMessageTimer(){
+  _bootTimer=setTimeout(()=>{
+    const el=document.getElementById('bootMsg');
+    if(el)el.textContent='サーバーを起動しています…（初回は1分ほどかかることがあります）';
+  },8000);
+}
+function hideBoot(){
+  clearTimeout(_bootTimer);
+  const el=document.getElementById('boot');
+  if(el)el.remove();
+}
+
+/* Googleログインから戻ってきたトークンを受け取る。
+   URLフラグメント（#以降）で渡されるためサーバーのアクセスログには残らない。
+   受け取ったらすぐURLから消して、履歴やブックマークに残らないようにする */
+function consumeTokenFromHash(){
+  if(!location.hash.startsWith('#'))return null;
+  const h=new URLSearchParams(location.hash.slice(1));
+  const token=h.get('token');
+  if(!token)return null;
+  setToken(token,h.get('remember')==='1');
+  const login=h.get('login');
+  history.replaceState(null,'',location.pathname+location.search);
+  return {login};
+}
+
 (async()=>{
+  startBootMessageTimer();
   const params=new URLSearchParams(location.search);
   const isStaffPage=location.pathname==='/staff';
+  const hashLogin=consumeTokenFromHash();
+  // 「次回から自動ログイン」で保存されたトークンを、このタブに取り込む。
+  // sessionStorage が空＝新しいタブ（＝ショートカットから開いた場合）なので、
+  // チェックが入っていなければここで何も起きず、ログイン画面が出る
+  if(!getToken()){
+    const saved=localStorage.getItem(TOKEN_KEY);
+    if(saved)sessionStorage.setItem(TOKEN_KEY,saved);
+  }
 
   // スタッフ登録でつまずいたときの案内（?staff_error=xxx）
   const STAFF_ERR_MSG={
@@ -2033,23 +2381,20 @@ function openMailDetail(id){
   };
 
   try{
-    // Googleログインボタンを出してよいかを先に確認する（失敗してもメール認証は使えるようにする）
+    /* 設定・ログイン状態・DB・支部一覧を1回の通信でまとめて取得する。
+       未ログインでも呼べるので、この1往復で画面を出すか決められる */
+    let boot={config:{},user:null,branches:[]};
     try{
-      const cRes=await fetch('/api/auth/config');
-      if(cRes.ok){
-        const cfg=await cRes.json();
-        GOOGLE_LOGIN_AVAILABLE=!!cfg.googleLogin;
-        PASSWORD_RESET_AVAILABLE=!!cfg.passwordReset;
-        STAFF_EMAIL_DOMAIN=cfg.staffEmailDomain||STAFF_EMAIL_DOMAIN;
-      }
-    }catch(e){/* 取得できないときはボタンを出さない */}
+      const bRes=await api('/api/bootstrap');
+      if(bRes.ok)boot=await bRes.json();
+    }catch(e){/* 取得できないときは既定値のまま（Googleボタンは出さない） */}
+    GOOGLE_LOGIN_AVAILABLE=!!boot.config.googleLogin;
+    PASSWORD_RESET_AVAILABLE=!!boot.config.passwordReset;
+    STAFF_EMAIL_DOMAIN=boot.config.staffEmailDomain||STAFF_EMAIL_DOMAIN;
+    LOGIN_BRANCHES=boot.branches||(boot.db&&boot.db.branches)||[];
 
     // スタッフ登録ページ（/staff）は、ログイン状態に関わらず専用画面を出す
     if(isStaffPage){
-      try{
-        const bRes=await fetch('/api/branches');
-        if(bRes.ok){LOGIN_BRANCHES=(await bRes.json()).branches||[];}
-      }catch(e){/* 支部が取れないときは空のまま表示する */}
       const verified=params.get('verified');
       const staffErr=params.get('staff_error');
       history.replaceState(null,'','/staff');
@@ -2080,23 +2425,23 @@ function openMailDetail(id){
       return;
     }
 
-    const meRes=await fetch('/api/auth/me');
-    if(meRes.ok){
-      await afterLogin();
+    if(boot.user){
+      await enterAppWith(boot.user,boot.db);
       startPolling();
     }else{
-      try{
-        const bRes=await fetch('/api/branches');
-        if(bRes.ok){LOGIN_BRANCHES=(await bRes.json()).branches||[];}
-      }catch(e){/* オフライン時は支部選択なしでログイン画面のみ表示 */}
+      // 期限切れのトークンが残っていたら消しておく（次の起動で無駄に問い合わせないため）
+      clearToken();
       renderLogin();
     }
   }catch(e){
     console.warn('サーバーに接続できません',e);
     renderLogin();
+  }finally{
+    hideBoot();
   }
 
-  const loginParam=params.get('login');
+  // 成功時はフラグメント（consumeTokenFromHashが読む）、失敗時はクエリで戻ってくる
+  const loginParam=hashLogin?hashLogin.login:null;
   const loginErr=params.get('login_error');
   if(loginParam||loginErr){
     params.delete('login');params.delete('login_error');

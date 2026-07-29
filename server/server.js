@@ -266,11 +266,12 @@ async function directoryStatus() {
 }
 
 /* ---------- sessions テーブル操作 ---------- */
-async function createSessionRow(userId) {
+/* remember=true（「次回から自動ログイン」）なら7日、そうでなければ12時間で失効する */
+async function createSessionRow(userId, remember) {
   const token = auth.newSessionToken();
   await client.execute({
     sql: 'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)',
-    args: [auth.hashToken(token), userId, new Date().toISOString(), auth.sessionExpiry()],
+    args: [auth.hashToken(token), userId, new Date().toISOString(), auth.sessionExpiry(remember)],
   });
   return token;
 }
@@ -295,7 +296,9 @@ async function requireAuth(req, res, next) {
   try {
     const token = auth.getSessionTokenFromReq(req);
     const user = await getUserBySessionToken(token);
-    if (!user || user.status !== 'active') return res.status(401).json({ error: '認証が必要です' });
+    // code はフロント側で「セッション切れ」と「パスワード違いなどの業務上の401」を
+    // 見分けるために使う。これが無いと、パスワード変更に失敗しただけでログアウトしてしまう
+    if (!user || user.status !== 'active') return res.status(401).json({ error: '認証が必要です', code: 'unauthenticated' });
     req.authUser = user;
     // パスワード変更時に「今使っている端末だけ残す」判定に使う
     req.authSessionTokenHash = auth.hashToken(token);
@@ -461,6 +464,180 @@ async function syncInterviewsToGoogle(oldDB, newBody, users) {
   }
 }
 
+/* =========================================================
+   データの見える範囲・変えてよい範囲（ロール別）
+
+   以前は GET /api/db が全支部の面談も他人あてのメール本文もそのまま全員に返しており、
+   PUT /api/db もログインさえしていれば何でも書き換えられる状態だった。
+   ここで「見える範囲（scopeDBForUser）」「書き戻しの合成（mergeScoped）」
+   「変更内容の検証（validateDiff）」の3段構えで制限する。
+   ========================================================= */
+
+/* その人が見てよいデータだけに絞り込む */
+function scopeDBForUser(obj, user, users) {
+  if (user.role === 'admin') return obj;
+  const branchId = user.branch_id;
+  const isIntern = user.role === 'intern';
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const inBranch = (id) => {
+    const u = userById.get(id);
+    return !!u && u.branch_id === branchId;
+  };
+
+  const interviews = (obj.interviews || []).filter((iv) =>
+    isIntern ? iv.intern_id === user.id : (iv.staff_id === user.id || inBranch(iv.intern_id)));
+  const events = (obj.events || []).filter((e) => e.branch_id === branchId);
+  const eventIds = new Set(events.map((e) => e.id));
+  const event_responses = (obj.event_responses || []).filter((r) => eventIds.has(r.event_id));
+  // メールは当事者だけ。以前は全員が全員分の本文を読めていた
+  const emails = (obj.emails || []).filter((m) => m.receiver_id === user.id || m.sender_id === user.id);
+  // branch_id を持たない通知は、この仕組みを入れる前の古いレコード
+  const notifications = (obj.notifications || []).filter((n) => !n.branch_id || n.branch_id === branchId);
+
+  /* 空き日程は面談の予約画面で必要なので自支部のスタッフ分を返す。
+     ただしインターン生には予定の中身（「アルバイト」など私的な情報）を伏せ、
+     時間帯だけを渡す */
+  const availability = {};
+  for (const [id, av] of Object.entries(obj.availability || {})) {
+    const u = userById.get(id);
+    if (!u || u.branch_id !== branchId) continue;
+    availability[id] = isIntern
+      ? {
+        weekly: av.weekly,
+        blocks: (av.blocks || []).map((b) => ({ id: b.id, start: b.start, end: b.end, kind: b.kind })),
+      }
+      : av;
+  }
+  return { ...obj, interviews, events, event_responses, emails, notifications, availability };
+}
+
+/* 絞り込んだデータを受け取ったクライアントが書き戻してきたとき、
+   その人には見えていなかった分を元のデータから戻して1つに合成する。
+   これをしないと、見えていないデータが保存のたびに消えてしまう */
+function mergeScoped(oldDB, clientDB, user, users) {
+  if (user.role === 'admin') return { ...clientDB, emails: oldDB.emails || [] };
+  const visible = scopeDBForUser(oldDB, user, users);
+  const merged = { ...oldDB };
+  for (const key of ['interviews', 'events', 'event_responses', 'notifications']) {
+    const visibleIds = new Set((visible[key] || []).map((x) => x.id));
+    const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
+    merged[key] = [...hidden, ...(clientDB[key] || [])];
+  }
+  merged.branches = clientDB.branches || oldDB.branches || [];
+  // メール履歴はサーバー（POST /api/mail/send）だけが書き込む
+  merged.emails = oldDB.emails || [];
+  /* 空き日程は自分の分だけを採用し、他人の分は送られてきても黙って捨てる。
+     403で弾かないのは、インターン生には予定名を伏せた「削った状態」で渡しているため。
+     送り返された内容と元データを直接比べると、正常な保存まで毎回はじいてしまう。
+     ここで採用しなければ他人の予定は決して書き換わらないので、これで十分に防げている */
+  merged.availability = { ...(oldDB.availability || {}) };
+  if (clientDB.availability && clientDB.availability[user.id]) {
+    merged.availability[user.id] = clientDB.availability[user.id];
+  }
+  return merged;
+}
+
+const sameJSON = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const byId = (list) => new Map((list || []).map((x) => [x.id, x]));
+
+/* 変更内容が、その人に許されたものかを1件ずつ確かめる。
+   1件でも許されない変更があれば、その保存はまるごと拒否する（一部だけ適用しない） */
+function validateDiff(oldDB, newDB, actor, users) {
+  const errs = [];
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const sameBranch = (id) => {
+    const u = userById.get(id);
+    return !!u && u.branch_id === actor.branch_id;
+  };
+  const isAdmin = actor.role === 'admin';
+  const isStaffLike = ['staff', 'branch_admin', 'admin'].includes(actor.role);
+
+  // ---- 支部：全体管理者のみ ----
+  if (!isAdmin && !sameJSON(oldDB.branches, newDB.branches)) {
+    errs.push('支部を変更できるのは全体管理者だけです');
+  }
+
+  // ---- 面談 ----
+  const oldIv = byId(oldDB.interviews);
+  const newIv = byId(newDB.interviews);
+  for (const [id, iv] of newIv) {
+    const prev = oldIv.get(id);
+    if (!prev) {
+      if (iv.intern_id !== actor.id) errs.push('面談を申請できるのは本人だけです');
+      else if (iv.status !== 'applied') errs.push('申請時のステータスが不正です');
+    } else if (!sameJSON(prev, iv)) {
+      if (!isStaffLike) errs.push('面談を変更する権限がありません');
+      else if (!isAdmin && iv.staff_id !== actor.id && !sameBranch(iv.intern_id)) {
+        errs.push('他の支部の面談は変更できません');
+      }
+    }
+  }
+  for (const [id, prev] of oldIv) {
+    if (newIv.has(id)) continue;
+    // 本人が申請中のものを取り下げる場合のみ許す
+    if (!isAdmin && !(prev.intern_id === actor.id && prev.status === 'applied')) {
+      errs.push('この面談を削除する権限がありません');
+    }
+  }
+
+  // ---- イベント ----
+  const oldEv = byId(oldDB.events);
+  const newEv = byId(newDB.events);
+  for (const [id, ev] of newEv) {
+    const prev = oldEv.get(id);
+    if (!prev) {
+      if (actor.role === 'intern') errs.push('イベントを作成する権限がありません');
+      else if (!isAdmin && ev.branch_id !== actor.branch_id) errs.push('他の支部のイベントは作成できません');
+      else if (ev.creator_id !== actor.id) errs.push('作成者が不正です');
+    } else if (!sameJSON(prev, ev)) {
+      if (!isAdmin && prev.creator_id !== actor.id) errs.push('このイベントを編集する権限がありません');
+    }
+  }
+  const removedEventIds = new Set([...oldEv.keys()].filter((id) => !newEv.has(id)));
+  for (const id of removedEventIds) {
+    const prev = oldEv.get(id);
+    if (!isAdmin && prev.creator_id !== actor.id) errs.push('このイベントを削除する権限がありません');
+  }
+
+  // ---- イベント回答：自分の回答だけ ----
+  const oldRs = byId(oldDB.event_responses);
+  const newRs = byId(newDB.event_responses);
+  for (const [id, r] of newRs) {
+    const prev = oldRs.get(id);
+    if ((!prev || !sameJSON(prev, r)) && r.user_id !== actor.id) {
+      errs.push('他の人の出欠回答は変更できません');
+    }
+  }
+  for (const [id, prev] of oldRs) {
+    if (newRs.has(id)) continue;
+    // イベントごと削除された場合は、その回答も一緒に消えてよい
+    if (removedEventIds.has(prev.event_id)) continue;
+    if (!isAdmin && prev.user_id !== actor.id) errs.push('他の人の出欠回答は削除できません');
+  }
+
+  // ---- 空き日程：自分の分だけ ----
+  const avKeys = new Set([...Object.keys(oldDB.availability || {}), ...Object.keys(newDB.availability || {})]);
+  for (const key of avKeys) {
+    if (key === actor.id || isAdmin) continue;
+    if (!sameJSON((oldDB.availability || {})[key], (newDB.availability || {})[key])) {
+      errs.push('他の人の空き時間は変更できません');
+    }
+  }
+
+  // ---- 通知：追加のみ。消して履歴を隠せないようにする ----
+  const newNotiIds = new Set((newDB.notifications || []).map((n) => n.id));
+  if (!isAdmin && (oldDB.notifications || []).some((n) => !newNotiIds.has(n.id))) {
+    errs.push('通知は削除できません');
+  }
+
+  // ---- メール履歴：専用APIでのみ変更する ----
+  if (!sameJSON(oldDB.emails, newDB.emails)) {
+    errs.push('メール履歴はこの方法では変更できません');
+  }
+
+  return [...new Set(errs)];
+}
+
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 
@@ -487,9 +664,9 @@ app.post('/api/auth/register-intern', async (req, res) => {
     if (existing) return res.status(409).json({ error: 'このメールアドレスは既に登録されています' });
     const passwordHash = await auth.hashPassword(password);
     const user = await insertUser({ email, passwordHash, nickname, role: 'intern', branchId: branch_id, status: 'active' });
-    const token = await createSessionRow(user.id);
-    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
-    res.json({ ok: true, user: toPublicUser(user) });
+    // 登録直後はそのタブ限りのログイン。自動ログインはログイン画面のチェックで選んでもらう
+    const token = await createSessionRow(user.id, false);
+    res.json({ ok: true, token, user: toPublicUser(user) });
   } catch (e) {
     console.error('インターン生登録に失敗しました', e);
     res.status(500).json({ error: '登録に失敗しました' });
@@ -507,7 +684,7 @@ app.post('/api/auth/register-staff', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, remember } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email・passwordは必須です' });
   try {
     const row = await findUserByEmail(email);
@@ -519,9 +696,8 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' });
     }
     if (row.status !== 'active') return res.status(403).json({ error: 'このアカウントではログインできません' });
-    const token = await createSessionRow(row.id);
-    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
-    res.json({ ok: true, user: toPublicUser(row) });
+    const token = await createSessionRow(row.id, remember === true);
+    res.json({ ok: true, token, user: toPublicUser(row) });
   } catch (e) {
     console.error('ログインに失敗しました', e);
     res.status(500).json({ error: 'ログインに失敗しました' });
@@ -529,9 +705,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.post('/api/auth/logout', requireAuth, async (req, res) => {
-  const token = auth.getSessionTokenFromReq(req);
-  await deleteSessionByToken(token);
-  res.setHeader('Set-Cookie', auth.serializeClearCookie());
+  await deleteSessionByToken(auth.getSessionTokenFromReq(req));
   res.json({ ok: true });
 });
 
@@ -540,19 +714,46 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 });
 
 // ログイン画面が「Googleでログイン」ボタンを出してよいかを判断するための設定。認証不要
-app.get('/api/auth/config', (req, res) => {
-  res.json({
+function authConfig() {
+  return {
     googleLogin: GOOGLE_LOGIN_ENABLED,
     passwordReset: mail.MAIL_ENABLED,
     staffEmailDomain: STAFF_EMAIL_DOMAIN,
-  });
+  };
+}
+app.get('/api/auth/config', (req, res) => res.json(authConfig()));
+
+/* 起動時に必要な情報をまとめて返す。
+   以前は config → me → db → branches を順番に呼んでおり、
+   通信の往復が3〜4回積み重なっていた。Renderの無料枠は海外リージョンで
+   1往復あたりの待ち時間が大きいため、ここを1回にまとめる効果が大きい。
+   認証は任意（トークンが無ければ未ログインとして返す） */
+app.get('/api/bootstrap', async (req, res) => {
+  try {
+    const config = authConfig();
+    const token = auth.getSessionTokenFromReq(req);
+    const user = token ? await getUserBySessionToken(token) : null;
+    const obj = await readDB();
+
+    if (!user || user.status !== 'active') {
+      return res.json({ config, user: null, branches: obj?.branches || [] });
+    }
+    const users = await listActiveUsers();
+    const db = obj ? scopeDBForUser(obj, user, users) : {};
+    db.users = scopeUsers(users, user);
+    res.json({ config, user: toPublicUser(user), db });
+  } catch (e) {
+    console.error('起動情報の取得に失敗しました', e);
+    res.status(500).json({ error: '起動情報の取得に失敗しました' });
+  }
 });
 
 /* ---------- Googleでログイン（OpenID Connect） ----------
    カレンダー連携（/api/auth/google/start）とは別経路。カレンダーの権限は要求しない */
 app.get('/api/auth/google/login', (req, res) => {
   if (!GOOGLE_LOGIN_ENABLED) return res.redirect('/?login_error=disabled');
-  res.redirect(google.getLoginAuthUrl());
+  // 「次回から自動ログイン」の選択は、Googleへ行って戻ってくる間 state に預けて持ち回す
+  res.redirect(google.getLoginAuthUrl(req.query.remember === '1' ? 'login-remember' : 'login'));
 });
 
 /* スタッフ登録の入口。ドットから配布された @dot-jp.or.jp のGoogleアカウントで
@@ -567,9 +768,10 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
   const { code, state, error } = req.query;
   const purpose = google.verifyState(state);
   const isStaffSignup = purpose === 'staff';
+  const remember = purpose === 'login-remember';
   const fail = (key) => res.redirect(isStaffSignup ? `/staff?staff_error=${key}` : `/?login_error=${key}`);
   if (error) return fail('cancelled');
-  if (!code || (purpose !== 'login' && purpose !== 'staff')) return fail('state');
+  if (!code || !['login', 'login-remember', 'staff'].includes(purpose)) return fail('state');
   try {
     const tokens = await google.exchangeLoginCode(code);
     const profile = google.parseIdToken(tokens.id_token);
@@ -610,9 +812,10 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
 
     if (user.status !== 'active') return fail('inactive');
 
-    const token = await createSessionRow(user.id);
-    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
-    res.redirect('/?login=google');
+    const token = await createSessionRow(user.id, remember);
+    // トークンはURLフラグメント（#以降）で渡す。フラグメントはサーバーに送信されず
+    // Refererにも載らないため、アクセスログや中継サーバーにトークンが残らない
+    res.redirect(`/#token=${encodeURIComponent(token)}&remember=${remember ? 1 : 0}&login=google`);
   } catch (e) {
     console.error('Googleログインに失敗しました', e);
     return fail('failed');
@@ -650,9 +853,9 @@ app.post('/api/auth/staff-signup', async (req, res) => {
       googleSub: verified.sub,
       avatarUrl: verified.picture || null,
     });
-    const token = await createSessionRow(user.id);
-    res.setHeader('Set-Cookie', auth.serializeSessionCookie(token));
-    res.json({ ok: true, user: toPublicUser(user) });
+    // 登録直後はそのタブ限りのログイン（register-internと同じ扱い）
+    const token = await createSessionRow(user.id, false);
+    res.json({ ok: true, token, user: toPublicUser(user) });
   } catch (e) {
     console.error('スタッフ登録に失敗しました', e);
     res.status(500).json({ error: '登録に失敗しました' });
@@ -981,32 +1184,123 @@ app.post('/api/admin/staff', requireAuth, requireBranchAdmin, async (req, res) =
   }
 });
 
+/* ---------- メール送信 ----------
+   面談の確定・不成立（kind='fixed'/'failed'）だけは実際にメールを送る。
+   Meet/Zoomリンクの送付などはアプリ内の履歴に残すだけ。
+   履歴はサーバーだけが書き込む（PUT /api/db 側では emails を受け付けない）ため、
+   クライアントの持っている情報が古くても履歴が消えることはない */
+const REAL_MAIL_KINDS = ['fixed', 'failed'];
+
+app.post('/api/mail/send', requireAuth, async (req, res) => {
+  const { receiver_id, subject, body, kind } = req.body || {};
+  const actor = req.authUser;
+  if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
+    return res.status(403).json({ error: '権限がありません' });
+  }
+  if (!receiver_id) return res.status(400).json({ error: '宛先が必要です' });
+  if (!subject || !String(subject).trim()) return res.status(400).json({ error: '件名を入力してください' });
+  try {
+    const receiver = await findUserById(receiver_id);
+    if (!receiver) return res.status(404).json({ error: '宛先のユーザーが見つかりません' });
+    if (actor.role !== 'admin' && receiver.branch_id !== actor.branch_id) {
+      return res.status(403).json({ error: '他の支部の方には送信できません' });
+    }
+
+    let sent = false;
+    let warning = null;
+    if (REAL_MAIL_KINDS.includes(kind)) {
+      if (!mail.MAIL_ENABLED) {
+        warning = 'メール送信が未設定のため、履歴への記録のみ行いました。';
+      } else {
+        try {
+          await mail.sendInterviewMail({
+            to: receiver.email, nickname: receiver.nickname,
+            subject: String(subject).trim(), body: String(body || ''),
+          });
+          sent = true;
+        } catch (e) {
+          // 送信に失敗しても履歴は残す。スタッフが送り直せるよう、失敗した事実は画面に返す
+          console.error('面談メールの送信に失敗しました', e);
+          warning = 'メールを送信できませんでした。履歴には記録しています。';
+        }
+      }
+    }
+
+    const db = (await readDB()) || {};
+    db.emails = db.emails || [];
+    db.emails.push({
+      id: 'ml_' + crypto.randomBytes(4).toString('hex'),
+      sender_id: actor.id, receiver_id, subject: String(subject).trim(),
+      body: String(body || ''), sent_at: new Date().toISOString(), delivered: sent,
+    });
+    await writeDB(db);
+    res.json({ ok: true, sent, warning });
+  } catch (e) {
+    console.error('メール送信処理に失敗しました', e);
+    res.status(500).json({ error: '送信に失敗しました' });
+  }
+});
+
 // 現在のDBを取得。未作成（初回アクセス）でも users だけは常に返し、branches等はフロント側のseed()投入に委ねる
 app.get('/api/db', requireAuth, async (req, res) => {
   try {
     const obj = await readDB();
     const users = await listActiveUsers();
-    if (!obj) return res.json({ users });
-    obj.users = users;
-    res.json(obj);
+    if (!obj) return res.json({ users: scopeUsers(users, req.authUser) });
+    const scoped = scopeDBForUser(obj, req.authUser, users);
+    scoped.users = scopeUsers(users, req.authUser);
+    res.json(scoped);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'db read failed' });
   }
 });
 
-// DB全体を置き換えて保存する（既存save()の置き換え先）。users は専用APIでのみ変更するためここでは無視する
+/* インターン生には、面談の申し込み先として必要な自支部のスタッフだけを見せる。
+   全支部の全ユーザー一覧を配る必要はない */
+function scopeUsers(users, actor) {
+  if (actor.role !== 'intern') return users;
+  return users.filter((u) =>
+    u.id === actor.id || (u.branch_id === actor.branch_id && (u.role === 'staff' || u.role === 'branch_admin')));
+}
+
+// DB全体を置き換えて保存する。users は専用APIでのみ変更するためここでは無視する
 app.put('/api/db', requireAuth, async (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object') {
     return res.status(400).json({ error: 'invalid body' });
   }
+  /* 楽観ロック用。クライアントが「このバージョンを読んだうえで書き換えた」と申告してくる。
+     申告と現在のバージョンがずれていれば、その間に他の人が保存したということなので、
+     上書きせず409を返す。クライアントは最新を取り直して同じ操作をやり直す */
+  const baseUpdatedAt = body._baseUpdatedAt;
+  delete body._baseUpdatedAt;
+  delete body.updatedAt;
   delete body.users;
   try {
     const oldDB = await readDB();
+    // 申告が無い場合も競合扱いにする。古いクライアントが無条件に上書きするのを防ぐ
+    if (oldDB && oldDB.updatedAt !== baseUpdatedAt) {
+      return res.status(409).json({ error: '他の人が先に更新しました', code: 'conflict' });
+    }
     const users = await listActiveUsers();
-    await syncInterviewsToGoogle(oldDB, body, users);
-    const updatedAt = await writeDB(body);
+
+    // 初回（データがまだ無い）は支部などの初期データ投入なので、そのまま受け入れる
+    if (!oldDB) {
+      const updatedAt = await writeDB(body);
+      return res.json({ ok: true, updatedAt });
+    }
+
+    // 送られてきた内容を、その人に見えていなかった分と合成してから権限を確かめる
+    const merged = mergeScoped(oldDB, body, req.authUser, users);
+    const errs = validateDiff(oldDB, merged, req.authUser, users);
+    if (errs.length) {
+      console.warn(`権限のない変更を拒否しました（user ${req.authUser.id} / ${req.authUser.role}）:`, errs);
+      return res.status(403).json({ error: errs[0], code: 'forbidden_change', details: errs });
+    }
+
+    await syncInterviewsToGoogle(oldDB, merged, users);
+    const updatedAt = await writeDB(merged);
     res.json({ ok: true, updatedAt });
   } catch (e) {
     console.error(e);

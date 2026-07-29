@@ -2,15 +2,22 @@
    認証ヘルパー
    - パスワードのハッシュ化・検証（scrypt）
    - セッショントークンの生成・検証（DBには sha256(token) のみ保存）
-   - Cookieのシリアライズ・簡易パース
+   - リクエストからの Bearer トークン取り出し
    すべてNode標準のcrypto/utilのみで実装（追加npm依存なし）
+
+   ※以前はCookieでセッションを持っていたが、Cookieはブラウザ全体で共有されるため
+     「タブごとに別のアカウントでログインする」ことができなかった。
+     現在はトークンを Authorization ヘッダで受け取り、保管場所はブラウザ側の
+     sessionStorage（タブごとに独立）に任せている。Cookieは一切使わない。
    ========================================================= */
 const crypto = require('node:crypto');
 const { promisify } = require('node:util');
 const scrypt = promisify(crypto.scrypt);
 
-const SESSION_COOKIE = 'ops_session';
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30日
+/* 「次回から自動ログイン」にチェックを入れた場合の有効期限 */
+const SESSION_TTL_REMEMBER_MS = 7 * 24 * 60 * 60 * 1000; // 7日
+/* チェックなしの場合。タブを閉じればトークンごと消えるので、長く持たせる意味がない */
+const SESSION_TTL_TAB_MS = 12 * 60 * 60 * 1000; // 12時間
 
 /* ---------- パスワードハッシュ ---------- */
 async function hashPassword(password) {
@@ -34,45 +41,20 @@ function newSessionToken() {
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
-function sessionExpiry() {
-  return new Date(Date.now() + SESSION_TTL_MS).toISOString();
+function sessionExpiry(remember) {
+  return new Date(Date.now() + (remember ? SESSION_TTL_REMEMBER_MS : SESSION_TTL_TAB_MS)).toISOString();
 }
 
-/* ---------- Cookie ---------- */
-function serializeSessionCookie(token) {
-  const maxAge = Math.floor(SESSION_TTL_MS / 1000);
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
-}
-function serializeClearCookie() {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-}
-function parseCookies(header) {
-  const out = {};
-  String(header || '').split(';').forEach((part) => {
-    const i = part.indexOf('=');
-    if (i === -1) return;
-    const k = part.slice(0, i).trim();
-    const v = part.slice(i + 1).trim();
-    if (k) out[k] = decodeURIComponent(v);
-  });
-  return out;
-}
+/* ---------- リクエストからトークンを取り出す ----------
+   Authorization: Bearer <token> のみを見る。Cookieは意図的に見ない
+   （見てしまうと、トークンを持たない新しいタブがCookieでログインできてしまい、
+     「タブごとに独立」「ショートカットからは毎回ログイン」が成立しなくなる） */
 function getSessionTokenFromReq(req) {
-  const cookies = parseCookies(req.headers.cookie);
-  return cookies[SESSION_COOKIE] || null;
-}
-
-/* ---------- 秘密鍵の定数時間比較（招待キー検証用） ---------- */
-function safeEqual(a, b) {
-  const bufA = Buffer.from(String(a || ''));
-  const bufB = Buffer.from(String(b || ''));
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+  const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+  return m ? m[1].trim() : null;
 }
 
 module.exports = {
   hashPassword, verifyPassword,
-  newSessionToken, hashToken, sessionExpiry,
-  serializeSessionCookie, serializeClearCookie, parseCookies, getSessionTokenFromReq,
-  safeEqual,
+  newSessionToken, hashToken, sessionExpiry, getSessionTokenFromReq,
 };

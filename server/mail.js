@@ -75,9 +75,25 @@ async function sendPasswordResetMail({ to, nickname, url, minutes }) {
   return sendMail({ to, subject, text, html });
 }
 
+/* 面談の確定・不成立をインターン生に知らせるメール。
+   本文はスタッフが画面で編集したものをそのまま送るため、改行だけHTMLに直して流し込む。
+   件名には、他のメールに埋もれないよう共通の接頭辞を付ける */
+async function sendInterviewMail({ to, nickname, subject, body }) {
+  const text = [`${nickname} さん`, '', body, '', '---', 'OPS日調アプリ（ドットジェイピー）'].join('\n');
+  const html = `
+  <div style="font-family:-apple-system,'Segoe UI',sans-serif;line-height:1.7;color:#1f2937">
+    <p>${escapeHtml(nickname)} さん</p>
+    <div style="white-space:pre-wrap">${escapeHtml(body)}</div>
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
+    <p style="font-size:12px;color:#9ca3af">OPS日調アプリ（ドットジェイピー）<br>
+      このメールは送信専用です。ご返信いただいてもお答えできません。</p>
+  </div>`;
+  return sendMail({ to, subject: `【OPS日調アプリ】${subject}`, text, html });
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-module.exports = { MAIL_ENABLED, sendMail, sendPasswordResetMail };
+module.exports = { MAIL_ENABLED, sendMail, sendPasswordResetMail, sendInterviewMail };

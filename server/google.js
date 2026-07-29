@@ -103,8 +103,8 @@ async function exchangeCode(code) {
 
 /* ---------- Googleでログイン（OpenID Connect） ----------
    カレンダー連携とは別物。カレンダーの権限は要求せず、本人確認（メール・氏名）だけを取得する */
-/* purpose は 'login'（通常のログイン）か 'staff'（スタッフ登録）。
-   戻ってきたときに state から用途を判別して処理を分ける */
+/* purpose は 'login'（通常のログイン）／'login-remember'（次回から自動ログインにチェック済み）／
+   'staff'（スタッフ登録）のいずれか。戻ってきたときに state から用途を判別して処理を分ける */
 function getLoginAuthUrl(purpose = 'login') {
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,

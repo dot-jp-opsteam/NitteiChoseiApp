@@ -23,8 +23,6 @@ services:
         sync: false
       - key: SEED_ADMIN_PASSWORD
         sync: false
-      - key: STAFF_SIGNUP_SECRET
-        sync: false
       # ログイン用リダイレクトURI（/api/auth/google/login/callback）は
       # 2026-07-27 に Google Cloud Console へ登録済み。OAuth同意画面も公開済みのため有効化
       - key: GOOGLE_LOGIN_ENABLED
