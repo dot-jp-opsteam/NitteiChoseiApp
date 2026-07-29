@@ -19,8 +19,18 @@ function getTransporter() {
   if (!MAIL_ENABLED) return null;
   if (!transporter) {
     transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
+      /* smtp.gmail.com はIPv6アドレスも返すが、Renderの無料プランは
+         外向きのIPv6が使えず ENETUNREACH で失敗する。
+         IPv4に固定しないとメールが1通も送れない（2026-07-29に判明） */
+      family: 4,
+      /* 接続できないときに延々と待たせない。既定では数分固まることがある */
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     });
   }
   return transporter;
