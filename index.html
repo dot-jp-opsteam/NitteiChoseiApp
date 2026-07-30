@@ -132,6 +132,20 @@ const ICON={
       +'<path pathLength="1" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>'
       +'<path pathLength="1" d="M9 12h7"/><path pathLength="1" d="M9 16h4.5"/>',
   clock:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="M12 6.8v5.5l3.4 2"/>',
+  // 依頼（拡声器）。ラッパ・持ち手・音の弧の3画で描く
+  megaphone:'<path pathLength="1" d="M4 10.2v3.6a1.6 1.6 0 0 0 1.6 1.6H8l7.4 4.4V5.8L8 10.2H5.6A1.6 1.6 0 0 0 4 11.8z"/>'
+           +'<path pathLength="1" d="M8 15.4v3.2a1.4 1.4 0 0 0 1.4 1.4h1.2"/>'
+           +'<path pathLength="1" d="M18.6 9.4a4 4 0 0 1 0 5.2"/>',
+  // 所属部署（組織図）
+  sitemap:'<rect pathLength="1" x="9" y="3" width="6" height="4.4" rx="1.2"/>'
+         +'<rect pathLength="1" x="2.6" y="16.6" width="6" height="4.4" rx="1.2"/>'
+         +'<rect pathLength="1" x="15.4" y="16.6" width="6" height="4.4" rx="1.2"/>'
+         +'<path pathLength="1" d="M12 7.4v4.4"/>'
+         +'<path pathLength="1" d="M5.6 16.6v-2.4a2.4 2.4 0 0 1 2.4-2.4h8a2.4 2.4 0 0 1 2.4 2.4v2.4"/>',
+  // インターン先（かばんと場所）
+  workplace:'<rect pathLength="1" x="3" y="7.4" width="18" height="12.4" rx="2"/>'
+           +'<path pathLength="1" d="M8.8 7.4V5.8a1.8 1.8 0 0 1 1.8-1.8h2.8a1.8 1.8 0 0 1 1.8 1.8v1.6"/>'
+           +'<path pathLength="1" d="M3 12.4h18"/>',
   alarm:'<circle pathLength="1" cx="12" cy="13.2" r="7.6"/>'
        +'<path pathLength="1" d="M12 9.6v3.6l2.4 1.4"/>'
        +'<path pathLength="1" d="M5.4 3.6 2.9 6.1"/><path pathLength="1" d="m18.6 3.6 2.5 2.5"/>',
@@ -289,7 +303,11 @@ async function api(path,opts={}){
 // 初期マスタデータ（支部のみ）。ユーザー・面談等は運用開始時点では空。
 function seed(){
   const branches=[{id:'b1',name:'茨城支部'},{id:'b2',name:'東京支部'},{id:'b3',name:'神奈川支部'}];
-  return {branches,interviews:[],events:[],event_responses:[],emails:[],availability:{},notifications:[],seededAt:nowISO()};
+  return {branches,interviews:[],events:[],event_responses:[],emails:[],availability:{},notifications:[],
+    // profiles＝ユーザーごとの追加情報（所属部署・インターン先）。
+    // ユーザー表はサーバー側の正規テーブルなので、こちら側の付加情報はここに持つ
+    profiles:{},internships:[],requests:[],
+    seededAt:nowISO()};
 }
 
 /* ---------- storage（フェーズ0：サーバーAPI + localStorageキャッシュ） ---------- */
@@ -1098,17 +1116,18 @@ const NAV={
     {id:'home',label:'ホーム',ic:'home'},
     {id:'apply',label:'面談申請',ic:'edit'},
     {id:'my',label:'面談状況',ic:'list'},
+    {id:'requests',label:'依頼',ic:'megaphone'},
   ],
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'avail',label:'空き日程',ic:'clock'},
+    {id:'requests',label:'依頼',ic:'megaphone'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'avail',label:'空き日程',ic:'clock'},
+    {id:'requests',label:'依頼',ic:'megaphone'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
@@ -1145,6 +1164,12 @@ function buildNav(){
   document.getElementById('sbAct').innerHTML=`
     ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す登録リンクを作る">
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
+    ${canSendRequest()?`<button class="sb-item" onclick="openMyDepartments()" title="自分の所属部署を設定する">
+      <span class="si">${ic('sitemap')}</span><span class="sl">所属部署</span></button>
+    <button class="sb-item" onclick="openInternshipMaster()" title="支部のインターン先を登録・編集する">
+      <span class="si">${ic('workplace')}</span><span class="sl">インターン先</span></button>`:''}
+    ${ME.role==='intern'?`<button class="sb-item" onclick="openMyInternshipForm()" title="自分のインターン先を設定する">
+      <span class="si">${ic('workplace')}</span><span class="sl">インターン先</span></button>`:''}
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="テーマを切り替える">
       <span class="si">${ic('contrast')}</span><span class="sl">テーマ</span>
       <span class="sv">${currentTheme()==='light'?'ライト':'ダーク'}</span></button>
@@ -1239,7 +1264,7 @@ function render(){
   else if(t==='apply')html=viewApply();
   else if(t==='my')html=viewMyInterviews();
   else if(t==='interviews')html=viewStaffInterviews();
-  else if(t==='avail')html=viewAvailability();
+  else if(t==='requests')html=viewRequests();
   else if(t==='avset')html=viewAvailSet();
   else if(t==='branches')html=viewBranches();
   else if(t==='users')html=viewUsers();
@@ -1290,10 +1315,14 @@ function viewHome(){
       statusCard=`<div class="hint">${ic('bulb')}<span>あなたの面談は現在 <b>「${s.t}」</b> です。${latest.status==='failed'?'再申請をお願いします。':''}</span></div>`;}
     const inbox=DB.emails.filter(m=>m.receiver_id===ME.id).length;
     const myStaff=findUser(ME.staff_id);
+    const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
+    const myPlace=findInternship(getProfile(ME.id).internship_id);
     return hi+statusCard+hexgrid([
       hex("go('apply')",'edit','面談を申請','希望日時を3つ提出'),
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
+      hex("go('requests')",'megaphone','依頼','スタッフからの連絡',unread),
       hex('openMyStaffForm()','staff','担当スタッフ',myStaff?esc(myStaff.nickname)+'さん':'まだ設定していません'),
+      hex('openMyInternshipForm()','workplace','インターン先',myPlace?esc(myPlace.name):'まだ設定していません'),
       hex('openMailHistory()','mail','受信メール','面談確定などの通知',inbox),
       hex('openGoogleCalendarSettings()','calendar','カレンダー連携','確定面談を自動登録'),
     ])+eventsSection();
@@ -1303,9 +1332,11 @@ function viewHome(){
     const pend=DB.interviews.filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
     const items=[];
     if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
+    const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
     items.push(
       hex("go('interviews')",'list','面談一覧・確定','担当インターン生の面談',pend),
-      hex("go('avail')",'clock','空き日程','カレンダーから確認'),
+      hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread),
+      hex('openMyDepartments()','sitemap','所属部署',deptLabel(ME.id)),
       hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごとに設定'),
       hex("go('avset')",'ban','面談できない時間','30分枠で登録'),
       hex('openGoogleCalendarSettings()','calendar','カレンダー連携','予定を自動で反映'),
@@ -2151,24 +2182,6 @@ async function deleteEvent(id){
 /* =========================================================
    スタッフ空き日程
    ========================================================= */
-function viewAvailability(){
-  const staffs=DB.users.filter(u=>(u.role==='staff'||u.role==='branch_admin')&&(isFullAdmin()||u.branch_id===ME.branch_id));
-  const cards=staffs.map(s=>{
-    const flat=[];
-    genSlots(s.id,7).forEach(d=>d.slots.forEach(x=>{if(x.ok)flat.push(`${fmtDate(d.dateObj.toISOString())} ${x.time}`);}));
-    const show=flat.slice(0,16).map(t=>`<span class="slot">${t}</span>`).join('');
-    const more=flat.length>16?`<span class="slot" style="background:var(--chip);color:var(--chip-ink)">他${flat.length-16}枠</span>`:'';
-    const slots=flat.length?show+more:'<span class="rs" style="color:var(--mut)">空き枠なし</span>';
-    return `<div class="staff">
-      <div class="sname"><span>${esc(s.nickname)}</span><span class="tag">空き ${flat.length}枠</span></div>
-      <div class="slots">${slots}</div></div>`;
-  }).join('')||'<div class="empty">スタッフが登録されていません</div>';
-  return `<h1 class="page">スタッフ空き日程</h1>
-    <p class="page-sub">面談可能時間帯と登録済みの予定から、空き時間を表示します（今後7日）。</p>
-    <div class="hint">${ic('flask')}<span>曜日別の可能時間帯・登録済みの不可時間・Googleカレンダー連携時の予定（連携している場合）・確定済み面談から算出しています。</span></div>
-    <div class="avail" style="margin-top:12px">${cards}</div>`;
-}
-
 /* =========================================================
    面談可能時間帯の設定（スタッフ・曜日ごと）
    ========================================================= */
@@ -2628,6 +2641,17 @@ async function refreshUsersAfterAdminChange(){
   try{const remote=await apiGetDB();if(remote&&remote.users)DB.users=remote.users;}catch(e){}
   render();
 }
+/* ユーザー一覧の2行目。インターン生は担当スタッフとインターン先、
+   スタッフは所属部署を出す（どちらも未設定なら空にする） */
+function userRowSub(u){
+  if(u.role==='intern'){
+    const staff=findUser(u.staff_id);
+    const place=findInternship(getProfile(u.id).internship_id);
+    return [staff?'担当：'+esc(staff.nickname):'担当なし',place?esc(place.name):''].filter(Boolean).join(' ・ ');
+  }
+  const d=getDepts(u.id);
+  return d.length?esc(d.join('・')):'';
+}
 function viewUsers(){
   const byBranch={};(DB.users||[]).forEach(u=>{(byBranch[u.branch_id]=byBranch[u.branch_id]||[]).push(u);});
   // 支部管理者に見せるのは自分の支部だけ
@@ -2644,8 +2668,7 @@ function viewUsers(){
         <div class="row" onclick="openUserForm('${u.id}')">
           <span class="av hexav">${esc(initials(u.nickname))}</span>
           <span class="rmain"><span class="rt">${esc(u.nickname)}</span>
-          <span class="rs">${u.id===ME.id?'（あなた）':
-            (u.role==='intern'?(findUser(u.staff_id)?'担当：'+esc(findUser(u.staff_id).nickname):'担当なし'):'')}</span></span>
+          <span class="rs">${u.id===ME.id?'（あなた）':userRowSub(u)}</span></span>
           <span class="rolebadge ${ROLE_CLS[u.role]}">${ROLE_JP[u.role]}</span>
         </div>`).join(''):'<div class="empty" style="padding:20px">ユーザーなし</div>'}</div></div>`;
   });
@@ -2669,6 +2692,9 @@ function openUserForm(id){
       <label class="fl">担当スタッフ</label>
       <select id="usStaff">${staffOptionsFor(u.branch_id,u.staff_id)}</select>
       <p class="fine" style="margin-top:6px">インターン生にだけ設定できます。</p>
+      <label class="fl">インターン先</label>
+      <select id="usPlace">${internshipOptionsFor(getProfile(u.id).internship_id)}</select>
+      <p class="fine" style="margin-top:6px">本人も設定できます。一覧に無いときは「インターン先」から先に追加してください。</p>
     </div>
     <div class="btn-row" style="margin-top:18px">
       ${u.id!==ME.id?`<button class="btn bad" onclick="deleteUser('${u.id}')">削除</button>`:''}
@@ -2685,6 +2711,11 @@ function staffOptionsFor(branchId,selected){
   return `<option value="">設定しない</option>`
     +list.map(s=>`<option value="${s.id}" ${s.id===selected?'selected':''}>${esc(s.nickname)}</option>`).join('');
 }
+/* 自支部のインターン先を選択肢にする */
+function internshipOptionsFor(selected){
+  return `<option value="">設定しない</option>`
+    +branchInternships().map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.name)}</option>`).join('');
+}
 function syncUserStaffField(){
   const role=document.querySelector('input[name=usRole]:checked').value;
   const wrap=document.getElementById('usStaffWrap');
@@ -2700,9 +2731,15 @@ async function saveUser(id){
   const role=document.querySelector('input[name=usRole]:checked').value;
   const data={nickname:nick,branch_id:document.getElementById('usBranch').value,role,
     staff_id:role==='intern'?(document.getElementById('usStaff').value||null):null};
+  // インターン先はサーバーのユーザー表ではなくDB側に持っているので、別々に保存する
+  const placeEl=document.getElementById('usPlace');
+  const place=role==='intern'?(placeEl?placeEl.value||null:null):null;
   try{
     const res=await api(`/api/admin/users/${id}`,{method:'PATCH',body:JSON.stringify(data)});
     if(!res.ok){const d=await res.json().catch(()=>({}));toast(d.error||'保存に失敗しました');return;}
+    if(place!==(getProfile(id).internship_id||null)){
+      await mutate(db=>{profileOf(db,id).internship_id=place;});
+    }
     closeSheet();toast('保存しました');
     await refreshUsersAfterAdminChange();
   }catch(e){toast('保存に失敗しました');}
@@ -2739,7 +2776,8 @@ const NOTI_IC={
   '面談確定':{e:'check',bg:'var(--ok-soft)',fg:'var(--ok-ink)'},
   '面談不成立':{e:'alert',bg:'var(--bad-soft)',fg:'var(--bad)'},
   'イベント作成':{e:'calendar',bg:'var(--iv-soft)',fg:'var(--iv-ink)'},
-  'イベント更新':{e:'refresh',bg:'var(--info-soft)',fg:'var(--info-ink)'}};
+  'イベント更新':{e:'refresh',bg:'var(--info-soft)',fg:'var(--info-ink)'},
+  '依頼':{e:'megaphone',bg:'var(--brand-soft)',fg:'var(--brand-d)'}};
 function updateBell(){
   const b=document.getElementById('bellBadge');if(!b||!ME)return;
   const n=unreadCount();
@@ -2761,6 +2799,462 @@ function openNotifications(){
   // 開いたら既読に
   const map=getNotiRead();map[ME.id]=nowISO();localStorage.setItem(NOTI_READ_KEY,JSON.stringify(map));
   updateBell();
+}
+
+/* =========================================================
+   所属部署・インターン先
+   ---------------------------------------------------------
+   ユーザー表はサーバー側の正規テーブルなので、支部やニックネームと違い
+   自由に列を足せない。所属部署とインターン先は「あとから足した付加情報」
+   なので、DB.profiles（ユーザーID→情報）に持たせている。
+   DB.availability が同じ形なので、作りを揃えた。
+   ========================================================= */
+const DEPARTMENTS=['事務局','プログラム','人財開発','クライアント','コンシューマー',
+  'コンテスト','デジマ','プロモーション','アライアンス'];
+
+function getProfile(userId){return (DB.profiles&&DB.profiles[userId])||{};}
+function getDepts(userId){const d=getProfile(userId).departments;return Array.isArray(d)?d:[];}
+/* ホームのタイルに出す短い説明 */
+function deptLabel(userId){
+  const d=getDepts(userId);
+  if(!d.length)return 'まだ設定していません';
+  return d.length<=2?d.join('・'):`${d[0]}ほか${d.length-1}件`;
+}
+/* 変更対象を db から引き直せるようにしておく（mutateのやり直しに備える） */
+function profileOf(db,userId){
+  db.profiles=db.profiles||{};
+  db.profiles[userId]=db.profiles[userId]||{};
+  return db.profiles[userId];
+}
+
+/* ---------- 所属部署の設定（スタッフ・支部管理者。複数選べる） ---------- */
+function openMyDepartments(){
+  const mine=getDepts(ME.id);
+  const rows=DEPARTMENTS.map(d=>`<label class="chk">
+    <input type="checkbox" name="deptChk" value="${esc(d)}" ${mine.includes(d)?'checked':''}>
+    <span>${esc(d)}</span></label>`).join('');
+  openSheet(`<h3>所属部署</h3>
+    <p class="page-sub" style="margin-top:0">いくつでも選べます。依頼を「部署あて」に出すときの絞り込みに使われます。</p>
+    <div class="chklist">${rows}</div>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveMyDepartments()">保存する</button>`);
+}
+async function saveMyDepartments(){
+  const departments=[...document.querySelectorAll('input[name=deptChk]:checked')].map(c=>c.value);
+  const ok=await mutate(db=>{profileOf(db,ME.id).departments=departments;});
+  if(!ok)return;
+  closeSheet();render();
+  toast(departments.length?'所属部署を保存しました':'所属部署を空にしました');
+}
+
+/* ---------- インターン先マスタ ---------- */
+function branchInternships(){
+  return (DB.internships||[]).filter(p=>p.branch_id===ME.branch_id)
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name),'ja'));
+}
+function findInternship(id){return (DB.internships||[]).find(p=>p.id===id)||null;}
+/* そのインターン先に所属しているインターン生 */
+function internsAt(internshipId){
+  return DB.users.filter(u=>u.role==='intern'&&u.branch_id===ME.branch_id
+    &&getProfile(u.id).internship_id===internshipId);
+}
+
+/* 支部のスタッフ全員が追加・編集できる。同じ名前が増えると宛先選びで迷うため、
+   登録時に既存と突き合わせて注意を出す */
+function openInternshipMaster(){
+  const list=branchInternships();
+  const rows=list.length?list.map(p=>{
+    const n=internsAt(p.id).length;
+    return `<div class="row">
+      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('workplace')}</span>
+      <span class="rmain"><span class="rt">${esc(p.name)}</span>
+      <span class="rs">${n}名が登録 ・ 追加 ${fmtRel(p.created_at)}</span></span>
+      <button class="btn sm" onclick="openInternshipForm('${p.id}')">編集</button></div>`;
+  }).join(''):`<div class="empty" style="padding:26px"><div class="ei">${ic('workplace')}</div>
+      <p>インターン先がまだ登録されていません。</p></div>`;
+  openSheet(`<h3>インターン先の一覧</h3>
+    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}のインターン先です。支部のスタッフなら誰でも追加できます。</p>
+    <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>
+    <button class="btn pri block" style="margin-top:16px" onclick="openInternshipForm()">＋ インターン先を追加</button>`);
+}
+function openInternshipForm(id){
+  const p=id?findInternship(id):null;
+  openSheet(`<h3>${p?'インターン先を編集':'インターン先を追加'}</h3>
+    <label class="fl">インターン先の名前<span class="req">*</span></label>
+    <input id="ipName" autocomplete="off" placeholder="例）○○議員事務所" value="${p?esc(p.name):''}">
+    <div class="field-err" id="ipErr"></div>
+    <div class="hint" style="margin-top:12px">${ic('bulb')}<span>支部のみんなで使う一覧です。略さず、正式な名前で登録すると探しやすくなります。</span></div>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveInternship(${p?`'${p.id}'`:'null'})">保存する</button>
+    ${p?`<button class="btn block" style="margin-top:10px" onclick="deleteInternship('${p.id}')">この インターン先を削除</button>`:''}
+    <button class="btn block" style="margin-top:10px" onclick="openInternshipMaster()">${ic('back')}一覧へ戻る</button>`);
+}
+async function saveInternship(id){
+  const name=document.getElementById('ipName').value.trim();
+  const err=document.getElementById('ipErr');
+  err.classList.remove('show');
+  if(!name){err.textContent='インターン先の名前を入力してください';err.classList.add('show');return;}
+  // 同じ名前が二重にできると、宛先を選ぶときにどちらか分からなくなる
+  const dup=branchInternships().find(p=>p.id!==id&&p.name===name);
+  if(dup){err.textContent='同じ名前がすでに登録されています';err.classList.add('show');return;}
+  const ok=await mutate(db=>{
+    db.internships=db.internships||[];
+    if(id){
+      const p=db.internships.find(x=>x.id===id);
+      if(p)p.name=name;
+    }else{
+      db.internships.push({id:'ip_'+uid(),name,branch_id:ME.branch_id,created_by:ME.id,created_at:nowISO()});
+    }
+  });
+  if(!ok)return;
+  openInternshipMaster();render();
+  toast(id?'インターン先を更新しました':'インターン先を追加しました');
+}
+async function deleteInternship(id){
+  const p=findInternship(id);
+  const n=internsAt(id).length;
+  // 誰かが登録したままだと、その人のインターン先が行方不明になる
+  if(n){toast(`${n}名が登録中のため削除できません。先に登録を変えてください`);return;}
+  if(!await confirmSheet('インターン先を削除',`「${p?p.name:''}」を削除します。よろしいですか？`,'削除する'))return;
+  const ok=await mutate(db=>{
+    db.internships=(db.internships||[]).filter(x=>x.id!==id);
+  });
+  if(!ok)return;
+  openInternshipMaster();render();
+  toast('インターン先を削除しました');
+}
+
+/* ---------- 自分のインターン先を選ぶ（インターン生） ---------- */
+function openMyInternshipForm(){
+  const list=branchInternships();
+  if(!list.length){
+    openSheet(`<h3>インターン先</h3>
+      <div class="empty"><div class="ei">${ic('workplace')}</div>
+      <p>あなたの支部には、インターン先がまだ登録されていません。<br>担当スタッフにお知らせください。</p></div>`);
+    return;
+  }
+  const cur=getProfile(ME.id).internship_id||'';
+  const opts=`<option value="">まだ決まっていない</option>`
+    +list.map(p=>`<option value="${p.id}" ${p.id===cur?'selected':''}>${esc(p.name)}</option>`).join('');
+  openSheet(`<h3>インターン先</h3>
+    <p class="page-sub" style="margin-top:0">スタッフがインターン先ごとに連絡を出すときに使われます。いつでも変えられます。</p>
+    <label class="fl">インターン先</label>
+    <select id="myIpSel">${opts}</select>
+    <div class="hint" style="margin-top:12px">${ic('bulb')}<span>一覧に無いときは、担当スタッフに追加をお願いしてください。</span></div>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveMyInternship()">これにする</button>`);
+}
+async function saveMyInternship(){
+  const internship_id=document.getElementById('myIpSel').value||null;
+  const ok=await mutate(db=>{profileOf(db,ME.id).internship_id=internship_id;});
+  if(!ok)return;
+  closeSheet();render();
+  toast('インターン先を保存しました');
+}
+/* スタッフがユーザー管理から、インターン生のインターン先を直す */
+async function setInternshipFor(userId,internshipId){
+  const ok=await mutate(db=>{profileOf(db,userId).internship_id=internshipId||null;});
+  if(!ok)return;
+  render();
+  toast('インターン先を変更しました');
+}
+
+/* =========================================================
+   依頼（支部内への連絡）
+   ---------------------------------------------------------
+   出せるのはスタッフ・支部管理者のみ。インターン生は受け取り専用。
+
+   宛先は「デジマ宛」のような条件のまま保存せず、送信した時点の
+   ユーザーID一覧に展開して固定する。条件のまま持つと、あとで誰かの
+   部署やインターン先が変わったときに、過去の依頼の宛先まで
+   変わってしまい「誰に頼んだか」の記録が崩れるため。
+   元の指定は target_label に文字列で残し、画面に併記する。
+   ========================================================= */
+function canSendRequest(u){u=u||ME;return !!u&&(u.role==='staff'||u.role==='branch_admin');}
+function allRequests(){return DB.requests||[];}
+/* 自分が受け取った依頼（新しい順） */
+function myRequests(){
+  return allRequests().filter(r=>(r.recipient_ids||[]).includes(ME.id))
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+}
+/* 自分が送った依頼（新しい順） */
+function sentRequests(){
+  return allRequests().filter(r=>r.sender_id===ME.id)
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+}
+function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userId);}
+
+let REQTAB='inbox'; // 'inbox' | 'sent'
+function setReqTab(t){REQTAB=t;render();}
+
+function viewRequests(){
+  const canSend=canSendRequest();
+  const inbox=myRequests();
+  const unread=inbox.filter(r=>!hasConfirmed(r,ME.id)).length;
+
+  // インターン生は受け取り専用なので、切り替えも新規作成も出さない
+  if(!canSend){
+    return `<h1 class="page">依頼</h1>
+      <p class="page-sub">スタッフから届いた連絡・依頼です。</p>
+      ${unread?`<div class="hint">${ic('megaphone')}<span><b>${unread}件</b> がまだ未確認です。</span></div>`:''}
+      ${requestList(inbox,'inbox')}`;
+  }
+
+  const sent=sentRequests();
+  const tabs=`<div class="seg" style="margin-bottom:14px">
+    <label><input type="radio" name="reqTab" ${REQTAB==='inbox'?'checked':''} onchange="setReqTab('inbox')">
+      <span class="segb">受けた依頼${unread?`（${unread}）`:''}</span></label>
+    <label><input type="radio" name="reqTab" ${REQTAB==='sent'?'checked':''} onchange="setReqTab('sent')">
+      <span class="segb">送った依頼</span></label>
+  </div>`;
+  return `<h1 class="page">依頼</h1>
+    <p class="page-sub">${branchName(ME.branch_id)}のスタッフ・インターン生に連絡や依頼を出せます。</p>
+    <button class="btn pri block" style="margin-bottom:16px" onclick="openRequestForm()">＋ 依頼を出す</button>
+    ${tabs}
+    ${REQTAB==='inbox'?requestList(inbox,'inbox'):requestList(sent,'sent')}`;
+}
+
+function requestList(list,kind){
+  if(!list.length){
+    return `<div class="empty" style="padding:30px"><div class="ei">${ic('megaphone')}</div>
+      <p>${kind==='inbox'?'届いている依頼はありません。':'まだ依頼を出していません。'}</p></div>`;
+  }
+  const rows=list.map(r=>{
+    const total=(r.recipient_ids||[]).length;
+    const done=(r.read_by||[]).length;
+    const sender=findUser(r.sender_id);
+    const sub=kind==='inbox'
+      ? `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`
+      : `${esc(r.target_label||'')} ・ ${done}/${total}人が確認 ・ ${fmtRel(r.created_at)}`;
+    const badge=kind==='inbox'&&!hasConfirmed(r,ME.id)
+      ? '<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>':'';
+    return `<div class="row" style="cursor:pointer" onclick="openRequestDetail('${r.id}')">
+      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('megaphone')}</span>
+      <span class="rmain"><span class="rt">${esc(r.subject)} ${badge}</span>
+      <span class="rs">${sub}</span></span>
+      <span class="tile-arrow">${ic('chevron')}</span></div>`;
+  }).join('');
+  return `<div class="card"><div class="rowlist">${rows}</div></div>`;
+}
+
+function openRequestDetail(id){
+  const r=allRequests().find(x=>x.id===id);
+  if(!r)return;
+  const sender=findUser(r.sender_id);
+  const mine=(r.recipient_ids||[]).includes(ME.id);
+  const done=hasConfirmed(r,ME.id);
+
+  // 送った本人には、誰が確認したかを名前で見せる
+  let status='';
+  if(r.sender_id===ME.id){
+    const names=(r.recipient_ids||[]).map(uid2=>{
+      const u=findUser(uid2);
+      const ok=hasConfirmed(r,uid2);
+      return `<span class="slot" style="${ok?'':'opacity:.5'}">${ok?'✓ ':''}${esc(u?u.nickname:'—')}</span>`;
+    }).join('');
+    status=`<div class="divider"></div>
+      <p class="fl" style="margin-top:14px">確認した人（${(r.read_by||[]).length}/${(r.recipient_ids||[]).length}）</p>
+      <div class="slots" style="margin-top:8px">${names}</div>`;
+  }
+
+  openSheet(`<h3>${esc(r.subject)}</h3>
+    <dl class="kv" style="margin:12px 0">
+      <dt>差出人</dt><dd>${esc(sender?sender.nickname:'—')}</dd>
+      <dt>あて先</dt><dd>${esc(r.target_label||'—')}（${(r.recipient_ids||[]).length}名）</dd>
+      <dt>送信日時</dt><dd>${fmtDT(r.created_at)}</dd>
+    </dl>
+    <div class="divider"></div>
+    <div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>
+    ${mine?(done
+      ? `<div class="hint" style="margin-top:18px">${ic('check')}<span>確認済みとしてお伝えしています。</span></div>`
+      : `<button class="btn pri block" style="margin-top:18px" onclick="confirmRequest('${r.id}')">確認しました</button>`):''}
+    ${status}`);
+}
+
+async function confirmRequest(id){
+  const ok=await mutate(db=>{
+    const r=(db.requests||[]).find(x=>x.id===id);
+    if(!r)return;
+    r.read_by=r.read_by||[];
+    if(!r.read_by.some(x=>x.user_id===ME.id))r.read_by.push({user_id:ME.id,at:nowISO()});
+  });
+  if(!ok)return;
+  closeSheet();render();
+  toast('確認しました');
+}
+
+/* ---------- 依頼を出す ---------- */
+let REQFORM=null; // {mode, picked:Set相当の配列}
+
+/* 宛先の選び方。mode ごとに「展開して選ぶもの」が変わる */
+const REQ_MODES=[
+  {id:'all_staff',   label:'支部の全スタッフ'},
+  {id:'pick_staff',  label:'スタッフを選ぶ'},
+  {id:'by_dept',     label:'部署で選ぶ'},
+  {id:'all_intern',  label:'支部の全インターン生'},
+  {id:'pick_intern', label:'インターン生を選ぶ'},
+  {id:'by_place',    label:'インターン先で選ぶ'},
+];
+
+function openRequestForm(){
+  REQFORM={mode:'all_staff',picked:[]};
+  renderRequestForm();
+}
+function setReqMode(mode){
+  REQFORM.mode=mode;
+  REQFORM.picked=[];   // 選び方を変えたら選択はやり直し
+  renderRequestForm(true);
+}
+function toggleReqPick(value){
+  const i=REQFORM.picked.indexOf(value);
+  if(i>=0)REQFORM.picked.splice(i,1);
+  else REQFORM.picked.push(value);
+  renderRequestForm(true);
+}
+
+function branchStaff(){
+  return DB.users.filter(u=>(u.role==='staff'||u.role==='branch_admin')&&u.branch_id===ME.branch_id)
+    .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
+}
+function branchInterns(){
+  return DB.users.filter(u=>u.role==='intern'&&u.branch_id===ME.branch_id)
+    .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
+}
+
+/* 選ばれている条件を、実際の宛先（ユーザーIDの配列）と表示名に変える */
+function resolveRecipients(){
+  const m=REQFORM.mode, picked=REQFORM.picked;
+  if(m==='all_staff'){
+    const list=branchStaff().filter(u=>u.id!==ME.id);  // 自分あては含めない
+    return {ids:list.map(u=>u.id),label:'支部の全スタッフ'};
+  }
+  if(m==='all_intern'){
+    const list=branchInterns();
+    return {ids:list.map(u=>u.id),label:'支部の全インターン生'};
+  }
+  if(m==='pick_staff'||m==='pick_intern'){
+    const ids=picked.filter(id=>id!==ME.id);
+    const names=ids.map(id=>{const u=findUser(id);return u?u.nickname:'—';});
+    return {ids,label:names.join('、')||'（未選択）'};
+  }
+  if(m==='by_dept'){
+    const ids=[],labels=[];
+    picked.forEach(d=>{
+      labels.push(d);
+      branchStaff().forEach(u=>{
+        if(u.id!==ME.id&&getDepts(u.id).includes(d)&&!ids.includes(u.id))ids.push(u.id);
+      });
+    });
+    return {ids,label:labels.length?labels.join('、')+'（部署）':'（未選択）'};
+  }
+  if(m==='by_place'){
+    const ids=[],labels=[];
+    picked.forEach(pid=>{
+      const p=findInternship(pid);
+      labels.push(p?p.name:'—');
+      internsAt(pid).forEach(u=>{if(!ids.includes(u.id))ids.push(u.id);});
+    });
+    return {ids,label:labels.length?labels.join('、')+'（インターン先）':'（未選択）'};
+  }
+  return {ids:[],label:'（未選択）'};
+}
+
+/* 選び方に応じた「展開部分」。
+   keepText=true のときは、件名・本文に打ちかけの文字を残したまま描き直す */
+function reqPickerHTML(){
+  const m=REQFORM.mode, picked=REQFORM.picked;
+  const chip=(value,label,sub)=>`<button type="button" class="pickchip ${picked.includes(value)?'on':''}"
+      onclick="toggleReqPick('${value}')">
+      <span>${esc(label)}</span>${sub?`<span class="picksub">${esc(sub)}</span>`:''}</button>`;
+
+  if(m==='all_staff'){
+    const n=branchStaff().filter(u=>u.id!==ME.id).length;
+    return `<div class="hint">${ic('users')}<span>自分を除いた <b>${n}名</b> のスタッフに届きます。</span></div>`;
+  }
+  if(m==='all_intern'){
+    return `<div class="hint">${ic('users')}<span>支部の <b>${branchInterns().length}名</b> のインターン生に届きます。</span></div>`;
+  }
+  if(m==='pick_staff'){
+    const list=branchStaff().filter(u=>u.id!==ME.id);
+    if(!list.length)return `<div class="empty" style="padding:20px"><p>ほかにスタッフがいません。</p></div>`;
+    return `<div class="picklist">${list.map(u=>chip(u.id,u.nickname,deptLabel(u.id)==='まだ設定していません'?'':deptLabel(u.id))).join('')}</div>`;
+  }
+  if(m==='pick_intern'){
+    const list=branchInterns();
+    if(!list.length)return `<div class="empty" style="padding:20px"><p>インターン生がいません。</p></div>`;
+    return `<div class="picklist">${list.map(u=>{
+      const p=findInternship(getProfile(u.id).internship_id);
+      return chip(u.id,u.nickname,p?p.name:'');
+    }).join('')}</div>`;
+  }
+  if(m==='by_dept'){
+    return `<div class="picklist">${DEPARTMENTS.map(d=>{
+      const n=branchStaff().filter(u=>u.id!==ME.id&&getDepts(u.id).includes(d)).length;
+      return chip(d,d,`${n}名`);
+    }).join('')}</div>`;
+  }
+  if(m==='by_place'){
+    const list=branchInternships();
+    if(!list.length){
+      return `<div class="empty" style="padding:20px"><div class="ei">${ic('workplace')}</div>
+        <p>インターン先がまだ登録されていません。</p>
+        <button class="btn sm" style="margin-top:10px" onclick="openInternshipMaster()">インターン先を登録する</button></div>`;
+    }
+    return `<div class="picklist">${list.map(p=>chip(p.id,p.name,`${internsAt(p.id).length}名`)).join('')}</div>`;
+  }
+  return '';
+}
+
+function renderRequestForm(keepText){
+  // 描き直しの前に、打ちかけの件名・本文を控えておく
+  const prevSubj=keepText?(document.getElementById('reqSubj')||{}).value||'':'';
+  const prevBody=keepText?(document.getElementById('reqBody')||{}).value||'':'';
+  const {ids,label}=resolveRecipients();
+
+  const modeBtns=REQ_MODES.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
+    onclick="setReqMode('${o.id}')">${o.label}</button>`).join('');
+
+  openSheet(`<h3>依頼を出す</h3>
+    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、連絡や依頼を送ります。</p>
+
+    <label class="fl">あて先の選び方</label>
+    <div class="modechips">${modeBtns}</div>
+    <div style="margin-top:12px">${reqPickerHTML()}</div>
+
+    <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>（${ids.length}名）</span></div>
+
+    <label class="fl" style="margin-top:16px">件名<span class="req">*</span></label>
+    <input id="reqSubj" autocomplete="off" placeholder="例）来週の定例、資料の準備をお願いします" value="${esc(prevSubj)}">
+    <label class="fl">本文</label>
+    <textarea id="reqBody" rows="6" placeholder="お願いしたい内容を書いてください。">${esc(prevBody)}</textarea>
+    <div class="field-err" id="reqErr"></div>
+
+    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">この内容で送る</button>`);
+}
+
+async function submitRequest(){
+  const subject=document.getElementById('reqSubj').value.trim();
+  const body=document.getElementById('reqBody').value.trim();
+  const err=document.getElementById('reqErr');
+  const btn=document.getElementById('reqBtn');
+  err.classList.remove('show');
+
+  const {ids,label}=resolveRecipients();
+  if(!ids.length){err.textContent='あて先を選んでください';err.classList.add('show');return;}
+  if(!subject){err.textContent='件名を入力してください';err.classList.add('show');return;}
+
+  btn.disabled=true;btn.textContent='送信中…';
+  const req={id:'rq_'+uid(),sender_id:ME.id,branch_id:ME.branch_id,
+    subject,body,
+    // 条件ではなく、送った時点の宛先を固定して持つ（上のコメント参照）
+    target_label:label,recipient_ids:ids,
+    read_by:[],created_at:nowISO()};
+  const ok=await mutate(db=>{
+    db.requests=db.requests||[];
+    db.requests.push(req);
+    pushNotification(db,'依頼',`${ME.nickname}さんから「${subject}」が届きました`);
+  });
+  if(!ok){btn.disabled=false;btn.textContent='この内容で送る';return;}
+  REQFORM=null;REQTAB='sent';
+  closeSheet();updateBell();render();
+  toast(`${ids.length}名に送りました`);
 }
 
 /* =========================================================

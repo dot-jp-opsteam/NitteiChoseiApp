@@ -175,6 +175,58 @@
     { id: 'nt_1', type: '面談申請', msg: '鈴木 彩香さんが面談を申請しました', at: at(-1, 9, 40), branch_id: 'b1' },
     { id: 'nt_2', type: 'イベント作成', msg: '「7月度 支部定例ミーティング」が作成されました', at: at(-3, 11, 0), branch_id: 'b1' },
     { id: 'nt_3', type: '面談確定', msg: '田中 悠斗さんの面談日程が確定しました', at: at(-2, 21, 30), branch_id: 'b1' },
+    { id: 'nt_4', type: '依頼', msg: '佐藤 健さんから「【デジマ】SNS投稿の担当わけ」が届きました', at: at(0, 11, 30), branch_id: 'b1' },
+  ];
+
+  /* ---------- インターン先マスタ ---------- */
+  var internships = [
+    { id: 'ip_1', name: '髙橋ひろし議員事務所', branch_id: 'b1', created_by: 'u_staff1', created_at: at(-40, 14) },
+    { id: 'ip_2', name: '水戸市議会 森田事務所', branch_id: 'b1', created_by: 'u_staff2', created_at: at(-35, 10) },
+    { id: 'ip_3', name: 'つくば市議会 大西事務所', branch_id: 'b1', created_by: 'u_staff1', created_at: at(-20, 16) },
+  ];
+
+  /* ---------- 所属部署・インターン先の割り当て ---------- */
+  var profiles = {
+    u_badmin: { departments: ['事務局', '人財開発'] },
+    u_staff1: { departments: ['デジマ', 'プロモーション'] },
+    u_staff2: { departments: ['プログラム'] },
+    u_staff3: { departments: ['クライアント', 'アライアンス'] },
+    u_int1: { internship_id: 'ip_1' },
+    u_int2: { internship_id: 'ip_1' },
+    u_int3: { internship_id: 'ip_2' },
+    u_int4: { internship_id: 'ip_3' },
+    u_int5: {},   // まだインターン先が決まっていない人
+  };
+
+  /* ---------- 依頼 ---------- */
+  var requests = [
+    {
+      id: 'rq_1', sender_id: 'u_badmin', branch_id: 'b1',
+      subject: '来週の定例、資料の準備をお願いします',
+      body: 'お疲れ様です。\n7月度の定例ミーティングに向けて、各自の担当分の資料を前日までにご準備ください。\n\n形式は自由です。よろしくお願いします。',
+      target_label: '支部の全スタッフ',
+      recipient_ids: ['u_staff1', 'u_staff2', 'u_staff3'],
+      read_by: [{ user_id: 'u_staff2', at: at(-2, 10) }],
+      created_at: at(-3, 9, 20),
+    },
+    {
+      id: 'rq_2', sender_id: 'u_staff1', branch_id: 'b1',
+      subject: '中間報告会のリハーサル日程について',
+      body: 'お疲れ様です。\n中間報告会に向けたリハーサルを来週おこないます。\n参加できる日をこのあとの面談でお知らせください。',
+      target_label: '髙橋ひろし議員事務所（インターン先）',
+      recipient_ids: ['u_int1', 'u_int2'],
+      read_by: [{ user_id: 'u_int2', at: at(-1, 20) }],
+      created_at: at(-2, 18, 0),
+    },
+    {
+      id: 'rq_3', sender_id: 'u_staff2', branch_id: 'b1',
+      subject: '【デジマ】SNS投稿の担当わけ',
+      body: '今月のSNS投稿の担当を決めたいです。\n希望があれば今週中に連絡してください。',
+      target_label: 'デジマ（部署）',
+      recipient_ids: ['u_staff1'],
+      read_by: [],
+      created_at: at(0, 11, 30),
+    },
   ];
 
   /* ---------- スタッフの空き時間 ---------- */
@@ -188,11 +240,16 @@
 
   /* ---------- ここまでを1つのDBにまとめる ---------- */
   var STORE = EMPTY
-    ? { branches: branches, interviews: [], events: [], event_responses: [], emails: [], availability: {}, notifications: [], seededAt: NOW, updatedAt: NOW }
+    ? {
+        branches: branches, interviews: [], events: [], event_responses: [], emails: [],
+        availability: {}, notifications: [], profiles: {}, internships: [], requests: [],
+        seededAt: NOW, updatedAt: NOW,
+      }
     : {
         branches: branches, interviews: interviews, events: events,
         event_responses: event_responses, emails: emails,
         availability: availability, notifications: notifications,
+        profiles: profiles, internships: internships, requests: requests,
         seededAt: NOW, updatedAt: NOW,
       };
 

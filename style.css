@@ -320,6 +320,31 @@
   .slot{font-size:12px;padding:5px 9px;border-radius:8px;background:var(--ok-soft);color:var(--ok-ink);font-weight:600}
   .slot.busy{background:var(--panel2);color:var(--mut);text-decoration:line-through}
 
+  /* ---------- 所属部署のチェックリスト ---------- */
+  .chklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:10px}
+  .chk{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);
+    border-radius:10px;cursor:pointer;background:var(--panel);transition:.12s;font-weight:600;color:var(--sub)}
+  .chk:hover{border-color:var(--line-h)}
+  .chk input{width:16px;height:16px;accent-color:var(--brand);flex:none;margin:0}
+  .chk:has(input:checked){border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+
+  /* ---------- 依頼のあて先えらび ---------- */
+  /* 上段＝選び方の切り替え、下段＝選んだ方法に応じて展開される候補 */
+  .modechips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .modechip{font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel);color:var(--sub);transition:.12s}
+  .modechip:hover{border-color:var(--line-h)}
+  .modechip.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+
+  .picklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+  .pickchip{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;
+    padding:10px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;
+    background:var(--panel);color:var(--ink);font-weight:600;font-size:14px;transition:.12s}
+  .pickchip:hover{border-color:var(--line-h)}
+  .pickchip.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+  .pickchip .picksub{font-size:11px;font-weight:600;color:var(--mut)}
+  .pickchip.on .picksub{color:var(--brand-d);opacity:.75}
+
   /* ---------- Modal / sheet ---------- */
   .scrim{position:fixed;inset:0;background:rgba(16,24,40,.42);z-index:50;display:none;align-items:flex-end;justify-content:center}
   .scrim.open{display:flex}
