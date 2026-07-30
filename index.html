@@ -37,14 +37,14 @@
 <!-- 起動中の表示。読み込みが終わったら hideBoot() が取り除く。
      これが無いと、サーバーが起きるまでの間まっ白な画面になり「壊れた」と誤解される -->
 <div id="boot">
-  <div class="mark">OPS</div>
+  <div class="mark"><b>OPS</b></div>
   <p id="bootMsg">読み込んでいます…</p>
 </div>
 
 <!-- ========== LOGIN ========== -->
 <div id="login">
   <div class="login-hero">
-    <div class="mark reveal">OPS</div>
+    <div class="mark reveal"><b>OPS</b></div>
     <h1 class="hero-title reveal">日調アプリ</h1>
     <p class="hero-sub reveal">ドットジェイピー 日程調整・面談管理</p>
   </div>
@@ -59,7 +59,7 @@
   <!-- 左端の縦メニュー。上＝ロゴ／中＝画面ナビと設定／下＝本人と通知 -->
   <aside id="sidebar">
     <div class="sb-top">
-      <span class="mark">OPS</span>
+      <span class="mark"><b>OPS</b></span>
       <span class="sb-brand">日調アプリ<small>ドットジェイピー</small></span>
       <button class="sb-toggle" id="sbToggle" onclick="toggleSidebar()" aria-label="メニューを開閉" aria-expanded="true">
         <i></i><i></i><i></i>
@@ -74,12 +74,12 @@
       <div class="sb-me">
         <span class="av hexav" id="chipAv">–</span>
         <span class="sb-me-t"><b id="chipName"></b><small id="chipRole"></small></span>
-        <button class="bell" id="bell" onclick="openNotifications()" aria-label="通知">🔔<span class="badge hidden" id="bellBadge">0</span></button>
+        <button class="bell" id="bell" onclick="openNotifications()" aria-label="通知" data-ic="bell"><span class="badge hidden" id="bellBadge">0</span></button>
       </div>
       <div class="sb-links">
         <a href="/terms.html">利用規約</a>
         <a href="/privacy.html">プライバシーポリシー</a>
-        <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer">ドットジェイピー公式 ↗</a>
+        <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer" data-ic-end="external">ドットジェイピー公式</a>
       </div>
     </div>
   </aside>
@@ -91,7 +91,7 @@
 
 <!-- 保存に失敗したときだけ出る帯。黙って消えるのを防ぐ -->
 <div id="savebar" class="hidden">
-  <span>⚠️</span>
+  <span data-ic="alert" class="sb-ic"></span>
   <span class="sb-msg">変更を保存できていません。通信状況をご確認ください。</span>
   <button id="savebarBtn" onclick="retrySave()">再試行</button>
 </div>
@@ -110,6 +110,129 @@
    - 認証：メールアドレス＋パスワード（サーバー側でセッション管理）
    - メール送信は引き続きアプリ内履歴のみ（実際には送信されない）
    ========================================================= */
+
+/* =========================================================
+   アイコン
+   - 絵文字は端末ごとに色も形も違い、細い線でそろえたこの画面から浮くので使わない。
+     代わりに 24×24 の枠に太さ1.5の線だけで描いたSVGをここに直接持つ。
+   - 外部から読み込まないのは、通信が1つ増えると起動が遅くなるうえ、
+     届くまでの間アイコンの場所が空になってしまうため。
+   - 色は指定しない（currentColor）。置いた場所の文字色に従うので、
+     ふだんはグレー、選ばれている項目ではシアン、と自動的に切り替わる。
+   - pathLength="1" を図形ごとに付けているのは、カーソルを乗せたときに
+     線を描く演出で、図形の実際の長さを気にせず進み具合を 0→1 で扱えるようにするため。
+     （点線で描く slot-empty だけは、破線の間隔が壊れるので付けない）
+   ========================================================= */
+const ICON={
+  /* --- 画面ナビ --- */
+  home:'<path pathLength="1" d="M3 10.4 12 3.2l9 7.2V19.8A1.2 1.2 0 0 1 19.8 21h-4.3v-6.4H8.5V21H4.2A1.2 1.2 0 0 1 3 19.8z"/>',
+  edit:'<path pathLength="1" d="M19 13.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5.5"/>'
+      +'<path pathLength="1" d="m16.4 3.9 3.7 3.7-7.1 7.1-4.4.7.7-4.4z"/>',
+  list:'<rect pathLength="1" x="8" y="2" width="8" height="4" rx="1"/>'
+      +'<path pathLength="1" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>'
+      +'<path pathLength="1" d="M9 12h7"/><path pathLength="1" d="M9 16h4.5"/>',
+  clock:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="M12 6.8v5.5l3.4 2"/>',
+  alarm:'<circle pathLength="1" cx="12" cy="13.2" r="7.6"/>'
+       +'<path pathLength="1" d="M12 9.6v3.6l2.4 1.4"/>'
+       +'<path pathLength="1" d="M5.4 3.6 2.9 6.1"/><path pathLength="1" d="m18.6 3.6 2.5 2.5"/>',
+  users:'<path pathLength="1" d="M15.5 20.5v-1.8a3.6 3.6 0 0 0-3.6-3.6H6.6A3.6 3.6 0 0 0 3 18.7v1.8"/>'
+       +'<circle pathLength="1" cx="9.3" cy="7.6" r="3.6"/>'
+       +'<path pathLength="1" d="M21 20.5v-1.8a3.6 3.6 0 0 0-2.7-3.5"/>'
+       +'<path pathLength="1" d="M15.6 4.2a3.6 3.6 0 0 1 0 7"/>',
+  building:'<path pathLength="1" d="M4 21V5.2A1.2 1.2 0 0 1 5.2 4h8.6A1.2 1.2 0 0 1 15 5.2V21"/>'
+          +'<path pathLength="1" d="M15 10h3.8A1.2 1.2 0 0 1 20 11.2V21"/>'
+          +'<path pathLength="1" d="M2.5 21h19"/>'
+          +'<path pathLength="1" d="M7.6 8h3.8"/><path pathLength="1" d="M7.6 12h3.8"/><path pathLength="1" d="M7.6 16h3.8"/>',
+  /* --- メニュー下段 --- */
+  link:'<path pathLength="1" d="M9.5 13.5a4.4 4.4 0 0 0 6.6.5l2.6-2.6a4.4 4.4 0 0 0-6.2-6.2l-1.5 1.5"/>'
+      +'<path pathLength="1" d="M14.5 10.5a4.4 4.4 0 0 0-6.6-.5l-2.6 2.6a4.4 4.4 0 0 0 6.2 6.2l1.5-1.5"/>',
+  /* テーマ切替だけは塗りを使う。「今どちらか」を伝える記号なので、線だけでは意味が消える */
+  contrast:'<circle pathLength="1" cx="12" cy="12" r="9"/>'
+          +'<path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
+  key:'<circle pathLength="1" cx="7.8" cy="16.2" r="3.6"/>'
+     +'<path pathLength="1" d="M10.35 13.65 20 4"/>'
+     +'<path pathLength="1" d="m17.2 6.8 2.4 2.4"/>'
+     +'<path pathLength="1" d="m14.6 9.4 2 2"/>',
+  power:'<path pathLength="1" d="M12 3.4v8.3"/><path pathLength="1" d="M6.6 6.9a7.5 7.5 0 1 0 10.8 0"/>',
+  bell:'<path pathLength="1" d="M18 8.6a6 6 0 1 0-12 0c0 6-2.5 7.4-2.5 7.4h17S18 14.6 18 8.6"/>'
+      +'<path pathLength="1" d="M13.7 19.4a2 2 0 0 1-3.4 0"/>',
+  /* --- ホームのタイル --- */
+  staff:'<path pathLength="1" d="M15 20.2v-1.8a3.8 3.8 0 0 0-3.8-3.8H6.3a3.8 3.8 0 0 0-3.8 3.8v1.8"/>'
+       +'<circle pathLength="1" cx="8.8" cy="7.4" r="3.8"/>'
+       +'<path pathLength="1" d="m15.9 11.6 2.2 2.2 3.4-4"/>',
+  mail:'<rect pathLength="1" x="2.5" y="5" width="19" height="14" rx="2.2"/>'
+      +'<path pathLength="1" d="m3.4 6.6 7.3 5.2a2.2 2.2 0 0 0 2.6 0l7.3-5.2"/>',
+  send:'<path pathLength="1" d="M21.4 2.6 2.9 9.9a.5.5 0 0 0 .05.95l7.95 2.25 2.25 7.95a.5.5 0 0 0 .95.05z"/>'
+      +'<path pathLength="1" d="M21.4 2.6 10.9 13.1"/>',
+  calendar:'<rect pathLength="1" x="3" y="5" width="18" height="16" rx="2.2"/>'
+          +'<path pathLength="1" d="M3 10h18"/>'
+          +'<path pathLength="1" d="M8 3v4"/><path pathLength="1" d="M16 3v4"/>',
+  'calendar-check':'<path pathLength="1" d="M21 11.6V7.2A2.2 2.2 0 0 0 18.8 5H5.2A2.2 2.2 0 0 0 3 7.2v11.6A2.2 2.2 0 0 0 5.2 21h6.1"/>'
+          +'<path pathLength="1" d="M3 10h18"/>'
+          +'<path pathLength="1" d="M8 3v4"/><path pathLength="1" d="M16 3v4"/>'
+          +'<path pathLength="1" d="m14.9 17.6 2.2 2.2 4.4-4.8"/>',
+  ban:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="m5.6 5.6 12.8 12.8"/>',
+  /* 歯車は小さくすると潰れるので、意味の伝わる「調整つまみ」にしている */
+  settings:'<path pathLength="1" d="M3.5 6h9"/><path pathLength="1" d="M17.8 6h2.7"/>'
+          +'<path pathLength="1" d="M3.5 12h4.2"/><path pathLength="1" d="M12.9 12h7.6"/>'
+          +'<path pathLength="1" d="M3.5 18h9"/><path pathLength="1" d="M17.8 18h2.7"/>'
+          +'<circle pathLength="1" cx="15.2" cy="6" r="2.3"/>'
+          +'<circle pathLength="1" cx="10.3" cy="12" r="2.3"/>'
+          +'<circle pathLength="1" cx="15.2" cy="18" r="2.3"/>',
+  /* --- 状態を伝える印 --- */
+  alert:'<path pathLength="1" d="M10.3 3.9 1.9 18.2A2 2 0 0 0 3.6 21.2h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'
+       +'<path pathLength="1" d="M12 9.4v4.3"/><path pathLength="1" d="M12 17.4h.01"/>',
+  check:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="m7.9 12.3 2.8 2.8 5.5-5.6"/>',
+  smile:'<circle pathLength="1" cx="12" cy="12" r="9"/>'
+       +'<path pathLength="1" d="M8.2 14.2a4.6 4.6 0 0 0 7.6 0"/>'
+       +'<path pathLength="1" d="M9.2 9.4h.01"/><path pathLength="1" d="M14.8 9.4h.01"/>',
+  bulb:'<path pathLength="1" d="M12 2.8a6.2 6.2 0 0 0-3.6 11.2c.7.6 1.1 1.4 1.1 2.3v.2h5v-.2c0-.9.4-1.7 1.1-2.3A6.2 6.2 0 0 0 12 2.8z"/>'
+      +'<path pathLength="1" d="M9.9 19.4h4.2"/><path pathLength="1" d="M10.7 21.4h2.6"/>',
+  message:'<path pathLength="1" d="M20.5 12.4a7.9 7.9 0 0 1-8.5 7.9 9 9 0 0 1-2.5-.35L4 21.5l1.6-5.6A7.9 7.9 0 0 1 12 4.1a7.9 7.9 0 0 1 8.5 8.3z"/>',
+  flask:'<path pathLength="1" d="M9.4 3h5.2"/>'
+       +'<path pathLength="1" d="M10.2 3v6.3L4.9 18.4A1.7 1.7 0 0 0 6.4 21h11.2a1.7 1.7 0 0 0 1.5-2.6L13.8 9.3V3"/>'
+       +'<path pathLength="1" d="M7.4 14.8h9.2"/>',
+  lock:'<rect pathLength="1" x="4.2" y="10.2" width="15.6" height="10.6" rx="2.2"/>'
+      +'<path pathLength="1" d="M8 10.2V7.4a4 4 0 0 1 8 0v2.8"/>',
+  briefcase:'<rect pathLength="1" x="2.5" y="7.2" width="19" height="13.3" rx="2.2"/>'
+           +'<path pathLength="1" d="M15.5 20.5V5.4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v15.1"/>',
+  search:'<circle pathLength="1" cx="10.8" cy="10.8" r="7.3"/><path pathLength="1" d="m21 21-5.05-5.05"/>',
+  pin:'<path pathLength="1" d="M20 10.3c0 5.6-8 12.2-8 12.2s-8-6.6-8-12.2a8 8 0 0 1 16 0z"/>'
+     +'<circle pathLength="1" cx="12" cy="10.2" r="2.9"/>',
+  refresh:'<path pathLength="1" d="M20.5 11.4a8.5 8.5 0 0 0-14.6-5.2L2.5 9.4"/>'
+         +'<path pathLength="1" d="M2.5 4.4v5h5"/>'
+         +'<path pathLength="1" d="M3.5 12.6a8.5 8.5 0 0 0 14.6 5.2l3.4-3.2"/>'
+         +'<path pathLength="1" d="M21.5 19.6v-5h-5"/>',
+  /* 破線で「枠はあるが中身がない」ことを表す。pathLength を付けると破線の間隔が壊れる */
+  'slot-empty':'<rect x="3.2" y="4.2" width="17.6" height="15.6" rx="2.4" stroke-dasharray="3 3.4"/>'
+              +'<path pathLength="1" d="M9 12h6"/>',
+  external:'<path pathLength="1" d="M14 3.5h6.5V10"/>'
+          +'<path pathLength="1" d="M20.5 3.5 11.2 12.8"/>'
+          +'<path pathLength="1" d="M19 14.6v4.2a2.2 2.2 0 0 1-2.2 2.2H5.2A2.2 2.2 0 0 1 3 18.8V7.2A2.2 2.2 0 0 1 5.2 5h4.2"/>',
+  chevron:'<path pathLength="1" d="m9.5 5 7 7-7 7"/>',
+  'chevron-l':'<path pathLength="1" d="m14.5 5-7 7 7 7"/>',
+  arrow:'<path pathLength="1" d="M4.5 12h15"/><path pathLength="1" d="m13 5.5 6.5 6.5-6.5 6.5"/>',
+  back:'<path pathLength="1" d="M19.5 12h-15"/><path pathLength="1" d="m11 5.5-6.5 6.5 6.5 6.5"/>',
+  /* 名前を間違えたときの逃げ道。ここが出ていたら ICON の綴りが合っていない */
+  dot:'<circle pathLength="1" cx="12" cy="12" r="2.2"/>',
+};
+/* 大きさは指定しない。CSS側で 1em にしてあるので、置いた場所の文字サイズに合わせて伸び縮みする */
+function ic(name,cls){
+  return `<svg class="ic${cls?' '+cls:''}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]||ICON.dot}</svg>`;
+}
+/* JSで組み立てないHTML（ベル・保存失敗の帯・外部リンク）にもアイコンを入れる。
+   data-ic は先頭に、data-ic-end は末尾に差し込む */
+function fillStaticIcons(root){
+  (root||document).querySelectorAll('[data-ic]').forEach(el=>{
+    el.insertAdjacentHTML('afterbegin',ic(el.getAttribute('data-ic')));
+    el.removeAttribute('data-ic');
+  });
+  (root||document).querySelectorAll('[data-ic-end]').forEach(el=>{
+    el.insertAdjacentHTML('beforeend',ic(el.getAttribute('data-ic-end')));
+    el.removeAttribute('data-ic-end');
+  });
+}
+document.addEventListener('DOMContentLoaded',()=>fillStaticIcons());
 
 /* ---------- storage ---------- */
 // DBキャッシュは sessionStorage（タブごとに独立）に置く。
@@ -566,7 +689,7 @@ function renderLogin(){
     // 招待URLから来たときは、その人の支部と担当スタッフを初めから入れておく（変更もできる）
     const branchSel=INVITE_STAFF?INVITE_STAFF.branch_id:undefined;
     body.innerHTML=`
-      ${INVITE_STAFF?`<div class="hint" style="margin-bottom:12px"><span>🤝</span><span>
+      ${INVITE_STAFF?`<div class="hint" style="margin-bottom:12px">${ic('staff')}<span>
         <b>${esc(INVITE_STAFF.nickname)}</b>さんからの登録リンクです。担当スタッフに設定されます。</span></div>`:''}
       <label class="fl">メールアドレス<span class="req">*</span></label>
       <input id="regEmail" type="email" autocomplete="username" placeholder="example@dot-jp.com">
@@ -581,7 +704,7 @@ function renderLogin(){
       <p class="fine" style="margin-top:6px">あとから変更できます。決まっていなければ「選択しない」のままで大丈夫です。</p>
       <div class="field-err" id="regErr"></div>
       <button class="btn pri block" style="margin-top:20px" onclick="doRegisterIntern()">登録してはじめる</button>
-      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
+      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">${ic('back')}ログイン画面に戻る</button>`;
     // 選択肢はサーバーから取り直す（招待の有無にかかわらず、選んだ支部のスタッフを出す）
     loadRegStaffOptions(document.getElementById('regBranch').value);
   }else if(LOGIN_VIEW==='staff-start'){
@@ -589,19 +712,19 @@ function renderLogin(){
     body.innerHTML=`
       <h3 style="margin:0 0 6px;font-size:17px;text-align:center">スタッフ登録</h3>
       <p class="page-sub" style="margin-top:0">ドットジェイピーから配布された <b>@${esc(STAFF_EMAIL_DOMAIN)}</b> のGoogleアカウントで登録できます。</p>
-      <div class="hint" style="margin-bottom:14px"><span>📋</span><span>登録に必要なのは、メールアドレス・所属支部・氏名の3つだけです。パスワードは設定しません。</span></div>
+      <div class="hint" style="margin-bottom:14px">${ic('list')}<span>登録に必要なのは、メールアドレス・所属支部・氏名の3つだけです。パスワードは設定しません。</span></div>
       ${GOOGLE_LOGIN_AVAILABLE?`
         <button class="btn social block" onclick="location.href='/api/auth/staff-signup/google'">
           <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
           <span class="social-label">Googleアカウントで続ける</span></button>
         <p class="fine" style="margin-top:10px;text-align:center">アカウント選択画面で、<b>@${esc(STAFF_EMAIL_DOMAIN)}</b> のアカウントを選んでください。</p>`
-      :`<div class="hint mock"><span>⚠️</span><span>ただいまスタッフ登録を受け付けられません。管理者にお問い合わせください。</span></div>`}
-      <button class="btn ghost block" style="margin-top:14px" onclick="location.href='/'">‹ ログイン画面へ</button>`;
+      :`<div class="hint mock">${ic('alert')}<span>ただいまスタッフ登録を受け付けられません。管理者にお問い合わせください。</span></div>`}
+      <button class="btn ghost block" style="margin-top:14px" onclick="location.href='/'">${ic('back')}ログイン画面へ</button>`;
   }else if(LOGIN_VIEW==='staff-form'){
     // 2画面目。Googleで確認できたメールアドレスは変更させない
     body.innerHTML=`
       <h3 style="margin:0 0 6px;font-size:17px;text-align:center">スタッフ登録</h3>
-      <div class="hint" style="margin-bottom:6px"><span>✅</span><span>${esc(STAFF_SIGNUP.email)} を確認しました。</span></div>
+      <div class="hint" style="margin-bottom:6px">${ic('check')}<span>${esc(STAFF_SIGNUP.email)} を確認しました。</span></div>
       <label class="fl">メールアドレス</label>
       <input value="${esc(STAFF_SIGNUP.email)}" readonly style="background:var(--bg);color:var(--sub)">
       <label class="fl">氏名（フルネーム）<span class="req">*</span></label>
@@ -617,9 +740,9 @@ function renderLogin(){
       <label class="fl">メールアドレス<span class="req">*</span></label>
       <input id="forgotEmail" type="email" autocomplete="username" placeholder="example@dot-jp.com">
       <div class="field-err" id="forgotErr"></div>
-      <div class="hint hidden" id="forgotDone" style="margin-top:14px"><span>📮</span><span></span></div>
+      <div class="hint hidden" id="forgotDone" style="margin-top:14px">${ic('send')}<span></span></div>
       <button class="btn pri block" style="margin-top:18px" id="forgotBtn" onclick="doForgotPassword()">再設定メールを送る</button>
-      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
+      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">${ic('back')}ログイン画面に戻る</button>`;
   }else{
     body.innerHTML=`
       <div class="login-cols">
@@ -696,13 +819,13 @@ async function renderResetPassword(token){
   }catch(e){/* 通信できないときは無効扱いにする */}
 
   if(!info.valid){
-    body.innerHTML=`<div class="hint"><span>⚠️</span><span>このリンクは期限切れか、既に使用済みです。お手数ですが、もう一度お手続きください。</span></div>
+    body.innerHTML=`<div class="hint">${ic('alert')}<span>このリンクは期限切れか、既に使用済みです。お手数ですが、もう一度お手続きください。</span></div>
       <button class="btn pri block" style="margin-top:16px" onclick="switchLoginView('forgot')">再設定メールを送り直す</button>
-      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">‹ ログイン画面に戻る</button>`;
+      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">${ic('back')}ログイン画面に戻る</button>`;
     return;
   }
   body.innerHTML=`
-    <div class="hint" style="margin-bottom:4px"><span>🔑</span><span>${esc(info.nickname)}さんの新しいパスワードを設定してください。</span></div>
+    <div class="hint" style="margin-bottom:4px">${ic('key')}<span>${esc(info.nickname)}さんの新しいパスワードを設定してください。</span></div>
     <label class="fl">新しいパスワード<span class="req">*</span></label>
     <input id="rsNew" type="password" autocomplete="new-password" placeholder="8文字以上">
     <label class="fl">新しいパスワード（確認）<span class="req">*</span></label>
@@ -733,7 +856,7 @@ function renderProfileSetup(){
   document.getElementById('login').classList.remove('hidden');
   LOGIN_VIEW='profile';
   document.getElementById('loginBody').innerHTML=`
-    <div class="hint" style="margin-bottom:4px"><span>👋</span><span>ようこそ、${esc(ME.nickname)}さん。あと1ステップで完了です。</span></div>
+    <div class="hint" style="margin-bottom:4px">${ic('smile')}<span>ようこそ、${esc(ME.nickname)}さん。あと1ステップで完了です。</span></div>
     <label class="fl">ニックネーム<span class="req">*</span></label>
     <input id="setupNick" autocomplete="off" value="${esc(ME.nickname||'')}">
     <label class="fl">所属支部<span class="req">*</span></label>
@@ -969,28 +1092,29 @@ async function doChangePassword(){
 /* =========================================================
    NAVIGATION
    ========================================================= */
+// ic は ICON の名前。実体は index.html 冒頭の ICON に入っている
 const NAV={
   intern:[
-    {id:'home',label:'ホーム',ic:'🏠'},
-    {id:'apply',label:'面談申請',ic:'📝'},
-    {id:'my',label:'面談状況',ic:'📋'},
+    {id:'home',label:'ホーム',ic:'home'},
+    {id:'apply',label:'面談申請',ic:'edit'},
+    {id:'my',label:'面談状況',ic:'list'},
   ],
   staff:[
-    {id:'home',label:'ホーム',ic:'🏠'},
-    {id:'interviews',label:'面談一覧',ic:'📋'},
-    {id:'avail',label:'空き日程',ic:'🕒'},
+    {id:'home',label:'ホーム',ic:'home'},
+    {id:'interviews',label:'面談一覧',ic:'list'},
+    {id:'avail',label:'空き日程',ic:'clock'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
-    {id:'home',label:'ホーム',ic:'🏠'},
-    {id:'interviews',label:'面談一覧',ic:'📋'},
-    {id:'avail',label:'空き日程',ic:'🕒'},
-    {id:'users',label:'ユーザー',ic:'👥'},
+    {id:'home',label:'ホーム',ic:'home'},
+    {id:'interviews',label:'面談一覧',ic:'list'},
+    {id:'avail',label:'空き日程',ic:'clock'},
+    {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
-    {id:'home',label:'ホーム',ic:'🏠'},
-    {id:'branches',label:'支部',ic:'🏢'},
-    {id:'users',label:'ユーザー',ic:'👥'},
+    {id:'home',label:'ホーム',ic:'home'},
+    {id:'branches',label:'支部',ic:'building'},
+    {id:'users',label:'ユーザー',ic:'users'},
   ],
 };
 let currentTab='home';
@@ -1016,18 +1140,18 @@ function defaultTab(){return 'home';}
 function buildNav(){
   document.getElementById('sbNav').innerHTML=NAV[ME.role].map(t=>
     `<button class="sb-item" data-tab="${t.id}" onclick="sbGo('${t.id}')" title="${t.label}">
-      <span class="si">${t.ic}</span><span class="sl">${t.label}</span></button>`).join('');
+      <span class="si">${ic(t.ic)}</span><span class="sl">${t.label}</span></button>`).join('');
 
   document.getElementById('sbAct').innerHTML=`
     ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す登録リンクを作る">
-      <span class="si">🔗</span><span class="sl">リンク作成</span></button>`:''}
+      <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="テーマを切り替える">
-      <span class="si">◐</span><span class="sl">テーマ</span>
+      <span class="si">${ic('contrast')}</span><span class="sl">テーマ</span>
       <span class="sv">${currentTheme()==='light'?'ライト':'ダーク'}</span></button>
     <button class="sb-item" onclick="openPasswordChange()" title="パスワードを変更">
-      <span class="si">🔑</span><span class="sl">パスワードを変更</span></button>
+      <span class="si">${ic('key')}</span><span class="sl">パスワードを変更</span></button>
     <button class="sb-item" onclick="logout()" title="ログアウト">
-      <span class="si">⏻</span><span class="sl">ログアウト</span></button>`;
+      <span class="si">${ic('power')}</span><span class="sl">ログアウト</span></button>`;
 }
 /* インターン生が自分の担当スタッフを選び直す */
 function openMyStaffForm(){
@@ -1035,7 +1159,7 @@ function openMyStaffForm(){
     .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
   if(!staffs.length){
     openSheet(`<h3>担当スタッフ</h3>
-      <div class="empty"><div class="ei">💼</div><p>あなたの支部に、担当できるスタッフがまだいません。</p></div>`);
+      <div class="empty"><div class="ei">${ic('briefcase')}</div><p>あなたの支部に、担当できるスタッフがまだいません。</p></div>`);
     return;
   }
   const opts=`<option value="">決めていない</option>`
@@ -1072,7 +1196,7 @@ async function openInternInviteLink(){
     url=data.url;
   }catch(e){
     openSheet(`<h3>インターン生に渡すリンク</h3>
-      <div class="hint mock"><span>⚠️</span><span>リンクを取り出せませんでした。時間をおいてもう一度お試しください。</span></div>`);
+      <div class="hint mock">${ic('alert')}<span>リンクを取り出せませんでした。時間をおいてもう一度お試しください。</span></div>`);
     return;
   }
   openSheet(`<h3>インターン生に渡すリンク</h3>
@@ -1080,7 +1204,7 @@ async function openInternInviteLink(){
       <b>${esc(ME.nickname)}</b>さんになります。</p>
     <div class="invite-url" id="inviteUrl">${esc(url)}</div>
     <button class="btn pri block" style="margin-top:12px" onclick="copyInviteLink('${esc(url)}')">リンクをコピーする</button>
-    <div class="hint" style="margin-top:14px"><span>💡</span><span>
+    <div class="hint" style="margin-top:14px">${ic('bulb')}<span>
       何人にでも、何度でも使えます。期限はありません。LINEやメールでそのまま送ってください。</span></div>
     <p class="fine" style="margin-top:10px">学生がリンクを開くと、いつものログイン画面が出ます。
       そこで「メールアドレスで会員登録する」に進むと、担当スタッフが入った状態になります。</p>`);
@@ -1130,11 +1254,12 @@ function render(){
    ========================================================= */
 /* ホームの入口タイル。参考サイトのポートフォリオに合わせて六角形で並べる。
    act には onclick にそのまま入るJSを渡す（go('apply') でも openXxx() でもよい）。
+   icon は ICON の名前（引数名を ic にすると同名の関数を隠してしまうので避けている）。
    badge は右上に出す件数（0や未指定なら出さない） */
-function hex(act,ic,t,d,badge){
+function hex(act,icon,t,d,badge){
   return `<button class="hex" onclick="${act}">
     ${badge?`<span class="hxb">${badge}</span>`:''}
-    <span class="hxi">${ic}</span>
+    <span class="hxi">${ic(icon)}</span>
     <span class="hxt">${t}</span>
     <span class="hxd">${d}</span></button>`;
 }
@@ -1162,39 +1287,39 @@ function viewHome(){
     const latest=mine.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
     let statusCard='';
     if(latest){const s=STATUS[latest.status];
-      statusCard=`<div class="hint"><span>💡</span><span>あなたの面談は現在 <b>「${s.t}」</b> です。${latest.status==='failed'?'再申請をお願いします。':''}</span></div>`;}
+      statusCard=`<div class="hint">${ic('bulb')}<span>あなたの面談は現在 <b>「${s.t}」</b> です。${latest.status==='failed'?'再申請をお願いします。':''}</span></div>`;}
     const inbox=DB.emails.filter(m=>m.receiver_id===ME.id).length;
     const myStaff=findUser(ME.staff_id);
     return hi+statusCard+hexgrid([
-      hex("go('apply')",'📝','面談を申請','希望日時を3つ提出'),
-      hex("go('my')",'📋','面談状況','申請中・確定済みを確認'),
-      hex('openMyStaffForm()','🤝','担当スタッフ',myStaff?esc(myStaff.nickname)+'さん':'まだ設定していません'),
-      hex('openMailHistory()','✉️','受信メール','面談確定などの通知',inbox),
-      hex('openGoogleCalendarSettings()','📅','カレンダー連携','確定面談を自動登録'),
+      hex("go('apply')",'edit','面談を申請','希望日時を3つ提出'),
+      hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
+      hex('openMyStaffForm()','staff','担当スタッフ',myStaff?esc(myStaff.nickname)+'さん':'まだ設定していません'),
+      hex('openMailHistory()','mail','受信メール','面談確定などの通知',inbox),
+      hex('openGoogleCalendarSettings()','calendar','カレンダー連携','確定面談を自動登録'),
     ])+eventsSection();
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
   if(ME.role==='staff'||ME.role==='branch_admin'){
     const pend=DB.interviews.filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
     const items=[];
-    if(ME.role==='branch_admin')items.push(hex("go('users')",'👥','ユーザー管理','スタッフ追加・権限'));
+    if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
     items.push(
-      hex("go('interviews')",'📋','面談一覧・確定','担当インターン生の面談',pend),
-      hex("go('avail')",'🕒','空き日程','カレンダーから確認'),
-      hex('openAvailabilitySettings()','⏰','面談可能時間帯','曜日ごとに設定'),
-      hex("go('avset')",'🚫','面談できない時間','30分枠で登録'),
-      hex('openGoogleCalendarSettings()','📅','カレンダー連携','予定を自動で反映'),
-      hex('openMailHistory()','✉️','メール履歴','送信済みメール'),
+      hex("go('interviews')",'list','面談一覧・確定','担当インターン生の面談',pend),
+      hex("go('avail')",'clock','空き日程','カレンダーから確認'),
+      hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごとに設定'),
+      hex("go('avset')",'ban','面談できない時間','30分枠で登録'),
+      hex('openGoogleCalendarSettings()','calendar','カレンダー連携','予定を自動で反映'),
+      hex('openMailHistory()','mail','メール履歴','送信済みメール'),
     );
     return hi+
-      (pend?`<div class="hint"><span>🔔</span><span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
+      (pend?`<div class="hint">${ic('bell')}<span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
       hexgrid(items)+eventsSection();
   }
   // admin
   return hi+hexgrid([
-    hex("go('branches')",'🏢','支部管理','支部の追加・編集'),
-    hex("go('users')",'👥','ユーザー管理','全支部の権限を管理'),
-    hex('openSystemSettings()','⚙️','システム設定','連携状況の確認'),
+    hex("go('branches')",'building','支部管理','支部の追加・編集'),
+    hex("go('users')",'users','ユーザー管理','全支部の権限を管理'),
+    hex('openSystemSettings()','settings','システム設定','連携状況の確認'),
   ])+eventsSection();
 }
 function openSystemSettings(){
@@ -1246,13 +1371,13 @@ async function openGoogleCalendarSettings(){
     renderGoogleCalendarSettings(await res.json());
   }catch(e){
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)"><span>⚠️</span><span>連携状態の取得に失敗しました。時間をおいて再度お試しください。</span></div>`);
+      <div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>連携状態の取得に失敗しました。時間をおいて再度お試しください。</span></div>`);
   }
 }
 function renderGoogleCalendarSettings(data){
   if(!data.enabled){
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <div class="hint mock"><span>⚠️</span><span>サーバー側でGoogleカレンダー連携がまだ設定されていません。管理者にお問い合わせください。</span></div>`);
+      <div class="hint mock">${ic('alert')}<span>サーバー側でGoogleカレンダー連携がまだ設定されていません。管理者にお問い合わせください。</span></div>`);
     return;
   }
   const isStaff=ME.role==='staff'||ME.role==='branch_admin';
@@ -1262,7 +1387,7 @@ function renderGoogleCalendarSettings(data){
   if(data.connected&&data.expired){
     openSheet(`<h3>Googleカレンダー連携</h3>
       <div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">
-        <span>⚠️</span><span><b>連携が切れています。</b>${isStaff
+        ${ic('alert')}<span><b>連携が切れています。</b>${isStaff
           ?'いまはGoogleカレンダーの予定が「面談不可」に反映されていません。予定が入っている時間にも面談を入れられてしまうため、下のボタンから連携し直してください。'
           :'いまは確定した面談がGoogleカレンダーに登録されません。下のボタンから連携し直してください。'}</span></div>
       <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携し直す</button>
@@ -1271,7 +1396,7 @@ function renderGoogleCalendarSettings(data){
   }
   if(data.connected){
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <div class="hint"><span>✅</span><span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
+      <div class="hint">${ic('check')}<span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
       <p class="page-sub" style="margin-top:10px">Notion Calendarをお使いの場合も、表示しているアカウントが同じGoogleアカウントであれば自動的に反映されます。iPhone標準カレンダー（iCloud）は別対応が必要です。</p>
       ${openCalendarButton()}
       <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:var(--bad-line)" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
@@ -1385,7 +1510,7 @@ function viewApply(){
   const preferred=staffs.find(s=>s.id===ME.staff_id)?.id||staffs[0]?.id||'';
   if(!APPLY)APPLY={staff:preferred,weekOffset:0,sel:[],mtype:'meet',note:''};
   if(!staffs.length)return `<h1 class="page">面談を申請</h1>
-    <div class="empty"><div class="ei">💼</div><p>あなたの支部に担当できるスタッフがいません。</p></div>`;
+    <div class="empty"><div class="ei">${ic('briefcase')}</div><p>あなたの支部に担当できるスタッフがいません。</p></div>`;
 
   const staffOpts=staffs.map(s=>`<option value="${s.id}" ${s.id===APPLY.staff?'selected':''}>${esc(s.nickname)}</option>`).join('');
   const{days,times,grid}=genApplyGrid(APPLY.staff,APPLY.weekOffset);
@@ -1412,7 +1537,7 @@ function viewApply(){
   const table=times.length?`<div class="booktable-wrap">
     <table class="booktable"><thead><tr><th class="bt-corner"></th>${headCells}</tr></thead>
     <tbody>${bodyRows}</tbody></table></div>`
-    :`<div class="empty" style="padding:28px"><div class="ei">🈳</div><p>この週は面談可能な空き枠がありません。</p></div>`;
+    :`<div class="empty" style="padding:28px"><div class="ei">${ic('slot-empty')}</div><p>この週は面談可能な空き枠がありません。</p></div>`;
 
   // 選択サマリー
   const summary=APPLY.sel.length?`<div class="divider"></div>
@@ -1427,9 +1552,9 @@ function viewApply(){
       <label class="fl">担当スタッフ</label>
       <select onchange="setApplyStaff(this.value)">${staffOpts}</select>
       <div class="weekpager">
-        <button class="pg" onclick="setApplyWeek(-1)" ${APPLY.weekOffset<=0?'disabled':''}>‹ 前の1週間</button>
+        <button class="pg" onclick="setApplyWeek(-1)" ${APPLY.weekOffset<=0?'disabled':''}>${ic('chevron-l')}前の1週間</button>
         <span class="wm">${monthLabel}</span>
-        <button class="pg" onclick="setApplyWeek(1)">次の1週間 ›</button>
+        <button class="pg" onclick="setApplyWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
       <label class="fl">日時を選ぶ（${APPLY.sel.length}/3）</label>
       ${table}
@@ -1477,7 +1602,7 @@ async function submitApply(){
 function viewMyInterviews(){
   const mine=DB.interviews.filter(i=>i.intern_id===ME.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   if(!mine.length)return `<h1 class="page">面談状況</h1>
-    <div class="empty"><div class="ei">📋</div><p>まだ面談の申請がありません。</p>
+    <div class="empty"><div class="ei">${ic('list')}</div><p>まだ面談の申請がありません。</p>
     <button class="btn pri" onclick="go('apply')">面談を申請する</button></div>`;
   const rows=mine.map(iv=>{const s=STATUS[iv.status];const staff=findUser(iv.staff_id);
     return `<div class="card"><div class="cb">
@@ -1488,14 +1613,14 @@ function viewMyInterviews(){
       </div>
       <div class="meta"><span>担当：<b>${staff?esc(staff.nickname):'未定'}</b></span></div>
       ${iv.status==='fixed'
-        ? `<div class="hint" style="margin-top:8px"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>${MTYPE[iv.meeting_type]}のリンクはメールで届きます。</span></div>
-           <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px"><span>📆</span><span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（ホーム画面から連携できます）'}</span></div>`
+        ? `<div class="hint" style="margin-top:8px">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>${MTYPE[iv.meeting_type]}のリンクはメールで届きます。</span></div>
+           <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（ホーム画面から連携できます）'}</span></div>`
         : iv.status==='failed'
-        ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)"><span>⚠️</span><span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
+        ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
            <button class="btn pri block sm" style="margin-top:10px" onclick="go('apply')">再申請する</button>`
         : `<dl class="kv" style="margin-top:8px">
              ${[iv.choice1,iv.choice2,iv.choice3].filter(Boolean).map((c,i)=>`<dt>第${i+1}希望</dt><dd>${fmtDT(c)}</dd>`).join('')}</dl>`}
-      ${iv.note?`<div class="hint" style="margin-top:8px"><span>💬</span><span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
+      ${iv.note?`<div class="hint" style="margin-top:8px">${ic('message')}<span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
     </div></div>`;}).join('');
   return `<h1 class="page">面談状況</h1><p class="page-sub">あなたの面談申請の状況です。</p>${rows}`;
 }
@@ -1509,7 +1634,7 @@ function viewStaffInterviews(){
     const intern=findUser(iv.intern_id);
     return iv.staff_id===ME.id || (intern&&intern.branch_id===ME.branch_id);
   }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||new Date(b.created_at)-new Date(a.created_at);});
-  if(!all.length)return `<h1 class="page">面談一覧</h1><div class="empty"><div class="ei">📋</div><p>担当する面談はまだありません。</p></div>`;
+  if(!all.length)return `<h1 class="page">面談一覧</h1><div class="empty"><div class="ei">${ic('list')}</div><p>担当する面談はまだありません。</p></div>`;
   // フィルタ適用
   const q=(IVFILTER.q||'').trim();
   const list=all.filter(iv=>{
@@ -1523,14 +1648,14 @@ function viewStaffInterviews(){
       ${chip('all','すべて')}${chip('applied','申請中')}${chip('fixed','確定済み')}${chip('failed','不成立')}
     </div>
     <div class="filterbar">
-      <input placeholder="🔍 学生名で検索" value="${esc(IVFILTER.q)}" oninput="IVFILTER.q=this.value" onchange="render()"
+      <input placeholder="学生名で検索" value="${esc(IVFILTER.q)}" oninput="IVFILTER.q=this.value" onchange="render()"
         onkeydown="if(event.key==='Enter')render()">
       ${q||IVFILTER.status!=='all'?`<button class="btn sm" onclick="clearIvFilter()">クリア</button>`:''}
     </div>`;
   if(!list.length)return `<h1 class="page">面談一覧</h1>
     <p class="page-sub">${branchName(ME.branch_id)}の面談 ${all.length}件</p>
     ${filterBar}
-    <div class="empty"><div class="ei">🔍</div><p>条件に一致する面談がありません。</p></div>`;
+    <div class="empty"><div class="ei">${ic('search')}</div><p>条件に一致する面談がありません。</p></div>`;
   const rows=list.map(iv=>{const s=STATUS[iv.status];const intern=findUser(iv.intern_id);
     return `<div class="row" onclick="openInterview('${iv.id}')">
       <span class="av">${esc(initials(intern?.nickname))}</span>
@@ -1563,11 +1688,11 @@ function openInterview(id){
         <button class="btn bad" style="flex:1" onclick="failInterview('${id}')">不成立にする</button>
       </div>`;
   }else if(iv.status==='fixed'){
-    actions=`<div class="hint"><span>✅</span><span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
-      <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px"><span>📆</span><span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
+    actions=`<div class="hint">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
+      <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
       <button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','${MTYPE[iv.meeting_type]}リンクの送付','お疲れ様です。面談の${MTYPE[iv.meeting_type]}リンクをお送りします。')">${MTYPE[iv.meeting_type]}リンクを送る</button>`;
   }else{
-    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)"><span>⚠️</span><span>この面談は不成立として処理されています。</span></div>
+    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>この面談は不成立として処理されています。</span></div>
       <button class="btn block" style="margin-top:12px" onclick="reopenInterview('${id}')">申請中に戻す</button>`;
   }
   openSheet(`
@@ -1580,7 +1705,7 @@ function openInterview(id){
     <dl class="kv" style="margin:12px 0">
       <dt>面談方法</dt><dd>${MTYPE[iv.meeting_type]}</dd>
     </dl>
-    ${iv.note?`<div class="hint" style="margin-bottom:12px"><span>💬</span><span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
+    ${iv.note?`<div class="hint" style="margin-bottom:12px">${ic('message')}<span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
     ${actions}`);
 }
 async function confirmInterview(id,dt){
@@ -1654,8 +1779,8 @@ function openSendMail(receiverId,subject,body,kind){
   const real=REAL_MAIL_KINDS.includes(kind);
   openSheet(`<h3>メール送信</h3>
     ${real
-      ?`<div class="hint"><span>📮</span><span>このメールは <b>${esc(r?.email||'ご本人のメールアドレス')}</b> 宛に実際に送信されます。</span></div>`
-      :`<div class="hint mock"><span>✉️</span><span>このメールは実際には送信されず、アプリ内の履歴に記録されます。</span></div>`}
+      ?`<div class="hint">${ic('send')}<span>このメールは <b>${esc(r?.email||'ご本人のメールアドレス')}</b> 宛に実際に送信されます。</span></div>`
+      :`<div class="hint mock">${ic('mail')}<span>このメールは実際には送信されず、アプリ内の履歴に記録されます。</span></div>`}
     <dl class="kv" style="margin:12px 0 4px"><dt>宛先</dt><dd>${esc(r?.nickname||'—')}（インターン生）</dd></dl>
     <label class="fl">件名</label>
     <input id="mailSubj" value="${esc(subject)}">
@@ -1709,14 +1834,14 @@ function eventCard(ev){
       <div style="display:flex;align-items:center;gap:8px">
         <span class="legend-dot" style="background:${ev.color||EVENT_COLORS[0].v};margin-right:0"></span>
         <b style="font-size:16px">${esc(ev.title)}</b>
-        <span class="tag" style="margin-left:auto">${isPrivate?'🔒 自分だけ':branchName(ev.branch_id)}</span>
+        <span class="tag" style="margin-left:auto">${isPrivate?ic('lock')+'自分だけ':branchName(ev.branch_id)}</span>
       </div>
       <div class="meta" style="margin-top:6px">
-        <span>🗓 <b>${fmtDT(ev.start_datetime)}</b> 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}</span>
+        <span>${ic('calendar')}<b>${fmtDT(ev.start_datetime)}</b> 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}</span>
       </div>
-      <div class="meta"><span>📍 ${esc(ev.location||'—')}</span></div>
+      <div class="meta"><span>${ic('pin')}${esc(ev.location||'—')}</span></div>
       ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
-      ${(ev.meet_url||ev.zoom_url)?`<div class="meta" style="margin-top:6px">${ev.meet_url?`<span>🔗 <a href="${esc(ev.meet_url)}" target="_blank" rel="noopener">Meet</a></span>`:''}${ev.zoom_url?`<span>🔗 <a href="${esc(ev.zoom_url)}" target="_blank" rel="noopener">Zoom</a></span>`:''}</div>`:''}
+      ${(ev.meet_url||ev.zoom_url)?`<div class="meta" style="margin-top:6px">${ev.meet_url?`<span>${ic('link')}<a href="${esc(ev.meet_url)}" target="_blank" rel="noopener">Meet</a></span>`:''}${ev.zoom_url?`<span>${ic('link')}<a href="${esc(ev.zoom_url)}" target="_blank" rel="noopener">Zoom</a></span>`:''}</div>`:''}
 
       ${isPrivate?'':`
       <div class="votebar">
@@ -1803,8 +1928,8 @@ function eventsSection(){
       <div class="calhead">
         <span class="cm"><span class="cm-m">${m+1}月</span><span class="cm-y">${y}</span></span>
         <span class="calnav">
-          <button class="navbtn" onclick="calShift(-1)">‹</button>
-          <button class="navbtn" onclick="calShift(1)">›</button>
+          <button class="navbtn" onclick="calShift(-1)" aria-label="前の月">${ic('chevron-l')}</button>
+          <button class="navbtn" onclick="calShift(1)" aria-label="次の月">${ic('chevron')}</button>
         </span>
       </div>
       ${body}
@@ -1817,24 +1942,24 @@ function eventsSection(){
   // 選択日の確定面談（該当日のみ、補足表示）
   const ivBelow=calSel?ivs.filter(iv=>ymd(new Date(iv.confirmed_datetime))===calSel):[];
   const ivCards=ivBelow.map(iv=>`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
-      <span class="tile-ic" style="width:38px;height:38px;background:var(--iv-soft);color:var(--iv);font-size:16px">🗓</span>
+      <span class="tile-ic" style="width:38px;height:38px;background:var(--iv-soft);color:var(--iv);font-size:18px">${ic('calendar')}</span>
       <span><b>${esc(ivLabel(iv))}</b><br><span class="tile-d">${fmtDT(iv.confirmed_datetime)} ・ ${MTYPE[iv.meeting_type]}</span></span>
     </div></div>`).join('');
   const listTitle=calSel?`${Number(calSel.split('-')[1])}/${Number(calSel.split('-')[2])} の予定`:`${m+1}月のイベント`;
   const clearBtn=calSel?`<button class="btn ghost sm" onclick="calSelect(null)">絞り込み解除</button>`:'';
   const cards=(below.length||ivBelow.length)?ivCards+below.map(eventCard).join('')
-    :`<div class="empty"><div class="ei">📅</div><p>${calSel?'この日の予定はありません。':'この月のイベントはありません。'}</p></div>`;
+    :`<div class="empty"><div class="ei">${ic('calendar')}</div><p>${calSel?'この日の予定はありません。':'この月のイベントはありません。'}</p></div>`;
 
   return `<div class="divider" style="margin:22px 0 14px"></div>
     <div style="display:flex;align-items:center;margin:0 2px 10px;gap:8px">
-      <h2 style="margin:0;font-size:18px">📅 カレンダー</h2>
+      <h2 style="margin:0;font-size:18px;display:flex;align-items:center;gap:8px">${ic('calendar')}カレンダー</h2>
       <div class="calview-tabs" style="margin-left:auto">
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div></div>
     <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定を追加できます。予定の帯をクリックすると、その日の一覧が下に出ます。</p>
     ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">
-      <span>🔒</span><span>公開範囲を選べるようになる前に作った予定が <b>${unreviewed.length}件</b> あります。
+      ${ic('lock')}<span>公開範囲を選べるようになる前に作った予定が <b>${unreviewed.length}件</b> あります。
       いまも支部の全員に見えているので、<b>個人的なものを「自分だけ」に変えられます</b>。タップして見直す。</span></div>`:''}
     <button class="btn pri block" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しい予定を作成</button>
     ${cal}
@@ -1849,7 +1974,7 @@ function agendaView(list,ivs,y,m){
   ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
     if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'iv',title:ivLabel(iv),sub:`${hm(iv.confirmed_datetime)}・${MTYPE[iv.meeting_type]}`,key:ymd(dt)});});
   items.sort((a,b)=>a.dt-b.dt);
-  if(!items.length)return `<div class="empty" style="padding:26px"><div class="ei">📅</div><p>${m+1}月の予定はありません。</p></div>`;
+  if(!items.length)return `<div class="empty" style="padding:26px"><div class="ei">${ic('calendar')}</div><p>${m+1}月の予定はありません。</p></div>`;
   return `<div class="agenda">`+items.map(it=>{
     const w=WD_JP[it.dt.getDay()];
     return `<div class="ag" ${it.type==='ev'?`style="cursor:pointer" onclick="calSelect('${it.key}')"`:''}>
@@ -1903,7 +2028,7 @@ function openVisibilityCleanup(){
       </span>
     </label>`).join('');
   openSheet(`<h3>昔の予定の公開範囲を見直す</h3>
-    <div class="hint"><span>💡</span><span>下の予定は、いまも <b>${esc(branchName(ME.branch_id))}の全員</b> に見えています。
+    <div class="hint">${ic('bulb')}<span>下の予定は、いまも <b>${esc(branchName(ME.branch_id))}の全員</b> に見えています。
       ほかの人に見せたくないものにチェックを入れてください。チェックしたものだけ「自分だけ」になります。</span></div>
     <div class="btn-row" style="margin:10px 0">
       <button class="btn sm" onclick="visCleanupAll(true)">すべて選ぶ</button>
@@ -2040,7 +2165,7 @@ function viewAvailability(){
   }).join('')||'<div class="empty">スタッフが登録されていません</div>';
   return `<h1 class="page">スタッフ空き日程</h1>
     <p class="page-sub">面談可能時間帯と登録済みの予定から、空き時間を表示します（今後7日）。</p>
-    <div class="hint"><span>🧪</span><span>曜日別の可能時間帯・登録済みの不可時間・Googleカレンダー連携時の予定（連携している場合）・確定済み面談から算出しています。</span></div>
+    <div class="hint">${ic('flask')}<span>曜日別の可能時間帯・登録済みの不可時間・Googleカレンダー連携時の予定（連携している場合）・確定済み面談から算出しています。</span></div>
     <div class="avail" style="margin-top:12px">${cards}</div>`;
 }
 
@@ -2060,7 +2185,7 @@ function openAvailabilitySettings(){
       </span></div>`;}).join('');
   openSheet(`<h3>面談可能時間帯</h3>
     <p class="page-sub">インターン生は、ここで設定した時間帯の中から30分刻みで面談を予約できます。</p>
-    <div class="hint"><span>📆</span><span>Googleカレンダーと連携している場合、予定は自動的に不可時間として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
+    <div class="hint">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に不可時間として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
     <div style="margin-top:8px">${rows}</div>
     <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
     ${openCalendarButton()}`);
@@ -2093,7 +2218,7 @@ async function saveAvailability(){
    ========================================================= */
 function viewAvailSet(){
   if(!AVSET)AVSET={weekOffset:0};
-  const back=`<button class="btn ghost sm" style="margin-bottom:6px" onclick="go('home')">‹ ホームに戻る</button>`;
+  const back=`<button class="btn ghost sm" style="margin-bottom:6px" onclick="go('home')">${ic('back')}ホームに戻る</button>`;
   const{days,times,grid:egrid}=genEditGrid(ME.id,AVSET.weekOffset||0);
   const todayKey=ymd(new Date());
   const monthLabel=`${days[0].getFullYear()}年${days[0].getMonth()+1}月`;
@@ -2118,7 +2243,7 @@ function viewAvailSet(){
   const table=times.length?`<div class="booktable-wrap">
     <table class="booktable"><thead><tr><th class="bt-corner"></th>${headCells}</tr></thead>
     <tbody>${bodyRows}</tbody></table></div>`
-    :`<div class="empty" style="padding:28px"><div class="ei">📆</div><p>面談可能時間帯が設定されていません。<br>先に「面談可能時間帯」で曜日を有効にしてください。</p>
+    :`<div class="empty" style="padding:28px"><div class="ei">${ic('calendar-check')}</div><p>面談可能時間帯が設定されていません。<br>先に「面談可能時間帯」で曜日を有効にしてください。</p>
       <button class="btn pri" onclick="openAvailabilitySettings()">面談可能時間帯を設定</button></div>`;
   const blockedCnt=egrid.reduce((n,col)=>n+col.filter(c=>c.state==='block').length,0);
 
@@ -2129,7 +2254,7 @@ function viewAvailSet(){
   const listRows=blocks.length?blocks.map(b=>{
     const isSlot=b.kind==='slot';
     return `<div class="row" style="cursor:default">
-      <span class="av" style="border-radius:10px;background:var(--bad-soft);color:var(--bad)">🚫</span>
+      <span class="av" style="border-radius:10px;background:var(--bad-soft);color:var(--bad);font-size:18px">${ic('ban')}</span>
       <span class="rmain"><span class="rt">${fmtDate(b.start)} ${hm(b.start)}〜${hm(b.end)}</span>
       <span class="rs">${esc(b.note||'予定あり')}${isSlot?'（枠タップ）':''}</span></span>
       <button class="btn sm bad" onclick="delBlock('${b.id}')">削除</button>
@@ -2144,12 +2269,12 @@ function viewAvailSet(){
     <div class="tp-wrap" style="margin-top:8px">
       <div>
         <label class="fl" style="margin-top:0">開始</label>
-        <div class="tpick" id="tpick_start" onclick="tpToggle('start')"><span id="tpv_start">${BLKFORM.start}</span><span class="tpic">🕐</span></div>
+        <div class="tpick" id="tpick_start" onclick="tpToggle('start')"><span id="tpv_start">${BLKFORM.start}</span><span class="tpic">${ic('clock')}</span></div>
         <div class="tpbar hidden" id="tpbar_start">${timeOptions('start')}</div>
       </div>
       <div>
         <label class="fl" style="margin-top:0">終了</label>
-        <div class="tpick" id="tpick_end" onclick="tpToggle('end')"><span id="tpv_end">${BLKFORM.end}</span><span class="tpic">🕐</span></div>
+        <div class="tpick" id="tpick_end" onclick="tpToggle('end')"><span id="tpv_end">${BLKFORM.end}</span><span class="tpic">${ic('clock')}</span></div>
         <div class="tpbar hidden" id="tpbar_end">${timeOptions('end')}</div>
       </div>
     </div>
@@ -2165,9 +2290,9 @@ function viewAvailSet(){
     <h3 style="margin:6px 2px 8px;font-size:15px">① カレンダーから枠をタップ</h3>
     <div class="card"><div class="cb">
       <div class="weekpager">
-        <button class="pg" onclick="avSetWeek(-1)" ${(AVSET.weekOffset||0)<=0?'disabled':''}>‹ 前の1週間</button>
+        <button class="pg" onclick="avSetWeek(-1)" ${(AVSET.weekOffset||0)<=0?'disabled':''}>${ic('chevron-l')}前の1週間</button>
         <span class="wm">${monthLabel}</span>
-        <button class="pg" onclick="avSetWeek(1)">次の1週間 ›</button>
+        <button class="pg" onclick="avSetWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
       <label class="fl">時間をタップ（不可 ${blockedCnt}枠）</label>
       ${table}
@@ -2322,7 +2447,7 @@ function viewBranches(){
   // 六角形1つが1支部。編集・削除はタップ後のシートにまとめた
   const cells=DB.branches.map(b=>{
     const uc=DB.users.filter(u=>u.branch_id===b.id).length;
-    return hex(`openBranchForm('${b.id}')`,'🏢',esc(b.name),`ユーザー ${uc}人`);
+    return hex(`openBranchForm('${b.id}')`,'building',esc(b.name),`ユーザー ${uc}人`);
   });
   cells.push(hex('openBranchForm()','＋','支部を追加','新しい支部をつくる'));
   return `<h1 class="page">支部管理</h1><p class="page-sub">支部をタップすると編集・削除ができます。</p>
@@ -2411,7 +2536,7 @@ function addStaffFromDirectory(i){
     <input id="asName" value="${esc(name||'')}"><div class="field-err" id="asNameE"></div>
     <label class="fl">所属支部<span class="req">*</span></label>
     <select id="asBranch">${opts}</select>
-    <div class="hint" style="margin-top:12px"><span>💡</span><span>追加した時点ですぐ使える状態になります。ご本人は
+    <div class="hint" style="margin-top:12px">${ic('bulb')}<span>追加した時点ですぐ使える状態になります。ご本人は
       ${esc(DIR_STATUS.domain)} のGoogleアカウントで「Googleでログイン」してください。パスワードは不要です。</span></div>
     <div class="btn-row" style="margin-top:18px">
       <button class="btn pri" style="flex:1" onclick="doAddStaff()">この人を追加する</button>
@@ -2439,7 +2564,7 @@ function openDirectoryImport(){
   openSheet(`<h3>スタッフ名簿を取り込む</h3>
     <p class="page-sub" style="margin-top:-6px">ドットから配布されたアカウント一覧を貼り付けてください。
       ExcelやGoogleスプレッドシートから、そのままコピー＆ペーストできます。</p>
-    <div class="hint"><span>💡</span><span>1行目に「氏名, メールアドレス, かな, 支部」の見出しを入れてください。
+    <div class="hint">${ic('bulb')}<span>1行目に「氏名, メールアドレス, かな, 支部」の見出しを入れてください。
       「かな」を入れておくと、ひらがなでも検索できます。</span></div>
     <label class="fl">貼り付け欄<span class="req">*</span></label>
     <textarea id="dirText" rows="10" placeholder="氏名,メールアドレス,かな,支部&#10;東 レアンドロ,azuma_reandoro@dot-jp.or.jp,あずま れあんどろ,東京支部"></textarea>
@@ -2468,7 +2593,7 @@ function directoryCard(){
   let html=`<div class="card"><div class="ch"><h3>スタッフを名簿から追加</h3>
     <span class="tag" style="margin-left:auto">${imported?`${DIR_STATUS.count}件`:'未取り込み'}</span></div><div class="cb" style="display:block">`;
   if(!imported){
-    html+=`<div class="hint"><span>💡</span><span>まだスタッフ名簿が取り込まれていません。${isFullAdmin()
+    html+=`<div class="hint">${ic('bulb')}<span>まだスタッフ名簿が取り込まれていません。${isFullAdmin()
       ?'下のボタンから、ドット配布アカウントの一覧を取り込んでください。'
       :'全体管理者に名簿の取り込みを依頼してください。'}</span></div>`;
   }else{
@@ -2610,11 +2735,11 @@ function lastRead(){return getNotiRead()[ME?.id]||'1970-01-01T00:00:00.000Z';}
 function unreadCount(){return (DB.notifications||[]).filter(n=>n.at>lastRead()).length;}
 /* 色はCSS変数で持つ。テーマを切り替えても勝手に追従する */
 const NOTI_IC={
-  '面談申請':{e:'📝',bg:'var(--warn-soft)',fg:'var(--warn-ink)'},
-  '面談確定':{e:'✅',bg:'var(--ok-soft)',fg:'var(--ok-ink)'},
-  '面談不成立':{e:'⚠️',bg:'var(--bad-soft)',fg:'var(--bad)'},
-  'イベント作成':{e:'📅',bg:'var(--iv-soft)',fg:'var(--iv-ink)'},
-  'イベント更新':{e:'🔄',bg:'var(--info-soft)',fg:'var(--info-ink)'}};
+  '面談申請':{e:'edit',bg:'var(--warn-soft)',fg:'var(--warn-ink)'},
+  '面談確定':{e:'check',bg:'var(--ok-soft)',fg:'var(--ok-ink)'},
+  '面談不成立':{e:'alert',bg:'var(--bad-soft)',fg:'var(--bad)'},
+  'イベント作成':{e:'calendar',bg:'var(--iv-soft)',fg:'var(--iv-ink)'},
+  'イベント更新':{e:'refresh',bg:'var(--info-soft)',fg:'var(--info-ink)'}};
 function updateBell(){
   const b=document.getElementById('bellBadge');if(!b||!ME)return;
   const n=unreadCount();
@@ -2624,11 +2749,12 @@ function updateBell(){
 function openNotifications(){
   const list=(DB.notifications||[]).slice().sort((a,b)=>new Date(b.at)-new Date(a.at));
   const lr=lastRead();
-  const rows=list.length?list.map(n=>{const ic=NOTI_IC[n.type]||{e:'🔔',bg:'var(--chip)',fg:'var(--chip-ink)'};
+  // 変数名を ic にすると同名のアイコン関数を隠してしまうので nic にしている
+  const rows=list.length?list.map(n=>{const nic=NOTI_IC[n.type]||{e:'bell',bg:'var(--chip)',fg:'var(--chip-ink)'};
     return `<div class="noti ${n.at>lr?'unread':''}">
-      <span class="nic" style="background:${ic.bg};color:${ic.fg}">${ic.e}</span>
+      <span class="nic" style="background:${nic.bg};color:${nic.fg}">${ic(nic.e)}</span>
       <span><span class="nt">${esc(n.msg)}</span><br><span class="ns">${esc(n.type)} ・ ${fmtRel(n.at)}</span></span>
-    </div>`;}).join(''):'<div class="empty" style="padding:26px"><div class="ei">🔔</div><p>通知はまだありません。</p></div>';
+    </div>`;}).join(''):`<div class="empty" style="padding:26px"><div class="ei">${ic('bell')}</div><p>通知はまだありません。</p></div>`;
   openSheet(`<h3>通知</h3>
     <p class="page-sub">面談・イベントに関するアプリ内通知です。</p>
     <div class="card"><div class="cb" style="padding:4px 12px">${rows}</div></div>`);
@@ -2649,13 +2775,13 @@ function openMailHistory(){
     const other=ME.role==='intern'?findUser(m.sender_id):findUser(m.receiver_id);
     const who=ME.role==='intern'?'差出人':'宛先';
     return `<div class="row" style="cursor:pointer" onclick="openMailDetail('${m.id}')">
-      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d)">✉️</span>
+      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('mail')}</span>
       <span class="rmain"><span class="rt">${esc(m.subject)}</span>
       <span class="rs">${who}：${esc(other?.nickname||'—')} ・ ${m.sent_at?fmtRel(m.sent_at):''}</span></span>
-      <span class="tile-arrow">›</span></div>`;}).join('')
-    :`<div class="empty" style="padding:26px"><div class="ei">✉️</div><p>${ME.role==='intern'?'受信したメールはありません。':'送信したメールはありません。'}</p></div>`;
+      <span class="tile-arrow">${ic('chevron')}</span></div>`;}).join('')
+    :`<div class="empty" style="padding:26px"><div class="ei">${ic('mail')}</div><p>${ME.role==='intern'?'受信したメールはありません。':'送信したメールはありません。'}</p></div>`;
   openSheet(`<h3>${ME.role==='intern'?'受信メール':'メール履歴（送信済み）'}</h3>
-    <div class="hint"><span>✉️</span><span>面談の確定・不成立のお知らせはメールでも届きます。
+    <div class="hint">${ic('mail')}<span>面談の確定・不成立のお知らせはメールでも届きます。
       それ以外はアプリ内の記録のみです。</span></div>
     <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>`);
 }
@@ -2671,7 +2797,7 @@ function openMailDetail(id){
     </dl>
     <div class="divider"></div>
     <div style="white-space:pre-wrap;font-size:14px;line-height:1.7">${esc(m.body)}</div>
-    <button class="btn block" style="margin-top:16px" onclick="openMailHistory()">← 一覧へ戻る</button>`);
+    <button class="btn block" style="margin-top:16px" onclick="openMailHistory()">${ic('back')}一覧へ戻る</button>`);
 }
 
 /* =========================================================
