@@ -18,7 +18,7 @@
    ========================================================= */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'index.html');
@@ -61,21 +61,38 @@ await writeFile(OUT, out, 'utf8');
 console.log(`作成しました: test/デザイン確認用.html（${out.length.toLocaleString()}文字）`);
 
 /* ---------------------------------------------------------
-   ショートカット（.url）も一緒に作り直す。
-   Windowsのショートカットは中に絶対パスを持つため、
-   フォルダを別の場所へ移したらこのスクリプトを実行し直すこと。
-   --------------------------------------------------------- */
-// file:///C:/... の形にする。日本語のフォルダ名はURLエンコードが必要
-const fileUrl = pathToFileURL(OUT).href;
+   役割ごとの入口を作る。
 
-const SHORTCUTS = [
-  ['テストページ（インターン生）.url', 'role=intern'],
-  ['テストページ（スタッフ）.url', 'role=staff'],
+   はじめはWindowsのショートカット（.url）にしていたが、
+   file:// のURLに ?role=staff のような「?」が付いていると
+   Windowsが開けず「指定されたファイルが見つかりません」になる。
+   そのため、ダブルクリックできる小さなHTMLを入口にした。
+   中で本体へ転送するだけなので、相対パスで済み、
+   フォルダをどこへ移してもそのまま動く。
+   --------------------------------------------------------- */
+const ENTRIES = [
+  ['スタッフの画面を見る.html', 'staff', 'スタッフ'],
+  ['インターン生の画面を見る.html', 'intern', 'インターン生'],
 ];
 
-for (const [name, query] of SHORTCUTS) {
-  // .url は行末CRLFのINI形式
-  const body = ['[InternetShortcut]', `URL=${fileUrl}?${query}`, 'IconIndex=0', ''].join('\r\n');
-  await writeFile(join(OUT_DIR, name), body, 'utf8');
+for (const [name, role, label] of ENTRIES) {
+  const page = `<!doctype html>
+<meta charset="utf-8">
+<title>${label}の画面を開いています…</title>
+<!--
+  ※ このファイルは自動生成です。
+     デザイン確認用.html を ${label} として開くだけの入口です。
+-->
+<style>
+  body{margin:0;height:100vh;display:grid;place-items:center;
+       background:#0e1113;color:#e6edf3;
+       font-family:"Yu Gothic UI","Meiryo",sans-serif}
+</style>
+<p>${label}の画面を開いています…</p>
+<script>
+  location.replace('デザイン確認用.html?role=${role}');
+</script>
+`;
+  await writeFile(join(OUT_DIR, name), page, 'utf8');
   console.log(`作成しました: test/${name}`);
 }
