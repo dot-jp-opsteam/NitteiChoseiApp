@@ -6,3 +6,8 @@ server/ops_nittyou.sqlite
 index_backup_*.html
 # デスクトップ作業用のショートカット（アプリ本体とは無関係のためGitHubには上げない）
 *.url
+# デザイン確認用ページは index.html から自動生成するものなので、中身は持たない。
+# 作り直しは node tools/make-test-page.mjs
+test/デザイン確認用.html
+# ブラウザ確認ツールの作業フォルダ
+.playwright-mcp/
