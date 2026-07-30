@@ -11,3 +11,6 @@ index_backup_*.html
 test/デザイン確認用.html
 # ブラウザ確認ツールの作業フォルダ
 .playwright-mcp/
+# デザインの参考にした他社サイトのスクリーンショット置き場。
+# 手元で見返すためのものなので、GitHubには上げない
+_reference/
