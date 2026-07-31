@@ -260,6 +260,61 @@ async function listChangedEvents(accessToken, calendarId, syncToken) {
   return { items: data.items || [], nextSyncToken: data.nextSyncToken || null };
 }
 
+/* ---------- 共有カレンダー（全体予定表）の読み取り ---------- */
+/* 取込用アカウントが見られるカレンダーの一覧。
+   管理者に「どのカレンダーを全体予定表にするか」を選ばせるために使う。
+   カレンダーIDは `〜@group.calendar.google.com` のような文字列で、
+   Googleカレンダーの設定画面を探さないと分からない。ここで一覧を出せば、
+   管理者は名前を見て選ぶだけで済む。
+   minAccessRole=reader は「少なくとも閲覧できるもの」に絞る指定 */
+async function listCalendars(accessToken) {
+  const params = new URLSearchParams({ maxResults: '250', minAccessRole: 'reader', showHidden: 'true' });
+  const res = await fetch(`${CAL_API}/users/me/calendarList?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`calendarList.list failed: ${await res.text()}`);
+  const data = await res.json();
+  return (data.items || []).map((c) => ({
+    id: c.id,
+    name: c.summaryOverride || c.summary || c.id,
+    primary: c.primary === true,
+  }));
+}
+
+/* 期間を指定して予定を取得する。
+   singleEvents=true にすると「毎週◯曜」のような繰り返しの予定が
+   1件ずつに展開されるので、カレンダーにそのまま並べられる。
+   アプリ側が扱いやすい形（開始・終了・終日フラグ）に変換して返す */
+async function listEventsInRange(accessToken, calendarId, timeMin, timeMax) {
+  const params = new URLSearchParams({
+    singleEvents: 'true', orderBy: 'startTime', maxResults: '2500', timeMin, timeMax,
+  });
+  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    const err = new Error(`events.list failed: ${body}`);
+    /* 404／403 は「カレンダーが消えた」「共有を外された」状態。
+       やり直しても直らないので、呼び出し側が管理者に設定し直しを促せるよう印を付ける */
+    if (res.status === 404 || res.status === 403) err.code = 'CALENDAR_UNAVAILABLE';
+    throw err;
+  }
+  const data = await res.json();
+  return (data.items || [])
+    .filter((e) => e.status !== 'cancelled')
+    .map((e) => ({
+      id: e.id,
+      title: e.summary || '(タイトルなし)',
+      // 終日の予定は date、時刻付きは dateTime に入る
+      start: e.start?.dateTime || e.start?.date || null,
+      end: e.end?.dateTime || e.end?.date || null,
+      allDay: !e.start?.dateTime,
+      location: e.location || '',
+    }))
+    .filter((e) => e.start);
+}
+
 async function createEvent(accessToken, calendarId, event) {
   const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events`, {
     method: 'POST',
@@ -292,5 +347,6 @@ module.exports = {
   getLoginAuthUrl, exchangeLoginCode, parseIdToken, loginRedirectUri,
   signPayload, verifyPayload,
   startWatch, stopWatch, listChangedEvents,
+  listCalendars, listEventsInRange,
   createEvent, updateEvent, deleteEvent,
 };

@@ -1361,6 +1361,7 @@ function viewHome(){
   return hi+hexgrid([
     hex("go('branches')",'building','支部管理','支部の追加・編集'),
     hex("go('users')",'users','ユーザー管理','全支部の権限を管理'),
+    hex('openSharedCalendarSettings()','calendar','全体予定表',SHARED_CAL.configured?esc(SHARED_CAL.name||'設定済み'):'スタッフ全員に見せる予定'),
     hex('openSystemSettings()','settings','システム設定','連携状況の確認'),
   ])+eventsSection();
 }
@@ -1368,6 +1369,7 @@ function openSystemSettings(){
   openSheet(`<h3>システム設定</h3>
     <dl class="kv" style="margin-top:14px">
       <dt>Googleカレンダー</dt><dd>スタッフごとに個別設定（スタッフのホーム画面から連携）</dd>
+      <dt>全体予定表</dt><dd>${SHARED_CAL.configured?esc(SHARED_CAL.name||'設定済み')+'（スタッフ全員に表示）':'未設定（ホームの「全体予定表」から設定）'}</dd>
       <dt>メール送信</dt><dd>${PASSWORD_RESET_AVAILABLE
         ?'面談の確定・不成立は実際に送信されます（その他は履歴のみ）'
         :'未設定のため履歴のみ（Renderの SMTP_USER / SMTP_PASS を確認してください）'}</dd>
@@ -1432,7 +1434,7 @@ function renderGoogleCalendarSettings(data){
         ${ic('alert')}<span><b>連携が切れています。</b>${isStaff
           ?'いまはGoogleカレンダーの予定が「面談不可」に反映されていません。予定が入っている時間にも面談を入れられてしまうため、下のボタンから連携し直してください。'
           :'いまは確定した面談がGoogleカレンダーに登録されません。下のボタンから連携し直してください。'}</span></div>
-      <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携し直す</button>
+      <button class="btn pri block" style="margin-top:16px" onclick="startGoogleConnect(this)">Googleカレンダーと連携し直す</button>
       ${openCalendarButton()}`);
     return;
   }
@@ -1445,8 +1447,129 @@ function renderGoogleCalendarSettings(data){
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
       <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
-      <button class="btn pri block" style="margin-top:16px" onclick="location.href='/api/auth/google/start?staffId='+encodeURIComponent(ME.id)">Googleカレンダーと連携する</button>
+      <button class="btn pri block" style="margin-top:16px" onclick="startGoogleConnect(this)">Googleカレンダーと連携する</button>
       ${openCalendarButton()}`);
+  }
+}
+
+/* =========================================================
+   全体予定表の設定（管理者のみ）
+   取込用アカウントを1つ連携し、そのアカウントが見られるカレンダーの中から
+   スタッフ全員に見せるものを選ぶ。カレンダーIDを自分で調べる必要はない。
+   ========================================================= */
+async function openSharedCalendarSettings(){
+  openSheet(`<h3>全体予定表</h3><p class="page-sub">状態を確認しています…</p>`);
+  let data;
+  try{
+    const res=await api('/api/shared-calendar/status');
+    if(!res.ok)throw new Error('failed');
+    data=await res.json();
+  }catch(e){
+    openSheet(`<h3>全体予定表</h3><div class="hint mock">${ic('alert')}<span>状態を取得できませんでした。時間をおいてお試しください。</span></div>`);
+    return;
+  }
+  const intro=`<p class="page-sub">ドットジェイピーの予定表カレンダーを、スタッフ全員のカレンダー画面に読み取り専用で表示します。予定の追加や変更はGoogleカレンダー側で行ってください。</p>`;
+  if(!data.enabled){
+    openSheet(`<h3>全体予定表</h3>${intro}
+      <div class="hint mock">${ic('alert')}<span>サーバー側でGoogle連携がまだ設定されていません。</span></div>`);
+    return;
+  }
+  if(!data.connected){
+    openSheet(`<h3>全体予定表</h3>${intro}
+      <div class="hint">${ic('bulb')}<span>まず<b>取込用のGoogleアカウント</b>を1つ連携します。次の画面では、その予定表カレンダーが見られるアカウント（ドットジェイピーのアカウント）を選んでください。</span></div>
+      <p class="page-sub" style="margin-top:10px">ここで連携したアカウントは予定を<b>読むだけ</b>に使われます。あなた個人のカレンダー連携とは別枠なので、面談の自動登録などには影響しません。</p>
+      <button class="btn pri block" style="margin-top:16px" onclick="startSharedCalConnect(this)">取込用アカウントを連携する</button>`);
+    return;
+  }
+  // 連携済み。カレンダーを選ぶ
+  openSheet(`<h3>全体予定表</h3>${intro}
+    <div class="hint">${ic('check')}<span>取込用アカウントは連携済みです。</span></div>
+    <div style="margin-top:14px">
+      <label class="fl">スタッフ全員に見せるカレンダー</label>
+      <div id="sharedCalPick" class="page-sub">カレンダーの一覧を取得しています…</div>
+    </div>
+    <div id="sharedCalMsg"></div>
+    <button class="btn block" style="margin-top:14px;color:var(--bad);border-color:var(--bad-line)" onclick="disconnectSharedCal()">取込用アカウントの連携を解除</button>`);
+  loadSharedCalOptions(data.calendarId);
+}
+async function startSharedCalConnect(btn){
+  if(btn){btn.disabled=true;btn.textContent='Googleに接続しています…';}
+  try{
+    const res=await api('/api/shared-calendar/connect-url');
+    if(!res.ok)throw new Error('failed');
+    const {url}=await res.json();
+    location.href=url;
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='取込用アカウントを連携する';}
+    toast('連携を開始できませんでした。時間をおいてお試しください。');
+  }
+}
+async function loadSharedCalOptions(current){
+  const box=document.getElementById('sharedCalPick');
+  if(!box)return;
+  try{
+    const res=await api('/api/shared-calendar/options');
+    if(res.status===409){
+      box.innerHTML=`<div class="hint mock">${ic('alert')}<span>取込用アカウントの連携が切れています。</span></div>
+        <button class="btn pri block" style="margin-top:10px" onclick="startSharedCalConnect(this)">連携し直す</button>`;
+      return;
+    }
+    if(!res.ok)throw new Error('failed');
+    const {calendars}=await res.json();
+    if(!calendars.length){
+      box.innerHTML=`<div class="hint mock">${ic('alert')}<span>このアカウントから見えるカレンダーがありません。予定表カレンダーが共有されているアカウントで連携し直してください。</span></div>`;
+      return;
+    }
+    box.innerHTML=`<select id="sharedCalSel" style="width:100%">
+        ${calendars.map(c=>`<option value="${esc(c.id)}" data-name="${esc(c.name)}"${c.id===current?' selected':''}>${esc(c.name)}${c.primary?'（このアカウント本人の予定）':''}</option>`).join('')}
+      </select>
+      <button class="btn pri block" style="margin-top:12px" onclick="saveSharedCal()">このカレンダーを全体予定表にする</button>`;
+  }catch(e){
+    box.innerHTML=`<div class="hint mock">${ic('alert')}<span>カレンダーの一覧を取得できませんでした。</span></div>`;
+  }
+}
+async function saveSharedCal(){
+  const sel=document.getElementById('sharedCalSel');
+  if(!sel)return;
+  const opt=sel.options[sel.selectedIndex];
+  try{
+    const res=await api('/api/shared-calendar/config',{method:'PUT',
+      body:JSON.stringify({calendar_id:sel.value,calendar_name:opt.dataset.name})});
+    if(!res.ok)throw new Error('failed');
+    SHARED_CAL={events:{},loading:{},configured:true,name:opt.dataset.name};
+    closeSheet();
+    toast('全体予定表を設定しました');
+    render();
+  }catch(e){toast('保存に失敗しました');}
+}
+async function disconnectSharedCal(){
+  if(!await confirmSheet('全体予定表の連携を解除',
+    '解除すると、スタッフのカレンダーに全体予定表が表示されなくなります。あとからいつでも設定し直せます。','解除する'))return;
+  try{
+    const res=await api('/api/shared-calendar/disconnect',{method:'POST'});
+    if(!res.ok)throw new Error('failed');
+    SHARED_CAL={events:{},loading:{},configured:false,name:null};
+    closeSheet();
+    toast('連携を解除しました');
+    render();
+  }catch(e){toast('解除に失敗しました');}
+}
+
+/* Google連携を開始する。
+   以前は連携用APIへ直接 location.href で飛ばしていたが、画面遷移では
+   Authorizationヘッダが送られないためサーバーが本人と判断できず、
+   ボタンを押してもエラーのJSONが出るだけになっていた。
+   まずAPIで連携URLを受け取り、それから遷移する */
+async function startGoogleConnect(btn){
+  if(btn){btn.disabled=true;btn.textContent='Googleに接続しています…';}
+  try{
+    const res=await api('/api/auth/google/connect-url');
+    if(!res.ok)throw new Error('failed');
+    const {url}=await res.json();
+    location.href=url;
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='Googleカレンダーと連携する';}
+    toast('連携を開始できませんでした。時間をおいてお試しください。');
   }
 }
 
@@ -1908,6 +2031,64 @@ function eventCard(ev){
         </div>`:''}
     </div></div>`;
 }
+/* =========================================================
+   全体予定表（ドットジェイピーの共有カレンダー）
+   ---------------------------------------------------------
+   管理者が連携した1つのGoogleカレンダーを、スタッフ全員のカレンダーに
+   読み取り専用で重ねて表示する。予定はDBに入れずサーバー経由で都度取得するので、
+   Googleカレンダー側で予定が変わればそのまま反映される。
+   表示している月ごとに取りに行き、一度取った月は覚えておく。
+   ========================================================= */
+/* 支部イベント（EVENT_COLORS）にも面談（--iv）にも使っていない色にして、
+   全体予定表の予定だとひと目で分かるようにする */
+const SHARED_CAL_COLOR='#f0955b';
+let SHARED_CAL={events:{},loading:{},configured:null,name:null};
+function sharedCalOn(){return ME&&ME.role!=='intern';}
+function sharedKey(y,m){return y+'-'+m;}
+/* 表示中の月の予定を確保する。未取得ならサーバーに聞きに行き、
+   返ってきたら画面を描き直す（render中に呼ばれるので同期では待たない） */
+function ensureSharedCal(y,m){
+  if(!sharedCalOn())return [];
+  const key=sharedKey(y,m);
+  if(SHARED_CAL.events[key])return SHARED_CAL.events[key];
+  if(SHARED_CAL.loading[key])return [];
+  SHARED_CAL.loading[key]=true;
+  const timeMin=new Date(y,m,1).toISOString();
+  const timeMax=new Date(y,m+1,1).toISOString();
+  api(`/api/shared-calendar/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`)
+    .then(r=>r.ok?r.json():null)
+    .then(d=>{
+      SHARED_CAL.loading[key]=false;
+      if(!d)return;
+      SHARED_CAL.events[key]=d.events||[];
+      SHARED_CAL.configured=!!d.configured;
+      if(d.name)SHARED_CAL.name=d.name;
+      // 取れた予定が画面に出るように描き直す
+      if(SHARED_CAL.events[key].length)render();
+    })
+    .catch(()=>{SHARED_CAL.loading[key]=false;});
+  return [];
+}
+// 全体予定表の予定を、支部イベントと同じ形に整えてカレンダーに並べる
+function sharedItemsFor(y,m){
+  return ensureSharedCal(y,m).map(e=>({
+    id:e.id,title:e.title,start:e.start,allDay:e.allDay,location:e.location,shared:true,
+  }));
+}
+/* 終日の予定は "2026-07-15" のような日付だけの文字列で届く。
+   そのまま new Date() に渡すとUTCの0時と解釈され、時差の分だけ日がずれることがある。
+   日付だけのときは地域時間の日付として組み立てて、ずれないようにする */
+function sharedDate(e){
+  if(e.allDay&&/^\d{4}-\d{2}-\d{2}$/.test(e.start)){
+    const[y,m,d]=e.start.split('-').map(Number);return new Date(y,m-1,d);
+  }
+  return new Date(e.start);
+}
+function sharedLabel(e){return e.allDay?e.title:`${hm(e.start)} ${e.title}`;}
+/* 全体予定表を読み込み直す。Googleカレンダー側を直したあと、
+   5分のキャッシュを待たずに反映させたいときに使う */
+function reloadSharedCal(){SHARED_CAL.events={};SHARED_CAL.loading={};render();}
+
 // 自分に関係する確定面談を取得（カレンダー併記用）
 function myInterviewsForCal(){
   return DB.interviews.filter(iv=>{
@@ -1928,13 +2109,15 @@ function eventsSection(){
   const ivs=myInterviewsForCal();
   const unreviewed=myUnreviewedEvents();
   const {y,m}=calYM;
-  const evByDay={},ivByDay={};
+  const shared=sharedItemsFor(y,m);
+  const evByDay={},ivByDay={},shByDay={};
   list.forEach(e=>{const k=ymd(new Date(e.start_datetime));(evByDay[k]=evByDay[k]||[]).push(e);});
   ivs.forEach(iv=>{const k=ymd(new Date(iv.confirmed_datetime));(ivByDay[k]=ivByDay[k]||[]).push(iv);});
+  shared.forEach(e=>{const k=ymd(sharedDate(e));(shByDay[k]=shByDay[k]||[]).push(e);});
 
   let body;
   if(calMode==='list'){
-    body=agendaView(list,ivs,y,m);
+    body=agendaView(list,ivs,shared,y,m);
   }else{
     const startDow=new Date(y,m,1).getDay();
     const daysInMonth=new Date(y,m+1,0).getDate();
@@ -1944,7 +2127,10 @@ function eventsSection(){
     for(let i=0;i<startDow;i++)cells+=`<div class="calcell out"></div>`;
     for(let d=1;d<=daysInMonth;d++){
       const key=ymd(new Date(y,m,d));const evs=evByDay[key]||[];const dvs=ivByDay[key]||[];
+      const shs=shByDay[key]||[];
       const items=[
+        // 全体予定表は組織全体の予定なので、その日の先頭に出す
+        ...shs.map(e=>({t:sharedDate(e),color:SHARED_CAL_COLOR,label:sharedLabel(e)})),
         ...evs.map(e=>({t:new Date(e.start_datetime),color:e.color||EVENT_COLORS[0].v,label:`${hm(e.start_datetime)} ${e.title}`})),
         ...dvs.map(iv=>({t:new Date(iv.confirmed_datetime),color:'var(--iv)',label:`${hm(iv.confirmed_datetime)} ${ivLabel(iv)}`})),
       ].sort((a,b)=>a.t-b.t);
@@ -1987,9 +2173,15 @@ function eventsSection(){
       <span class="tile-ic" style="width:38px;height:38px;background:var(--iv-soft);color:var(--iv);font-size:18px">${ic('calendar')}</span>
       <span><b>${esc(ivLabel(iv))}</b><br><span class="tile-d">${fmtDT(iv.confirmed_datetime)} ・ ${MTYPE[iv.meeting_type]}</span></span>
     </div></div>`).join('');
+  // 選択日の全体予定表（読み取り専用。編集はGoogleカレンダー側で行う）
+  const shBelow=calSel?shared.filter(e=>ymd(sharedDate(e))===calSel):[];
+  const shCards=shBelow.map(e=>`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
+      <span class="tile-ic" style="width:38px;height:38px;background:${chipBg(SHARED_CAL_COLOR)};color:${chipFg(SHARED_CAL_COLOR)};font-size:18px">${ic('calendar')}</span>
+      <span><b>${esc(e.title)}</b><br><span class="tile-d">${e.allDay?'終日':fmtDT(e.start)}${e.location?' ・ '+esc(e.location):''} ・ 全体予定表</span></span>
+    </div></div>`).join('');
   const listTitle=calSel?`${Number(calSel.split('-')[1])}/${Number(calSel.split('-')[2])} の予定`:`${m+1}月のイベント`;
   const clearBtn=calSel?`<button class="btn ghost sm" onclick="calSelect(null)">絞り込み解除</button>`:'';
-  const cards=(below.length||ivBelow.length)?ivCards+below.map(eventCard).join('')
+  const cards=(below.length||ivBelow.length||shBelow.length)?shCards+ivCards+below.map(eventCard).join('')
     :`<div class="empty"><div class="ei">${ic('calendar')}</div><p>${calSel?'この日の予定はありません。':'この月のイベントはありません。'}</p></div>`;
 
   return `<div class="divider" style="margin:22px 0 14px"></div>
@@ -2000,6 +2192,11 @@ function eventsSection(){
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div></div>
     <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定を追加できます。予定の帯をクリックすると、その日の一覧が下に出ます。</p>
+    ${sharedCalOn()&&SHARED_CAL.configured?`<div class="hint">
+      <span style="width:14px;height:14px;border-radius:4px;background:${SHARED_CAL_COLOR};flex:none"></span>
+      <span>この色の予定は <b>${esc(SHARED_CAL.name||'全体予定表')}</b> です。ドットジェイピーのカレンダーをそのまま表示しています（このアプリからは編集できません）。</span></div>`:''}
+    ${isFullAdmin()&&SHARED_CAL.configured===false?`<div class="hint mock" style="cursor:pointer" onclick="openSharedCalendarSettings()">
+      ${ic('calendar')}<span>全体予定表がまだ設定されていません。タップして、スタッフ全員に見せるカレンダーを設定できます。</span></div>`:''}
     ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">
       ${ic('lock')}<span>公開範囲を選べるようになる前に作った予定が <b>${unreviewed.length}件</b> あります。
       いまも支部の全員に見えているので、<b>個人的なものを「自分だけ」に変えられます</b>。タップして見直す。</span></div>`:''}
@@ -2009,8 +2206,10 @@ function eventsSection(){
     ${cards}`;
 }
 // リスト（アジェンダ）表示：当月のイベント＋面談を時系列で
-function agendaView(list,ivs,y,m){
+function agendaView(list,ivs,shared,y,m){
   const items=[];
+  (shared||[]).forEach(e=>{const dt=sharedDate(e);
+    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${e.allDay?'終日':hm(e.start)}・全体予定表`,key:ymd(dt),color:SHARED_CAL_COLOR});});
   list.forEach(e=>{const dt=new Date(e.start_datetime);
     if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${hm(e.start_datetime)}・${e.location||'—'}`,key:ymd(dt),color:e.color||EVENT_COLORS[0].v});});
   ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
@@ -3782,6 +3981,25 @@ function consumeTokenFromHash(){
     history.replaceState(null,'',location.pathname+(q?`?${q}`:''));
     if(googleParam==='connected')toast('Googleカレンダーと連携しました');
     else if(googleParam==='error')toast('Googleカレンダー連携に失敗しました');
+  }
+
+  /* 全体予定表の取込用アカウントを連携して戻ってきたところ。
+     続けて「どのカレンダーを表示するか」を選んでもらう */
+  const sharedParam=params.get('shared_calendar');
+  if(sharedParam){
+    params.delete('shared_calendar');
+    const q=params.toString();
+    history.replaceState(null,'',location.pathname+(q?`?${q}`:''));
+    if(sharedParam==='connected'){
+      toast('取込用アカウントを連携しました');
+      /* ログインの復元が終わるまで ME は入っていない。
+         入るのを少し待ってから設定画面を開く（最大6秒であきらめる） */
+      let tries=0;
+      const timer=setInterval(()=>{
+        if(ME&&ME.role==='admin'){clearInterval(timer);openSharedCalendarSettings();}
+        else if(++tries>20)clearInterval(timer);
+      },300);
+    }
   }
 })();
 </script>

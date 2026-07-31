@@ -127,6 +127,7 @@ async function initDB() {
     'ALTER TABLE users ADD COLUMN google_sub TEXT',   // Googleでログイン用
     'ALTER TABLE users ADD COLUMN avatar_url TEXT',   // Googleでログイン用
     'ALTER TABLE users ADD COLUMN staff_id TEXT',     // インターン生の担当スタッフ
+    'ALTER TABLE google_tokens ADD COLUMN calendar_name TEXT', // 全体予定表の表示名
   ]) {
     try {
       await client.execute(ddl);
@@ -350,6 +351,13 @@ function canManageUser(actor, target) {
   if (target.role === 'admin') return false;
   return target.branch_id === actor.branch_id;
 }
+
+/* 全体予定表（ドットジェイピーの共有カレンダー）用のトークンを入れておく予約キー。
+   google_tokens は staff_id が主キーなので、人ではない行を1つ混ぜても構造は変わらない。
+   ユーザーIDは 'u_' で始まるため、この名前が実在のユーザーとぶつかることはない。
+   スタッフ個人の連携（面談の自動登録・面談不可の反映）とは完全に別枠にしてあり、
+   取込用アカウントを連携しても誰かの個人カレンダーには影響しない */
+const SHARED_CALENDAR_KEY = '__shared__';
 
 /* ---------- google_tokens テーブル操作 ---------- */
 async function getTokenRow(staffId) {
@@ -1468,12 +1476,14 @@ app.put('/api/db', requireAuth, async (req, res) => {
 });
 
 /* ---------- Googleカレンダー連携 ---------- */
-app.get('/api/auth/google/start', requireAuth, (req, res) => {
-  if (!GOOGLE_ENABLED) return res.status(503).send('Google連携は未設定です');
-  const staffId = String(req.query.staffId || '');
-  if (!staffId) return res.status(400).send('staffIdが必要です');
-  if (staffId !== req.authUser.id) return res.status(403).send('本人以外は連携できません');
-  res.redirect(google.getAuthUrl(staffId));
+/* 連携用のURLを返す。
+   以前はここで直接Googleへリダイレクトしていたが、画面遷移（location.href）では
+   Authorizationヘッダが送られないため requireAuth を必ず通れず、
+   ボタンを押すとエラーのJSONが表示されるだけになっていた。
+   URLだけ返して遷移はフロントに任せることで、認証を通したまま連携できる */
+app.get('/api/auth/google/connect-url', requireAuth, (req, res) => {
+  if (!GOOGLE_ENABLED) return res.status(503).json({ error: 'Google連携は未設定です' });
+  res.json({ url: google.getAuthUrl(req.authUser.id) });
 });
 
 app.get('/api/auth/google/callback', async (req, res) => {
@@ -1490,14 +1500,24 @@ app.get('/api/auth/google/callback', async (req, res) => {
       if (!existing) throw new Error('refresh_tokenが取得できませんでした。再度連携をお試しください。');
     }
     const tokenExpiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+    const isShared = staffId === SHARED_CALENDAR_KEY;
+    const existingRow = await getTokenRow(staffId);
     await upsertTokenRow({
       staff_id: staffId,
       access_token: google.encrypt(tokens.access_token),
-      refresh_token: tokens.refresh_token ? google.encrypt(tokens.refresh_token) : (await getTokenRow(staffId)).refresh_token,
+      refresh_token: tokens.refresh_token ? google.encrypt(tokens.refresh_token) : existingRow.refresh_token,
       token_expiry: tokenExpiry,
-      calendar_id: 'primary',
+      // 連携し直しても、選んである全体予定表のカレンダーは選び直さずに済むようにする
+      calendar_id: isShared ? (existingRow?.calendar_id || 'primary') : 'primary',
       connected_at: new Date().toISOString(),
     });
+    if (isShared) {
+      /* 全体予定表は読むだけなので push通知（watch）は登録しない。
+         通知先はスタッフ個人の「面談できない時間」を書き換える仕組みで、
+         共有カレンダーの予定をそこに混ぜてしまうと全員の面談枠が消えてしまう */
+      clearSharedCalCache();
+      return res.redirect('/?shared_calendar=connected');
+    }
     try {
       await registerWatch(staffId, tokens.access_token, 'primary');
     } catch (e) {
@@ -1563,6 +1583,138 @@ app.get('/api/google/status', requireAuth, async (req, res) => {
   }
 });
 
+/* =========================================================
+   全体予定表（ドットジェイピーの共有カレンダー）
+   ---------------------------------------------------------
+   仕組み：管理者が取込用アカウントを1つだけ連携し、表示するカレンダーを選ぶ。
+   閲覧はサーバーがその1つのトークンで代表して行い、結果を全スタッフに配る。
+   こうしておくと、スタッフ個人がGoogleカレンダー連携をしていなくても、
+   また共有カレンダーがドメイン内限定の公開であっても、全員が同じ予定を見られる。
+   予定はDBに写さず、都度Googleから取ってメモリに短時間だけ置く。
+   予定表は元のGoogleカレンダー側で編集されるので、写しを持つと必ず古くなるため。
+   ========================================================= */
+const SHARED_CAL_TTL_MS = 5 * 60 * 1000;
+const sharedCalCache = new Map(); // `${calendarId}|${timeMin}|${timeMax}` -> { at, events }
+
+function clearSharedCalCache() { sharedCalCache.clear(); }
+
+/* 全体予定表を見てよいのはスタッフ側だけ。インターン生には配らない */
+function canSeeSharedCalendar(user) {
+  return !!user && user.role !== 'intern';
+}
+
+app.get('/api/shared-calendar/status', requireAuth, async (req, res) => {
+  const canManage = req.authUser.role === 'admin';
+  if (!GOOGLE_ENABLED) return res.json({ enabled: false, configured: false, canManage });
+  try {
+    const row = await getTokenRow(SHARED_CALENDAR_KEY);
+    res.json({
+      enabled: true,
+      canManage,
+      connected: !!row,
+      // カレンダーを選ぶまでは connected でも配信は始まらない
+      configured: !!row && !!row.calendar_id && row.calendar_id !== 'primary',
+      calendarId: row?.calendar_id || null,
+      calendarName: row?.calendar_name || null,
+      visible: canSeeSharedCalendar(req.authUser),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '状態取得に失敗しました' });
+  }
+});
+
+/* 取込用アカウントの連携を始めるためのURLを返す。ここで選んだGoogleアカウントが
+   「全体予定表を読む代表者」になる。スタッフ個人の連携とは別の行に保存される。
+   リダイレクトするAPIにせずURLを返すだけにしているのは、画面遷移では
+   Authorizationヘッダが送られず認証を通せないため（フロント側で遷移する） */
+app.get('/api/shared-calendar/connect-url', requireAuth, requireAdmin, (req, res) => {
+  if (!GOOGLE_ENABLED) return res.status(503).json({ error: 'Google連携は未設定です' });
+  res.json({ url: google.getAuthUrl(SHARED_CALENDAR_KEY) });
+});
+
+/* 取込用アカウントが見られるカレンダーの一覧。管理者が選ぶためのもの */
+app.get('/api/shared-calendar/options', requireAuth, requireAdmin, async (req, res) => {
+  if (!GOOGLE_ENABLED) return res.status(503).json({ error: 'Google連携は未設定です' });
+  try {
+    const row = await getTokenRow(SHARED_CALENDAR_KEY);
+    if (!row) return res.status(400).json({ error: '先に取込用アカウントを連携してください' });
+    const accessToken = await accessTokenFor(row);
+    res.json({ calendars: await google.listCalendars(accessToken) });
+  } catch (e) {
+    if (e.code === 'REFRESH_REVOKED') {
+      return res.status(409).json({ error: '取込用アカウントの連携が切れています。連携し直してください。', code: 'revoked' });
+    }
+    console.error('カレンダー一覧の取得に失敗しました', e);
+    res.status(500).json({ error: 'カレンダー一覧の取得に失敗しました' });
+  }
+});
+
+/* 表示するカレンダーを決める */
+app.put('/api/shared-calendar/config', requireAuth, requireAdmin, async (req, res) => {
+  const calendarId = String(req.body?.calendar_id || '').trim();
+  const calendarName = String(req.body?.calendar_name || '').trim();
+  if (!calendarId) return res.status(400).json({ error: 'カレンダーを選んでください' });
+  try {
+    const row = await getTokenRow(SHARED_CALENDAR_KEY);
+    if (!row) return res.status(400).json({ error: '先に取込用アカウントを連携してください' });
+    await client.execute({
+      sql: 'UPDATE google_tokens SET calendar_id = ?, calendar_name = ? WHERE staff_id = ?',
+      args: [calendarId, calendarName || calendarId, SHARED_CALENDAR_KEY],
+    });
+    clearSharedCalCache();
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '保存に失敗しました' });
+  }
+});
+
+app.post('/api/shared-calendar/disconnect', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await deleteTokenRow(SHARED_CALENDAR_KEY);
+    clearSharedCalCache();
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '解除に失敗しました' });
+  }
+});
+
+/* スタッフの画面に出す予定を返す。期間はカレンダーで開いている月の前後 */
+app.get('/api/shared-calendar/events', requireAuth, async (req, res) => {
+  if (!GOOGLE_ENABLED) return res.json({ events: [], configured: false });
+  if (!canSeeSharedCalendar(req.authUser)) return res.json({ events: [], configured: false });
+  const timeMin = String(req.query.timeMin || '');
+  const timeMax = String(req.query.timeMax || '');
+  if (!timeMin || !timeMax) return res.status(400).json({ error: '期間の指定が必要です' });
+  try {
+    const row = await getTokenRow(SHARED_CALENDAR_KEY);
+    if (!row || !row.calendar_id || row.calendar_id === 'primary') {
+      return res.json({ events: [], configured: false });
+    }
+    const key = `${row.calendar_id}|${timeMin}|${timeMax}`;
+    const hit = sharedCalCache.get(key);
+    if (hit && Date.now() - hit.at < SHARED_CAL_TTL_MS) {
+      return res.json({ events: hit.events, configured: true, name: row.calendar_name, cached: true });
+    }
+    const accessToken = await accessTokenFor(row);
+    const events = await google.listEventsInRange(accessToken, row.calendar_id, timeMin, timeMax);
+    sharedCalCache.set(key, { at: Date.now(), events });
+    res.json({ events, configured: true, name: row.calendar_name });
+  } catch (e) {
+    /* ここで500を返すとカレンダー画面ごと出なくなってしまう。
+       全体予定表はあくまで付け足しなので、取れなければ黙って空で返し、
+       原因はサーバーのログに残す */
+    if (e.code === 'REFRESH_REVOKED' || e.code === 'CALENDAR_UNAVAILABLE') {
+      console.warn('全体予定表を取得できません（管理者による設定し直しが必要）', e.message || e);
+      return res.json({ events: [], configured: true, error: 'unavailable' });
+    }
+    console.error('全体予定表の取得に失敗しました', e);
+    res.json({ events: [], configured: true, error: 'failed' });
+  }
+});
+
 // Googleからのpush通知受信（面談不可時間へ外部予定を反映）
 app.post('/api/webhooks/google-calendar', async (req, res) => {
   if (!GOOGLE_ENABLED) return res.status(200).end();
@@ -1615,8 +1767,10 @@ async function renewExpiringWatches() {
   try {
     const soon = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const rs = await client.execute({
-      sql: 'SELECT staff_id FROM google_tokens WHERE channel_expiration IS NULL OR channel_expiration < ?',
-      args: [soon],
+      /* 全体予定表の行は読むだけでwatchを張っていないので、対象から外す。
+         外さないと channel_expiration が常にNULLのため毎回登録しようとしてしまう */
+      sql: 'SELECT staff_id FROM google_tokens WHERE staff_id <> ? AND (channel_expiration IS NULL OR channel_expiration < ?)',
+      args: [SHARED_CALENDAR_KEY, soon],
     });
     for (const row of rs.rows) {
       const tokenRow = await getTokenRow(row.staff_id);

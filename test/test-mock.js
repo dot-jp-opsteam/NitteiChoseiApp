@@ -25,6 +25,8 @@
 (function () {
   'use strict';
 
+  var pad2 = function (n) { return String(n).padStart(2, '0'); };
+
   var params = new URLSearchParams(location.search);
   var ROLE = params.get('role') || 'intern';
   if (['intern', 'staff', 'branch_admin', 'admin'].indexOf(ROLE) < 0) ROLE = 'intern';
@@ -284,7 +286,8 @@
     staffEmailDomain: 'dot-jp.or.jp',
   };
 
-  function handle(path, method, body) {
+  function handle(path, method, body, query) {
+    query = query || '';
     var loggedOut = sessionStorage.getItem(LOGGED_OUT_KEY) === '1';
 
     /* --- 起動 --- */
@@ -359,6 +362,41 @@
 
     /* --- Googleカレンダー連携（未連携として見せる） --- */
     if (path.indexOf('/api/google/status') === 0) return json({ connected: false });
+    if (path.indexOf('/api/auth/google/connect-url') === 0) return json({ url: '#test-google-connect' });
+
+    /* --- 全体予定表（ドットジェイピーの共有カレンダー） ---
+       デザイン確認用なので、設定済みのカレンダーがある状態にして
+       当月にダミーの予定を出す。インターン生には出さない */
+    if (path.indexOf('/api/shared-calendar/status') === 0) {
+      return json({
+        enabled: true, connected: true, configured: true,
+        calendarId: 'dotjp-schedule@group.calendar.google.com',
+        calendarName: 'ドットジェイピー予定表',
+        canManage: ME.role === 'admin', visible: ME.role !== 'intern',
+      });
+    }
+    if (path.indexOf('/api/shared-calendar/options') === 0) {
+      return json({ calendars: [
+        { id: 'dotjp-schedule@group.calendar.google.com', name: 'ドットジェイピー予定表', primary: false },
+        { id: 'test@example.com', name: 'test@example.com', primary: true },
+      ] });
+    }
+    if (path.indexOf('/api/shared-calendar/connect-url') === 0) return json({ url: '#test-shared-connect' });
+    if (path.indexOf('/api/shared-calendar/config') === 0) return json({ ok: true });
+    if (path.indexOf('/api/shared-calendar/disconnect') === 0) return json({ ok: true });
+    if (path.indexOf('/api/shared-calendar/events') === 0) {
+      if (ME.role === 'intern') return json({ events: [], configured: false });
+      // 要求された期間の「月」を読み取り、その月の日付でダミーを組み立てる
+      var minParam = /timeMin=([^&]*)/.exec(query);
+      var base = minParam ? new Date(decodeURIComponent(minParam[1])) : new Date();
+      var yy = base.getFullYear(), mm = base.getMonth();
+      var day = function (d, h, min) { return new Date(yy, mm, d, h, min).toISOString(); };
+      return json({ configured: true, name: 'ドットジェイピー予定表', events: [
+        { id: 'sc1', title: '全体会議', start: day(8, 19, 0), end: day(8, 20, 30), allDay: false, location: 'オンライン' },
+        { id: 'sc2', title: '夏季研修（終日）', start: [yy, pad2(mm + 1), '15'].join('-'), end: [yy, pad2(mm + 1), '16'].join('-'), allDay: true, location: '' },
+        { id: 'sc3', title: '支部長会', start: day(22, 18, 0), end: day(22, 19, 30), allDay: false, location: '本部' },
+      ] });
+    }
 
     /* --- 名簿取り込み（管理者画面） --- */
     if (path.indexOf('/api/admin/directory/status') === 0) return json({ count: 0, updatedAt: null });
@@ -403,13 +441,14 @@
     if (url.indexOf('/api/') < 0) return realFetch(input, opts);
 
     var path = url.split('?')[0];
+    var query = url.split('?')[1] || '';
     var method = (opts.method || 'GET').toUpperCase();
     var body = null;
     if (opts.body) { try { body = JSON.parse(opts.body); } catch (e) { body = null; } }
 
     // 本番の待ち時間に近い見え方にするため、ほんの少しだけ遅らせる
     return new Promise(function (resolve) {
-      setTimeout(function () { resolve(handle(path, method, body)); }, 60);
+      setTimeout(function () { resolve(handle(path, method, body, query)); }, 60);
     });
   };
 
