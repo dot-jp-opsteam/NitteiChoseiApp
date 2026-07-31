@@ -1142,12 +1142,14 @@ const NAV={
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
+    {id:'myinterns',label:'担当一覧',ic:'staff'},
     {id:'requests',label:'依頼',ic:'megaphone'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
+    {id:'myinterns',label:'担当一覧',ic:'staff'},
     {id:'requests',label:'依頼',ic:'megaphone'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
@@ -1200,33 +1202,20 @@ function buildNav(){
       <span class="si">${ic('power')}</span><span class="sl">ログアウト</span></button>`;
 }
 /* インターン生が自分の担当スタッフを選び直す */
+/* インターン生から見た担当スタッフ。見るだけで、変更はできない。
+   本人が付け替えると、スタッフ側が知らないうちに担当から外れてしまうため。
+   会員登録のときだけは自分で選べる */
 function openMyStaffForm(){
-  const staffs=DB.users.filter(u=>(u.role==='staff'||u.role==='branch_admin')&&u.branch_id===ME.branch_id)
-    .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
-  if(!staffs.length){
-    openSheet(`<h3>担当スタッフ</h3>
-      <div class="empty"><div class="ei">${ic('briefcase')}</div><p>あなたの支部に、担当できるスタッフがまだいません。</p></div>`);
-    return;
-  }
-  const opts=`<option value="">決めていない</option>`
-    +staffs.map(s=>`<option value="${s.id}" ${s.id===ME.staff_id?'selected':''}>${esc(s.nickname)}</option>`).join('');
+  const s=findUser(ME.staff_id);
   openSheet(`<h3>担当スタッフ</h3>
-    <p class="page-sub" style="margin-top:0">面談を申請するときの相手として、初めから選ばれます。いつでも変えられます。</p>
-    <label class="fl">担当スタッフ</label>
-    <select id="myStaffSel">${opts}</select>
-    <button class="btn pri block" style="margin-top:18px" onclick="saveMyStaff()">この担当にする</button>`);
-}
-async function saveMyStaff(){
-  const staff_id=document.getElementById('myStaffSel').value||null;
-  try{
-    const res=await api('/api/me/staff',{method:'PATCH',body:JSON.stringify({staff_id})});
-    const data=await res.json().catch(()=>({}));
-    if(!res.ok){toast(data.error||'変更に失敗しました');return;}
-    if(data.user)ME=data.user;
-    APPLY=null;               // 申請画面の初期選択を新しい担当で作り直す
-    closeSheet();render();
-    toast(staff_id?'担当スタッフを変更しました':'担当スタッフを外しました');
-  }catch(e){toast('変更に失敗しました');}
+    ${s?`<div class="row" style="margin-top:12px">
+        <span class="av hexav">${esc(initials(s.nickname))}</span>
+        <span class="rmain"><span class="rt">${esc(s.nickname)}さん</span>
+        <span class="rs">${esc(branchName(s.branch_id))}</span></span></div>
+      <div class="hint" style="margin-top:14px">${ic('bulb')}<span>面談を申請するときの相手として、初めから選ばれます。</span></div>`
+    :`<div class="empty" style="padding:26px"><div class="ei">${ic('staff')}</div>
+        <p>担当スタッフはまだ決まっていません。</p></div>`}
+    <div class="hint" style="margin-top:12px">${ic('alert')}<span>担当スタッフの変更はスタッフ側で行います。変えたいときは担当スタッフか支部の運営にご相談ください。</span></div>`);
 }
 
 /* インターン生に渡す登録リンクを出す。
@@ -1286,6 +1275,7 @@ function render(){
   else if(t==='my')html=viewMyInterviews();
   else if(t==='interviews')html=viewStaffInterviews();
   else if(t==='requests')html=viewRequests();
+  else if(t==='myinterns')html=viewMyInterns();
   else if(t==='avset')html=viewAvailSet();
   else if(t==='branches')html=viewBranches();
   else if(t==='users')html=viewUsers();
@@ -2884,6 +2874,94 @@ function openNotifications(){
   // 開いたら既読に
   const map=getNotiRead();map[ME.id]=nowISO();localStorage.setItem(NOTI_READ_KEY,JSON.stringify(map));
   updateBell();
+}
+
+/* =========================================================
+   担当一覧（スタッフ・支部管理者）
+   ---------------------------------------------------------
+   自分が担当しているインターン生を並べ、担当の引き継ぎと
+   インターン先の変更ができる。
+   引き継げるのは「自分が担当している人」だけ（サーバー側でも同じ判定）。
+   ========================================================= */
+function myInterns(){
+  return DB.users.filter(u=>u.role==='intern'&&u.staff_id===ME.id)
+    .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
+}
+
+function viewMyInterns(){
+  const list=myInterns();
+  if(!list.length){
+    return `<h1 class="page">担当一覧</h1>
+      <p class="page-sub">あなたが担当しているインターン生です。</p>
+      <div class="empty" style="padding:30px"><div class="ei">${ic('staff')}</div>
+        <p>担当しているインターン生はいません。<br>
+        左メニューの「リンク作成」から登録リンクを渡すと、あなたが担当になります。</p></div>`;
+  }
+  const rows=list.map(u=>{
+    const place=findInternship(getProfile(u.id).internship_id);
+    const pend=DB.interviews.filter(i=>i.intern_id===u.id&&i.status==='applied').length;
+    return `<div class="row" style="cursor:pointer" onclick="openInternCard('${u.id}')">
+      <span class="av hexav">${esc(initials(u.nickname))}</span>
+      <span class="rmain"><span class="rt">${esc(u.nickname)}
+        ${pend?`<span class="tag" style="background:var(--warn-soft);color:var(--warn)">申請 ${pend}件</span>`:''}</span>
+      <span class="rs">${place?esc(place.name):'インターン先は未設定'}</span></span>
+      <span class="tile-arrow">${ic('chevron')}</span></div>`;
+  }).join('');
+  return `<h1 class="page">担当一覧</h1>
+    <p class="page-sub">あなたが担当しているインターン生です（${list.length}名）。</p>
+    <div class="card"><div class="rowlist">${rows}</div></div>`;
+}
+
+function openInternCard(id){
+  const u=findUser(id);
+  if(!u)return;
+  const others=DB.users.filter(s=>(s.role==='staff'||s.role==='branch_admin')&&s.branch_id===u.branch_id)
+    .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
+  const staffOpts=`<option value="">担当を外す</option>`
+    +others.map(s=>`<option value="${s.id}" ${s.id===u.staff_id?'selected':''}>${esc(s.nickname)}${s.id===ME.id?'（あなた）':''}</option>`).join('');
+  const place=getProfile(u.id).internship_id||'';
+
+  openSheet(`<h3>${esc(u.nickname)}さん</h3>
+    <dl class="kv" style="margin:12px 0">
+      <dt>所属支部</dt><dd>${esc(branchName(u.branch_id))}</dd>
+      <dt>メール</dt><dd>${esc(u.email||'—')}</dd>
+    </dl>
+    <div class="divider"></div>
+
+    <label class="fl" style="margin-top:14px">担当スタッフ</label>
+    <select id="icStaff">${staffOpts}</select>
+    <p class="fine" style="margin-top:6px">ほかのスタッフに引き継げます。引き継ぐと、この一覧からは消えます。</p>
+
+    <label class="fl">インターン先</label>
+    <select id="icPlace">${internshipOptionsFor(place)}</select>
+
+    <div class="field-err" id="icErr"></div>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveInternCard('${u.id}')">保存する</button>`);
+}
+
+async function saveInternCard(id){
+  const staff_id=document.getElementById('icStaff').value||null;
+  const place=document.getElementById('icPlace').value||null;
+  const err=document.getElementById('icErr');
+  err.classList.remove('show');
+  const before=findUser(id);
+  const staffChanged=staff_id!==(before?before.staff_id||null:null);
+
+  if(staffChanged){
+    try{
+      const res=await api(`/api/staff/interns/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({staff_id})});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok){err.textContent=data.error||'変更に失敗しました';err.classList.add('show');return;}
+    }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');return;}
+  }
+  if(place!==(getProfile(id).internship_id||null)){
+    await mutate(db=>{profileOf(db,id).internship_id=place;});
+  }
+  closeSheet();
+  // 担当が変わるとユーザー一覧の中身も変わるので、サーバーから取り直す
+  if(staffChanged)await refreshUsersAfterAdminChange();
+  render();
+  toast(staffChanged&&staff_id!==ME.id?'担当を引き継ぎました':'保存しました');
 }
 
 /* =========================================================

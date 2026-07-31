@@ -364,6 +364,19 @@
     if (path.indexOf('/api/admin/directory/status') === 0) return json({ count: 0, updatedAt: null });
     if (path.indexOf('/api/admin/directory/search') === 0) return json({ results: [] });
 
+    /* --- 担当スタッフの引き継ぎ（本番と同じく、担当している本人だけ） --- */
+    if (path.indexOf('/api/staff/interns/') === 0) {
+      var internId = decodeURIComponent(path.split('/').pop());
+      var intern = users.filter(function (u) { return u.id === internId; })[0];
+      if (!intern || intern.role !== 'intern') return json({ error: 'インターン生が見つかりません' }, 404);
+      if (ME.role !== 'staff' && ME.role !== 'branch_admin') return json({ error: '権限がありません' }, 403);
+      if (intern.staff_id !== ME.id) {
+        return json({ error: 'あなたが担当しているインターン生ではありません' }, 403);
+      }
+      intern.staff_id = (body && body.staff_id) || null;
+      return json({ ok: true });
+    }
+
     /* --- ユーザーの追加・更新（テストではその場のメモリだけ書き換える） --- */
     if (path.indexOf('/api/admin/users/') === 0) {
       var id = decodeURIComponent(path.split('/').pop());

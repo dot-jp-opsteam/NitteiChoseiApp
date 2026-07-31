@@ -1169,17 +1169,30 @@ app.patch('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, r
 });
 
 /* インターン生が自分の担当スタッフを自分で変える */
-app.patch('/api/me/staff', requireAuth, async (req, res) => {
+/* 担当スタッフの引き継ぎ。
+   変更できるのは、いま担当しているスタッフ本人だけ。
+   インターン生が自分で付け替えると、スタッフ側が把握しないまま
+   担当から外れてしまうため、本人には触らせない（会員登録のときだけ選べる）。 */
+app.patch('/api/staff/interns/:id', requireAuth, async (req, res) => {
   const me = req.authUser;
-  if (me.role !== 'intern') return res.status(403).json({ error: '担当スタッフを持つのはインターン生だけです' });
+  if (me.role !== 'staff' && me.role !== 'branch_admin') {
+    return res.status(403).json({ error: '権限がありません' });
+  }
   try {
-    const staffId = await validStaffIdFor(req.body?.staff_id, me.branch_id);
-    // 指定があったのに該当しない相手なら、黙って外さずエラーで知らせる
+    const target = await findUserById(req.params.id);
+    if (!target || target.role !== 'intern') {
+      return res.status(404).json({ error: 'インターン生が見つかりません' });
+    }
+    if (target.staff_id !== me.id) {
+      return res.status(403).json({ error: 'あなたが担当しているインターン生ではありません' });
+    }
+    // 引き継ぎ先は、同じ支部のスタッフに限る（支部をまたぐ担当を作らない）
+    const staffId = await validStaffIdFor(req.body?.staff_id, target.branch_id);
     if (req.body?.staff_id && !staffId) {
       return res.status(400).json({ error: 'その担当スタッフは選べません' });
     }
-    await client.execute({ sql: 'UPDATE users SET staff_id=? WHERE id=?', args: [staffId, me.id] });
-    res.json({ ok: true, user: toPublicUser(await findUserById(me.id)) });
+    await client.execute({ sql: 'UPDATE users SET staff_id=? WHERE id=?', args: [staffId, target.id] });
+    res.json({ ok: true });
   } catch (e) {
     console.error('担当スタッフの変更に失敗しました', e);
     res.status(500).json({ error: '変更に失敗しました' });
