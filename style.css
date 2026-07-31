@@ -320,6 +320,23 @@
   .slot{font-size:12px;padding:5px 9px;border-radius:8px;background:var(--ok-soft);color:var(--ok-ink);font-weight:600}
   .slot.busy{background:var(--panel2);color:var(--mut);text-decoration:line-through}
 
+  /* ---------- プロフィール ---------- */
+  .profhead{display:flex;align-items:center;gap:14px;margin-top:14px}
+  .profhead .profav{width:52px;height:60px;font-size:20px;overflow:hidden}
+  .profhead b{display:block;font-size:17px;font-weight:800}
+  .profhead small{display:block;font-size:12px;color:var(--mut);margin:2px 0 6px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .swatches{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+  .swatch{width:34px;height:34px;border-radius:999px;cursor:pointer;
+    border:2px solid transparent;box-shadow:0 0 0 1px var(--line) inset;transition:.12s}
+  .swatch:hover{transform:scale(1.08)}
+  .swatch.on{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand) inset}
+  /* 左メニュー下の自分の欄。押せることが分かるように、ボタンらしさを消しつつ反応させる */
+  .sb-me .av,.sb-me-t{border:0;background:none;font-family:inherit;cursor:pointer;
+    padding:0;text-align:left;color:inherit;transition:opacity .15s var(--ease)}
+  .sb-me .av{overflow:hidden}
+  .sb-me .av:hover,.sb-me-t:hover{opacity:.72}
+
   /* ---------- 所属部署のチェックリスト ---------- */
   .chklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:10px}
   .chk{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);

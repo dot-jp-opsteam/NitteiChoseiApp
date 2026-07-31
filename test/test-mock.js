@@ -44,12 +44,19 @@
   }
   var NOW = new Date().toISOString();
 
-  /* ---------- 支部 ---------- */
-  var branches = [
-    { id: 'b1', name: '茨城支部' },
-    { id: 'b2', name: '東京支部' },
-    { id: 'b3', name: '神奈川支部' },
+  /* ---------- 支部（本番と同じ全国37支部） ---------- */
+  var BRANCH_NAMES = [
+    '北海道', '宮城', '米沢', '福島', '栃木',
+    '東京企業', '東京第一', '東京第二', '東京第三', '東京第四',
+    '神奈川', '静岡', '愛知', '三重', '新潟', '石川', '福井',
+    '京都第一', '京都第二', '大阪第一', '大阪第二', '奈良', '兵庫',
+    '岡山', '広島第一', '広島第二', '香川', '山口',
+    '福岡', '北九州', '大分', '長崎',
+    '熊本企業', '熊本第一', '熊本第二', '宮崎', '鹿児島',
   ];
+  var branches = BRANCH_NAMES.map(function (name, i) { return { id: 'b' + (i + 1), name: name }; });
+  // ダミーの登場人物は全員この支部に置く（b5＝栃木）
+  var HOME_BRANCH = 'b5';
 
   /* ---------- 人（架空。実在の人物とは関係ありません） ---------- */
   function user(id, nickname, role, branch_id, staff_id) {
@@ -70,16 +77,16 @@
   }
 
   var users = [
-    user('u_admin', '運営 事務局', 'admin', 'b1'),
-    user('u_badmin', '高橋 美咲', 'branch_admin', 'b1'),
-    user('u_staff1', '東 玲奈', 'staff', 'b1'),
-    user('u_staff2', '佐藤 健', 'staff', 'b1'),
-    user('u_staff3', '中村 陽介', 'staff', 'b1'),
-    user('u_int1', '田中 悠斗', 'intern', 'b1', 'u_staff1'),
-    user('u_int2', '鈴木 彩香', 'intern', 'b1', 'u_staff1'),
-    user('u_int3', '伊藤 大輝', 'intern', 'b1', 'u_staff2'),
-    user('u_int4', '渡辺 芽依', 'intern', 'b1', 'u_staff2'),
-    user('u_int5', '小林 翔太', 'intern', 'b1', null),
+    user('u_admin', '運営 事務局', 'admin', HOME_BRANCH),
+    user('u_badmin', '高橋 美咲', 'branch_admin', HOME_BRANCH),
+    user('u_staff1', '東 玲奈', 'staff', HOME_BRANCH),
+    user('u_staff2', '佐藤 健', 'staff', HOME_BRANCH),
+    user('u_staff3', '中村 陽介', 'staff', HOME_BRANCH),
+    user('u_int1', '田中 悠斗', 'intern', HOME_BRANCH, 'u_staff1'),
+    user('u_int2', '鈴木 彩香', 'intern', HOME_BRANCH, 'u_staff1'),
+    user('u_int3', '伊藤 大輝', 'intern', HOME_BRANCH, 'u_staff2'),
+    user('u_int4', '渡辺 芽依', 'intern', HOME_BRANCH, 'u_staff2'),
+    user('u_int5', '小林 翔太', 'intern', HOME_BRANCH, null),
   ];
 
   // どの人としてログインした状態にするか
@@ -120,21 +127,21 @@
       id: 'ev_1', creator_id: 'u_badmin', title: '7月度 支部定例ミーティング',
       description: '今月の活動報告と来月の予定共有を行います。',
       start_datetime: at(5, 19, 0), end_datetime: at(5, 20, 30),
-      location: 'オンライン', branch_id: 'b1', visibility: 'branch',
+      location: 'オンライン', branch_id: HOME_BRANCH, visibility: 'branch',
       color: '#6aa9f0', meet_url: 'https://meet.google.com/xxx-yyyy-zzz', zoom_url: '',
     },
     {
       id: 'ev_2', creator_id: 'u_staff1', title: '議員インターン 中間報告会',
       description: 'インターン生による中間報告。スタッフは全員参加をお願いします。',
       start_datetime: at(12, 13, 0), end_datetime: at(12, 17, 0),
-      location: '水戸市民会館 中ホール', branch_id: 'b1', visibility: 'branch',
+      location: '宇都宮市文化会館 小ホール', branch_id: HOME_BRANCH, visibility: 'branch',
       color: '#3ddc97', meet_url: '', zoom_url: '',
     },
     {
       id: 'ev_3', creator_id: ME.id, title: '【自分メモ】資料づくり',
       description: '報告会のスライドを仕上げる。',
       start_datetime: at(9, 20, 0), end_datetime: at(9, 22, 0),
-      location: '', branch_id: 'b1', visibility: 'private',
+      location: '', branch_id: HOME_BRANCH, visibility: 'private',
       color: '#a98bf5', meet_url: '', zoom_url: '',
     },
   ];
@@ -172,17 +179,17 @@
 
   /* ---------- 通知 ---------- */
   var notifications = [
-    { id: 'nt_1', type: '面談申請', msg: '鈴木 彩香さんが面談を申請しました', at: at(-1, 9, 40), branch_id: 'b1' },
-    { id: 'nt_2', type: 'イベント作成', msg: '「7月度 支部定例ミーティング」が作成されました', at: at(-3, 11, 0), branch_id: 'b1' },
-    { id: 'nt_3', type: '面談確定', msg: '田中 悠斗さんの面談日程が確定しました', at: at(-2, 21, 30), branch_id: 'b1' },
-    { id: 'nt_4', type: '依頼', msg: '佐藤 健さんから「【デジマ】SNS投稿の担当わけ」が届きました', at: at(0, 11, 30), branch_id: 'b1' },
+    { id: 'nt_1', type: '面談申請', msg: '鈴木 彩香さんが面談を申請しました', at: at(-1, 9, 40), branch_id: HOME_BRANCH },
+    { id: 'nt_2', type: 'イベント作成', msg: '「7月度 支部定例ミーティング」が作成されました', at: at(-3, 11, 0), branch_id: HOME_BRANCH },
+    { id: 'nt_3', type: '面談確定', msg: '田中 悠斗さんの面談日程が確定しました', at: at(-2, 21, 30), branch_id: HOME_BRANCH },
+    { id: 'nt_4', type: '依頼', msg: '佐藤 健さんから「【デジマ】SNS投稿の担当わけ」が届きました', at: at(0, 11, 30), branch_id: HOME_BRANCH },
   ];
 
   /* ---------- インターン先マスタ ---------- */
   var internships = [
-    { id: 'ip_1', name: '髙橋ひろし議員事務所', branch_id: 'b1', created_by: 'u_staff1', created_at: at(-40, 14) },
-    { id: 'ip_2', name: '水戸市議会 森田事務所', branch_id: 'b1', created_by: 'u_staff2', created_at: at(-35, 10) },
-    { id: 'ip_3', name: 'つくば市議会 大西事務所', branch_id: 'b1', created_by: 'u_staff1', created_at: at(-20, 16) },
+    { id: 'ip_1', name: '髙橋ひろし議員事務所', branch_id: HOME_BRANCH, created_by: 'u_staff1', created_at: at(-40, 14) },
+    { id: 'ip_2', name: '宇都宮市議会 森田事務所', branch_id: HOME_BRANCH, created_by: 'u_staff2', created_at: at(-35, 10) },
+    { id: 'ip_3', name: '足利市議会 大西事務所', branch_id: HOME_BRANCH, created_by: 'u_staff1', created_at: at(-20, 16) },
   ];
 
   /* ---------- 所属部署・インターン先の割り当て ---------- */
@@ -201,7 +208,7 @@
   /* ---------- 依頼 ---------- */
   var requests = [
     {
-      id: 'rq_1', sender_id: 'u_badmin', branch_id: 'b1',
+      id: 'rq_1', sender_id: 'u_badmin', branch_id: HOME_BRANCH,
       subject: '来週の定例、資料の準備をお願いします',
       body: 'お疲れ様です。\n7月度の定例ミーティングに向けて、各自の担当分の資料を前日までにご準備ください。\n\n形式は自由です。よろしくお願いします。',
       target_label: '支部の全スタッフ',
@@ -210,7 +217,7 @@
       created_at: at(-3, 9, 20),
     },
     {
-      id: 'rq_2', sender_id: 'u_staff1', branch_id: 'b1',
+      id: 'rq_2', sender_id: 'u_staff1', branch_id: HOME_BRANCH,
       subject: '中間報告会のリハーサル日程について',
       body: 'お疲れ様です。\n中間報告会に向けたリハーサルを来週おこないます。\n参加できる日をこのあとの面談でお知らせください。',
       target_label: '髙橋ひろし議員事務所（インターン先）',
@@ -219,7 +226,7 @@
       created_at: at(-2, 18, 0),
     },
     {
-      id: 'rq_3', sender_id: 'u_staff2', branch_id: 'b1',
+      id: 'rq_3', sender_id: 'u_staff2', branch_id: HOME_BRANCH,
       subject: '【デジマ】SNS投稿の担当わけ',
       body: '今月のSNS投稿の担当を決めたいです。\n希望があれば今週中に連絡してください。',
       target_label: 'デジマ（部署）',
@@ -296,6 +303,15 @@
       sessionStorage.setItem(LOGGED_OUT_KEY, '1');
       return json({ ok: true });
     }
+    /* --- プロフィール（ニックネーム・所属支部）の保存 --- */
+    if (path === '/api/auth/complete-profile') {
+      if (body && body.nickname) ME.nickname = String(body.nickname).trim();
+      if (body && body.branch_id) ME.branch_id = body.branch_id;
+      // users 一覧の中の自分も合わせて書き換える（画面のあちこちがこちらを見ているため）
+      var self = users.filter(function (u) { return u.id === ME.id; })[0];
+      if (self) { self.nickname = ME.nickname; self.branch_id = ME.branch_id; }
+      return json({ ok: true, user: ME });
+    }
     if (path === '/api/auth/me') {
       if (loggedOut) return json({ error: 'ログインしてください', code: 'unauthenticated' }, 401);
       return json({ user: ME });
@@ -352,7 +368,7 @@
       return json({ ok: true, user: target || null });
     }
     if (path === '/api/admin/staff') {
-      var created = user('u_' + uid(), (body && body.nickname) || '新しいスタッフ', (body && body.role) || 'staff', (body && body.branch_id) || 'b1');
+      var created = user('u_' + uid(), (body && body.nickname) || '新しいスタッフ', (body && body.role) || 'staff', (body && body.branch_id) || HOME_BRANCH);
       users.push(created);
       return json({ ok: true, user: created });
     }

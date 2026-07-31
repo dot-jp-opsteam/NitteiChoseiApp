@@ -72,8 +72,8 @@
 
     <div class="sb-foot">
       <div class="sb-me">
-        <span class="av hexav" id="chipAv">–</span>
-        <span class="sb-me-t"><b id="chipName"></b><small id="chipRole"></small></span>
+        <button class="av hexav" id="chipAv" onclick="openMyProfile()" title="プロフィールを開く">–</button>
+        <button class="sb-me-t" onclick="openMyProfile()" title="プロフィールを開く"><b id="chipName"></b><small id="chipRole"></small></button>
         <button class="bell" id="bell" onclick="openNotifications()" aria-label="通知" data-ic="bell"><span class="badge hidden" id="bellBadge">0</span></button>
       </div>
       <div class="sb-links">
@@ -302,7 +302,8 @@ async function api(path,opts={}){
 
 // 初期マスタデータ（支部のみ）。ユーザー・面談等は運用開始時点では空。
 function seed(){
-  const branches=[{id:'b1',name:'茨城支部'},{id:'b2',name:'東京支部'},{id:'b3',name:'神奈川支部'}];
+  // 支部の一覧は STANDARD_BRANCHES（helpers内）にまとめてある
+  const branches=STANDARD_BRANCHES.map((name,i)=>({id:'b'+(i+1),name}));
   return {branches,interviews:[],events:[],event_responses:[],emails:[],availability:{},notifications:[],
     // profiles＝ユーザーごとの追加情報（所属部署・インターン先）。
     // ユーザー表はサーバー側の正規テーブルなので、こちら側の付加情報はここに持つ
@@ -446,6 +447,24 @@ let ME=null; // current user object
 
 function findUser(id){return (DB.users||[]).find(u=>u.id===id);}
 function branchName(id){const b=DB.branches.find(b=>b.id===id);return b?b.name:'—';}
+
+/* ドットジェイピーの支部一覧。おおむね北から南の順に並べている。
+   支部が増えたらここに足して、支部管理の「まとめて登録」を押せば反映される */
+const STANDARD_BRANCHES=[
+  '北海道','宮城','米沢','福島','栃木',
+  '東京企業','東京第一','東京第二','東京第三','東京第四',
+  '神奈川','静岡','愛知','三重','新潟','石川','福井',
+  '京都第一','京都第二','大阪第一','大阪第二','奈良','兵庫',
+  '岡山','広島第一','広島第二','香川','山口',
+  '福岡','北九州','大分','長崎',
+  '熊本企業','熊本第一','熊本第二','宮崎','鹿児島',
+];
+
+/* 運用を始めたころの仮の支部名を、正式な名前に直すための対応表。
+   新しく作り直すのではなく名前だけ変えるのは、支部IDを変えてしまうと
+   その支部に紐づいた予定・面談・依頼が迷子になるため。
+   一度そろえてしまえば出番はないが、消すと古いDBを開いたときに直せなくなる */
+const LEGACY_BRANCH_RENAMES={'茨城支部':'栃木','東京支部':'東京第一','神奈川支部':'神奈川'};
 
 /* ---------- helpers ---------- */
 const ROLE_JP={intern:'インターン生',staff:'スタッフ',branch_admin:'支部管理者',admin:'管理者'};
@@ -993,7 +1012,9 @@ async function logout(){
 
 /* 左メニュー最下部の「誰でログインしているか」 */
 function renderChip(){
-  document.getElementById('chipAv').textContent=initials(ME.nickname);
+  const av=document.getElementById('chipAv');
+  av.innerHTML=avatarInner(ME);
+  av.style.background=avatarBg(ME.id);
   document.getElementById('chipName').textContent=ME.nickname;
   document.getElementById('chipRole').textContent=branchName(ME.branch_id)+' ・ '+ROLE_JP[ME.role];
   updateBell();
@@ -2457,14 +2478,78 @@ async function delBlock(id){
    支部管理（管理者）
    ========================================================= */
 function viewBranches(){
-  // 六角形1つが1支部。編集・削除はタップ後のシートにまとめた
-  const cells=DB.branches.map(b=>{
+  // 支部が数個だったころは六角形で並べていたが、全国分（40近く）になると
+  // 縦に長すぎて探せないため、件数が多いときは一覧表示に切り替える
+  const many=DB.branches.length>8;
+  const legacy=DB.branches.filter(b=>LEGACY_BRANCH_RENAMES[b.name]).length;
+  // 古い名前を直したあとの状態で数える。そうしないと、名前を直せば済むものまで
+  // 「未登録」に数えてしまい、実際に増える件数と食い違う
+  const after=DB.branches.map(b=>LEGACY_BRANCH_RENAMES[b.name]||b.name);
+  const missing=STANDARD_BRANCHES.filter(n=>!after.includes(n)).length;
+
+  const head=`<h1 class="page">支部管理</h1>
+    <p class="page-sub">支部を${many?'選ぶ':'タップする'}と編集・削除ができます。</p>
+    ${(missing||legacy)?`<div class="hint">${ic('bulb')}<span>
+      ${legacy?`古い名前の支部が <b>${legacy}件</b> あります。`:''}
+      ${missing?`未登録の支部が <b>${missing}件</b> あります。`:''}
+      下の「まとめて登録」で一度にそろえられます。</span></div>`:''}`;
+
+  const foot=`<div class="btn-row" style="margin-top:16px">
+      <button class="btn" style="flex:1" onclick="openBranchForm()">＋ 支部を追加</button>
+      <button class="btn pri" style="flex:1" onclick="bulkAddBranches()">標準の支部をまとめて登録</button>
+    </div>`;
+
+  if(!many){
+    const cells=DB.branches.map(b=>{
+      const uc=DB.users.filter(u=>u.branch_id===b.id).length;
+      return hex(`openBranchForm('${b.id}')`,'building',esc(b.name),`ユーザー ${uc}人`);
+    });
+    return head+hexgrid(cells)+foot;
+  }
+  const rows=DB.branches.map(b=>{
     const uc=DB.users.filter(u=>u.branch_id===b.id).length;
-    return hex(`openBranchForm('${b.id}')`,'building',esc(b.name),`ユーザー ${uc}人`);
+    return `<div class="row" style="cursor:pointer" onclick="openBranchForm('${b.id}')">
+      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('building')}</span>
+      <span class="rmain"><span class="rt">${esc(b.name)}</span>
+      <span class="rs">ユーザー ${uc}人</span></span>
+      <span class="tile-arrow">${ic('chevron')}</span></div>`;
+  }).join('');
+  return head+`<div class="card"><div class="rowlist">${rows}</div></div>`+foot;
+}
+
+/* 標準の支部をまとめて登録する。
+   ・古い名前（茨城支部など）は、作り直さずに名前だけ直す
+     ＝支部IDが変わらないので、紐づいた予定・面談・依頼が切れない
+   ・すでにある名前は足さない（何度押しても増えない）
+   ・こちらに無い支部は消さない（手で足した支部を勝手に消さないため） */
+async function bulkAddBranches(){
+  const renames=DB.branches.filter(b=>LEGACY_BRANCH_RENAMES[b.name])
+    .map(b=>({id:b.id,from:b.name,to:LEGACY_BRANCH_RENAMES[b.name]}));
+  // 名前を直したあとの状態で、足りないものを数える
+  const after=DB.branches.map(b=>LEGACY_BRANCH_RENAMES[b.name]||b.name);
+  const adds=STANDARD_BRANCHES.filter(n=>!after.includes(n));
+
+  if(!renames.length&&!adds.length){
+    await alertSheet('登録済みです','標準の支部はすべて登録されています。');
+    return;
+  }
+  const lines=[];
+  if(renames.length)lines.push('名前を直す：\n'+renames.map(r=>`　${r.from} → ${r.to}`).join('\n'));
+  if(adds.length)lines.push(`新しく追加する：${adds.length}件\n　${adds.join('、')}`);
+  if(!await confirmSheet('標準の支部をまとめて登録',lines.join('\n\n'),'実行する',false))return;
+
+  const ok=await mutate(db=>{
+    db.branches=db.branches||[];
+    renames.forEach(r=>{const b=db.branches.find(x=>x.id===r.id);if(b)b.name=r.to;});
+    const have=db.branches.map(b=>b.name);
+    STANDARD_BRANCHES.forEach(n=>{
+      if(!have.includes(n)){db.branches.push({id:'b_'+uid(),name:n});have.push(n);}
+    });
   });
-  cells.push(hex('openBranchForm()','＋','支部を追加','新しい支部をつくる'));
-  return `<h1 class="page">支部管理</h1><p class="page-sub">支部をタップすると編集・削除ができます。</p>
-    ${hexgrid(cells)}`;
+  if(!ok)return;
+  LOGIN_BRANCHES=DB.branches;   // ログイン画面・初回設定の選択肢にも反映する
+  go('branches');
+  toast(`支部をそろえました（名前の変更${renames.length}件・追加${adds.length}件）`);
 }
 function openBranchForm(id){
   const b=id?DB.branches.find(x=>x.id===id):null;
@@ -2799,6 +2884,118 @@ function openNotifications(){
   // 開いたら既読に
   const map=getNotiRead();map[ME.id]=nowISO();localStorage.setItem(NOTI_READ_KEY,JSON.stringify(map));
   updateBell();
+}
+
+/* =========================================================
+   プロフィール
+   ---------------------------------------------------------
+   左メニュー下の自分の名前・アイコンを押すと開く。
+   ニックネームと所属支部は、初回設定と同じ /api/auth/complete-profile で
+   保存する（自分自身しか書き換えられないことをサーバー側が保証している）。
+   アイコンの色は見た目だけの設定なので、DB.profiles に置いている。
+   ========================================================= */
+/* アイコンの背景に使える色。文字が読めるよう、どれも淡い色にしている */
+const AVATAR_COLORS=[
+  {v:'brand', c:'var(--brand-soft)', n:'既定'},
+  {v:'blue',  c:'#dbeafe', n:'ブルー'},
+  {v:'green', c:'#d7f5e3', n:'グリーン'},
+  {v:'purple',c:'#e9e0fd', n:'パープル'},
+  {v:'pink',  c:'#fcdfec', n:'ピンク'},
+  {v:'orange',c:'#fde8cf', n:'オレンジ'},
+  {v:'gray',  c:'#e3e8ee', n:'グレー'},
+];
+function avatarColor(userId){
+  const v=getProfile(userId).avatar_color;
+  return AVATAR_COLORS.find(c=>c.v===v)||AVATAR_COLORS[0];
+}
+function avatarBg(userId){return avatarColor(userId).c;}
+/* Googleでログインした人は写真を持っていることがあるので、あれば使う。
+   読み込めなかったときは頭文字に戻す（onerror） */
+function avatarInner(u){
+  if(u&&u.avatar_url){
+    return `<img src="${esc(u.avatar_url)}" alt="" referrerpolicy="no-referrer"
+      style="width:100%;height:100%;object-fit:cover"
+      onerror="this.replaceWith(document.createTextNode('${esc(initials(u.nickname))}'))">`;
+  }
+  return esc(initials(u?u.nickname:''));
+}
+
+function openMyProfile(){
+  const cur=avatarColor(ME.id).v;
+  const swatches=AVATAR_COLORS.map(c=>`<button type="button" class="swatch ${c.v===cur?'on':''}"
+    style="background:${c.c}" title="${c.n}" onclick="pickAvatarColor('${c.v}')"></button>`).join('');
+
+  // すでにある設定は作り直さず、ここから開けるようにするだけにしている
+  const links=[
+    ME.role==='intern'?['staff','担当スタッフ','openMyStaffForm()']:null,
+    ME.role==='intern'?['workplace','インターン先','openMyInternshipForm()']:null,
+    canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
+    canSendRequest()?['workplace','インターン先の一覧','openInternshipMaster()']:null,
+    ['key','パスワードを変更','openPasswordChange()'],
+    ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
+  ].filter(Boolean).map(([icon,label,act])=>`<div class="row" style="cursor:pointer" onclick="${act}">
+      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic(icon)}</span>
+      <span class="rmain"><span class="rt">${label}</span></span>
+      <span class="tile-arrow">${ic('chevron')}</span></div>`).join('');
+
+  openSheet(`<h3>プロフィール</h3>
+    <div class="profhead">
+      <span class="av hexav profav" id="profAv" style="background:${avatarBg(ME.id)}">${avatarInner(ME)}</span>
+      <span><b>${esc(ME.nickname)}</b><small>${esc(ME.email||'')}</small>
+      <span class="rolebadge ${ROLE_CLS[ME.role]}">${ROLE_JP[ME.role]}</span></span>
+    </div>
+
+    <label class="fl" style="margin-top:18px">ニックネーム<span class="req">*</span></label>
+    <input id="profNick" autocomplete="off" value="${esc(ME.nickname||'')}">
+
+    <label class="fl">所属支部<span class="req">*</span></label>
+    <select id="profBranch">${DB.branches.map(b=>`<option value="${b.id}" ${b.id===ME.branch_id?'selected':''}>${esc(b.name)}</option>`).join('')}</select>
+    <p class="fine" style="margin-top:6px">支部を変えると、見える面談・予定・依頼もその支部のものに切り替わります。</p>
+
+    <label class="fl">アイコンの色</label>
+    <div class="swatches">${swatches}</div>
+    ${ME.avatar_url?`<p class="fine" style="margin-top:6px">Googleの写真を使っています。色は写真が読み込めないときに使われます。</p>`:''}
+
+    <div class="field-err" id="profErr"></div>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveMyProfile()">保存する</button>
+
+    <div class="divider" style="margin-top:22px"></div>
+    <p class="fl" style="margin-top:14px">ほかの設定</p>
+    <div class="card" style="margin-top:8px"><div class="rowlist">${links}</div></div>`);
+}
+
+/* 色は押した瞬間に見た目へ反映する（保存は「保存する」を押したとき） */
+let PROF_COLOR=null;
+function pickAvatarColor(v){
+  PROF_COLOR=v;
+  document.querySelectorAll('.swatch').forEach(el=>el.classList.remove('on'));
+  const c=AVATAR_COLORS.find(x=>x.v===v)||AVATAR_COLORS[0];
+  const btn=[...document.querySelectorAll('.swatch')].find(el=>el.style.background===c.c||el.title===c.n);
+  if(btn)btn.classList.add('on');
+  const av=document.getElementById('profAv');
+  if(av)av.style.background=c.c;
+}
+
+async function saveMyProfile(){
+  const nickname=document.getElementById('profNick').value.trim();
+  const branch_id=document.getElementById('profBranch').value;
+  const err=document.getElementById('profErr');
+  err.classList.remove('show');
+  if(!nickname){err.textContent='ニックネームを入力してください';err.classList.add('show');return;}
+  if(!branch_id){err.textContent='所属支部を選択してください';err.classList.add('show');return;}
+  try{
+    const res=await api('/api/auth/complete-profile',{method:'POST',body:JSON.stringify({nickname,branch_id})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){err.textContent=data.error||'保存に失敗しました';err.classList.add('show');return;}
+    if(data.user)ME=data.user;
+  }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');return;}
+
+  if(PROF_COLOR&&PROF_COLOR!==avatarColor(ME.id).v){
+    await mutate(db=>{profileOf(db,ME.id).avatar_color=PROF_COLOR;});
+  }
+  PROF_COLOR=null;
+  closeSheet();renderChip();render();
+  toast('プロフィールを保存しました');
 }
 
 /* =========================================================
