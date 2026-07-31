@@ -967,9 +967,20 @@ app.post('/api/auth/complete-profile', requireAuth, async (req, res) => {
     const obj = await readDB();
     const exists = (obj?.branches || []).some((b) => b.id === branch_id);
     if (!exists) return res.status(400).json({ error: '選択された支部が存在しません' });
+
+    /* インターン生の支部は、いちど決まったら本人には変えさせない。
+       担当スタッフは同じ支部の人しか選べない作りなので（validStaffIdFor）、
+       支部だけを動かせると担当と食い違ってしまう。
+       初回設定（まだ支部が無い状態）だけは通す */
+    const me = req.authUser;
+    const keepBranch = me.role === 'intern' && me.branch_id;
+    const nextBranch = keepBranch ? me.branch_id : branch_id;
+    if (keepBranch && branch_id !== me.branch_id) {
+      return res.status(403).json({ error: '支部の変更は担当スタッフにご依頼ください' });
+    }
     await client.execute({
       sql: 'UPDATE users SET nickname = ?, branch_id = ? WHERE id = ?',
-      args: [String(nickname).trim(), branch_id, req.authUser.id],
+      args: [String(nickname).trim(), nextBranch, req.authUser.id],
     });
     res.json({ ok: true, user: toPublicUser(await findUserById(req.authUser.id)) });
   } catch (e) {

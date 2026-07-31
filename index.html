@@ -2920,16 +2920,18 @@ function avatarInner(u){
   return esc(initials(u?u.nickname:''));
 }
 
-function openMyProfile(){
-  const cur=avatarColor(ME.id).v;
-  const swatches=AVATAR_COLORS.map(c=>`<button type="button" class="swatch ${c.v===cur?'on':''}"
-    style="background:${c.c}" title="${c.n}" onclick="pickAvatarColor('${c.v}')"></button>`).join('');
+/* 支部を自分で変えられるのはスタッフ以上。
+   インターン生の支部は担当スタッフと同じでなければならず（担当は同支部の人しか
+   選べない）、本人が動かすと担当と食い違ってしまうため。
+   サーバー側でも同じ判定をしている（/api/auth/complete-profile） */
+function canChangeMyBranch(u){u=u||ME;return !!u&&u.role!=='intern';}
 
-  // すでにある設定は作り直さず、ここから開けるようにするだけにしている
-  const links=[
+/* プロフィールの下に並べる「ほかの設定」。
+   すでにある画面を作り直さず、ここから開けるようにしているだけ */
+function profileLinks(){
+  return [
     ME.role==='intern'?['staff','担当スタッフ','openMyStaffForm()']:null,
     ME.role==='intern'?['workplace','インターン先','openMyInternshipForm()']:null,
-    canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
     canSendRequest()?['workplace','インターン先の一覧','openInternshipMaster()']:null,
     ['key','パスワードを変更','openPasswordChange()'],
     ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
@@ -2937,31 +2939,78 @@ function openMyProfile(){
       <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic(icon)}</span>
       <span class="rmain"><span class="rt">${label}</span></span>
       <span class="tile-arrow">${ic('chevron')}</span></div>`).join('');
-
-  openSheet(`<h3>プロフィール</h3>
-    <div class="profhead">
+}
+function profileHead(){
+  return `<div class="profhead">
       <span class="av hexav profav" id="profAv" style="background:${avatarBg(ME.id)}">${avatarInner(ME)}</span>
       <span><b>${esc(ME.nickname)}</b><small>${esc(ME.email||'')}</small>
       <span class="rolebadge ${ROLE_CLS[ME.role]}">${ROLE_JP[ME.role]}</span></span>
-    </div>
+    </div>`;
+}
 
-    <label class="fl" style="margin-top:18px">ニックネーム<span class="req">*</span></label>
-    <input id="profNick" autocomplete="off" value="${esc(ME.nickname||'')}">
+/* ---------- 見るだけの画面 ---------- */
+function openMyProfile(){
+  PROF_COLOR=null;
+  // 部署はスタッフだけのものなので、インターン生にはインターン先を出す
+  const third=ME.role==='intern'
+    ? ['インターン先',(findInternship(getProfile(ME.id).internship_id)||{}).name||'未設定']
+    : ['所属部署',getDepts(ME.id).join('・')||'未設定'];
 
+  openSheet(`<h3>プロフィール</h3>
+    ${profileHead()}
+    <dl class="kv" style="margin:18px 0">
+      <dt>名前</dt><dd>${esc(ME.nickname||'—')}</dd>
+      <dt>所属支部</dt><dd>${esc(branchName(ME.branch_id))}</dd>
+      <dt>${third[0]}</dt><dd>${esc(third[1])}</dd>
+    </dl>
+    <button class="btn pri block" onclick="openMyProfileEdit()">${ic('edit')}プロフィールを編集</button>
+
+    <div class="divider" style="margin-top:22px"></div>
+    <p class="fl" style="margin-top:14px">ほかの設定</p>
+    <div class="card" style="margin-top:8px"><div class="rowlist">${profileLinks()}</div></div>`);
+}
+
+/* ---------- 編集する画面 ---------- */
+function openMyProfileEdit(){
+  const cur=PROF_COLOR||avatarColor(ME.id).v;
+  const swatches=AVATAR_COLORS.map(c=>`<button type="button" class="swatch ${c.v===cur?'on':''}"
+    style="background:${c.c}" title="${c.n}" onclick="pickAvatarColor('${c.v}')"></button>`).join('');
+
+  // 部署はスタッフだけの項目。インターン生には出さず、インターン先の変更へ案内する
+  const deptBlock=canSendRequest()?`
+    <label class="fl">所属部署</label>
+    <div class="chklist">${DEPARTMENTS.map(d=>`<label class="chk">
+      <input type="checkbox" name="profDept" value="${esc(d)}" ${getDepts(ME.id).includes(d)?'checked':''}>
+      <span>${esc(d)}</span></label>`).join('')}</div>
+    <p class="fine" style="margin-top:6px">いくつでも選べます。依頼を「部署あて」に出すときの絞り込みに使われます。</p>`:'';
+
+  const branchBlock=canChangeMyBranch()?`
     <label class="fl">所属支部<span class="req">*</span></label>
     <select id="profBranch">${DB.branches.map(b=>`<option value="${b.id}" ${b.id===ME.branch_id?'selected':''}>${esc(b.name)}</option>`).join('')}</select>
-    <p class="fine" style="margin-top:6px">支部を変えると、見える面談・予定・依頼もその支部のものに切り替わります。</p>
+    <p class="fine" style="margin-top:6px">支部を変えると、見える面談・予定・依頼もその支部のものに切り替わります。</p>`
+  :`
+    <label class="fl">所属支部</label>
+    <input value="${esc(branchName(ME.branch_id))}" disabled>
+    <p class="fine" style="margin-top:6px">支部は担当スタッフと同じになります。変えたいときは担当スタッフにご相談ください。</p>`;
+
+  openSheet(`<h3>プロフィールを編集</h3>
+    ${profileHead()}
+
+    <label class="fl" style="margin-top:18px">名前<span class="req">*</span></label>
+    <input id="profNick" autocomplete="off" value="${esc(ME.nickname||'')}">
+
+    ${branchBlock}
+    ${deptBlock}
 
     <label class="fl">アイコンの色</label>
     <div class="swatches">${swatches}</div>
     ${ME.avatar_url?`<p class="fine" style="margin-top:6px">Googleの写真を使っています。色は写真が読み込めないときに使われます。</p>`:''}
 
     <div class="field-err" id="profErr"></div>
-    <button class="btn pri block" style="margin-top:18px" onclick="saveMyProfile()">保存する</button>
-
-    <div class="divider" style="margin-top:22px"></div>
-    <p class="fl" style="margin-top:14px">ほかの設定</p>
-    <div class="card" style="margin-top:8px"><div class="rowlist">${links}</div></div>`);
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn" style="flex:1" onclick="openMyProfile()">キャンセル</button>
+      <button class="btn pri" style="flex:1" onclick="saveMyProfile()">保存する</button>
+    </div>`);
 }
 
 /* 色は押した瞬間に見た目へ反映する（保存は「保存する」を押したとき） */
@@ -2978,11 +3027,18 @@ function pickAvatarColor(v){
 
 async function saveMyProfile(){
   const nickname=document.getElementById('profNick').value.trim();
-  const branch_id=document.getElementById('profBranch').value;
+  const sel=document.getElementById('profBranch');
+  // インターン生は支部の欄が出ないので、今の支部をそのまま送る
+  const branch_id=sel?sel.value:ME.branch_id;
   const err=document.getElementById('profErr');
   err.classList.remove('show');
-  if(!nickname){err.textContent='ニックネームを入力してください';err.classList.add('show');return;}
+  if(!nickname){err.textContent='名前を入力してください';err.classList.add('show');return;}
   if(!branch_id){err.textContent='所属支部を選択してください';err.classList.add('show');return;}
+
+  // 部署は画面が閉じる前に控えておく（サーバーの応答を待つ間に消えるため）
+  const deptEls=document.querySelectorAll('input[name=profDept]');
+  const departments=deptEls.length?[...deptEls].filter(c=>c.checked).map(c=>c.value):null;
+
   try{
     const res=await api('/api/auth/complete-profile',{method:'POST',body:JSON.stringify({nickname,branch_id})});
     const data=await res.json().catch(()=>({}));
@@ -2990,11 +3046,19 @@ async function saveMyProfile(){
     if(data.user)ME=data.user;
   }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');return;}
 
-  if(PROF_COLOR&&PROF_COLOR!==avatarColor(ME.id).v){
-    await mutate(db=>{profileOf(db,ME.id).avatar_color=PROF_COLOR;});
+  // 部署とアイコンの色はDB側に持っているので、まとめて1回で保存する
+  const colorChanged=PROF_COLOR&&PROF_COLOR!==avatarColor(ME.id).v;
+  const deptChanged=departments&&departments.join()!==getDepts(ME.id).join();
+  if(colorChanged||deptChanged){
+    await mutate(db=>{
+      const p=profileOf(db,ME.id);
+      if(colorChanged)p.avatar_color=PROF_COLOR;
+      if(deptChanged)p.departments=departments;
+    });
   }
   PROF_COLOR=null;
-  closeSheet();renderChip();render();
+  renderChip();render();
+  openMyProfile();          // 保存したら、見るだけの画面に戻る
   toast('プロフィールを保存しました');
 }
 

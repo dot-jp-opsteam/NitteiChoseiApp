@@ -305,6 +305,10 @@
     }
     /* --- プロフィール（ニックネーム・所属支部）の保存 --- */
     if (path === '/api/auth/complete-profile') {
+      // 本番と同じく、インターン生の支部変更は断る
+      if (ME.role === 'intern' && ME.branch_id && body && body.branch_id && body.branch_id !== ME.branch_id) {
+        return json({ error: '支部の変更は担当スタッフにご依頼ください' }, 403);
+      }
       if (body && body.nickname) ME.nickname = String(body.nickname).trim();
       if (body && body.branch_id) ME.branch_id = body.branch_id;
       // users 一覧の中の自分も合わせて書き換える（画面のあちこちがこちらを見ているため）
