@@ -363,6 +363,7 @@ async function putDB(){
   return api('/api/db',{method:'PUT',body:JSON.stringify({...body,_baseUpdatedAt:DB.updatedAt})});
 }
 async function mutate(fn){
+  NOTI_QUEUE=[];              // やり直しのたびに積み直すので、始める前に空にする
   fn(DB);
   sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
   let conflicted=false;
@@ -373,25 +374,31 @@ async function mutate(fn){
         DB.updatedAt=(await res.json()).updatedAt;
         sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
         setSaveError(null);
+        await flushNotifications();   // 保存できてから通知を送る
+        sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
         if(conflicted&&ME)render(); // 取り込んだ他の人の変更を画面に出す
         return true;
       }
       if(res.status!==409){
         const d=await res.json().catch(()=>({}));
         setSaveError(d.error||'変更を保存できませんでした。');
+        NOTI_QUEUE=[];          // 保存できていないので通知も送らない
         return false;
       }
       conflicted=true;
       DB=await apiGetDB();      // 最新を取り込んで
+      NOTI_QUEUE=[];            // やり直しで積み直されるため、前回の分は捨てる
       fn(DB);                   // 同じ操作をやり直す
       sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
     }catch(e){
       console.warn('保存に失敗しました',e);
       setSaveError('変更を保存できていません。通信状況をご確認ください。');
+      NOTI_QUEUE=[];
       return false;
     }
   }
   setSaveError('他の方の操作と重なって保存できませんでした。もう一度お試しください。');
+  NOTI_QUEUE=[];
   return false;
 }
 
@@ -2288,14 +2295,29 @@ function agendaView(list,ivs,shared,y,m){
 function setCalMode(mode){calMode=mode;render();}
 function calShift(delta){let m=calYM.m+delta,y=calYM.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}calYM={y,m};calSel=null;render();}
 function calSelect(key){calSel=(key&&key!==calSel)?key:null;render();}
+/* 出欠の回答は専用APIで送る。DB全体を保存し直す方式だと、
+   案内の直後に全員が一斉に押したときに大半が保存できなくなるため */
 async function vote(evId,resp){
-  const ok=await mutate(db=>{
-    const r=db.event_responses.find(x=>x.event_id===evId&&x.user_id===ME.id);
-    if(!r){db.event_responses.push({id:uid(),event_id:evId,user_id:ME.id,response:resp});return;}
-    // 同じものをもう一度押したら取り消し
-    if(r.response===resp)db.event_responses=db.event_responses.filter(x=>x!==r);
-    else r.response=resp;
-  });
+  let ok=false;
+  try{
+    const res=await api(`/api/events/${encodeURIComponent(evId)}/response`,
+      {method:'PUT',body:JSON.stringify({response:resp})});
+    if(res.ok){
+      const {response}=await res.json();
+      // 手元の一覧も同じ形に合わせる（画面をすぐ描き替えるため）
+      DB.event_responses=(DB.event_responses||[]).filter(x=>!(x.event_id===evId&&x.user_id===ME.id));
+      if(response)DB.event_responses.push(response);
+      sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+      setSaveError(null);
+      ok=true;
+    }else{
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'回答を保存できませんでした。');
+    }
+  }catch(e){
+    console.warn('出欠の保存に失敗しました',e);
+    setSaveError('回答を保存できていません。通信状況をご確認ください。');
+  }
   render();
   if(ok)toast('回答を記録しました');
 }
@@ -2442,10 +2464,11 @@ async function saveEvent(id){
 }
 async function deleteEvent(id){
   if(!await confirmSheet('イベントを削除','このイベントと、これまでの出欠回答をすべて削除します。元に戻せません。','削除する'))return;
+  // 出欠回答は専用テーブルにあるので、サーバー側がイベントの削除に合わせて片付ける
   const ok=await mutate(db=>{
     db.events=db.events.filter(e=>e.id!==id);
-    db.event_responses=db.event_responses.filter(r=>r.event_id!==id);
   });
+  if(ok)DB.event_responses=(DB.event_responses||[]).filter(r=>r.event_id!==id);
   render();
   if(ok)toast('イベントを削除しました');
 }
@@ -3102,12 +3125,28 @@ async function deleteUser(id){
 /* =========================================================
    通知ログ（アプリ内通知の簡易実装）
    ========================================================= */
-/* 通知を1件積む。単体では保存せず、通知の原因になった変更と同じ mutate() の中で呼ぶ。
-   別々に保存すると、保存が2回に分かれて競合の機会が増えるため。
-   branch_id は、他支部の通知が見えないようサーバー側で絞り込むために持たせる */
+/* 通知を1件積む。通知はサーバー側の専用テーブルに入るので、ここでは控えておき、
+   mutate() の保存が成功したあとにまとめて送る。
+   mutate() の中身は競合したときにやり直されることがあるため、
+   その場で送ると同じ通知が二重に記録されてしまう。
+   支部はサーバー側で本人の所属に固定される */
+let NOTI_QUEUE=[];
 function pushNotification(db,type,msg){
-  db.notifications=db.notifications||[];
-  db.notifications.push({id:uid(),type,msg,at:nowISO(),branch_id:ME.branch_id||null});
+  NOTI_QUEUE.push({type,msg});
+}
+/* 控えておいた通知をまとめて送る。
+   通知が届かなくても本筋の保存は成功しているので、
+   失敗しても画面にはエラーを出さず、記録だけ残して先へ進む */
+async function flushNotifications(){
+  if(!NOTI_QUEUE.length)return;
+  const items=NOTI_QUEUE.splice(0,NOTI_QUEUE.length);
+  try{
+    const res=await api('/api/notifications',{method:'POST',body:JSON.stringify({items})});
+    if(!res.ok)return;
+    // サーバーが実際に積んだ内容をそのまま手元にも足す
+    const {added}=await res.json();
+    DB.notifications=[...(DB.notifications||[]),...(added||[])];
+  }catch(e){console.warn('通知を記録できませんでした',e);}
 }
 const NOTI_READ_KEY='ops_notiread_v1';
 function getNotiRead(){try{return JSON.parse(localStorage.getItem(NOTI_READ_KEY))||{};}catch(e){return {};}}
@@ -3687,14 +3726,30 @@ function openRequestDetail(id){
     ${status}`);
 }
 
+/* 「確認しました」は専用APIで送る。ここは支部の全員に配った依頼を
+   全員が押す場所なので、DB全体を保存し直す方式では耐えられない。
+   サーバー側は1人1行を足すだけなので、何人が同時に押しても衝突しない */
 async function confirmRequest(id){
-  const ok=await mutate(db=>{
-    const r=(db.requests||[]).find(x=>x.id===id);
-    if(!r)return;
-    r.read_by=r.read_by||[];
-    if(!r.read_by.some(x=>x.user_id===ME.id))r.read_by.push({user_id:ME.id,at:nowISO()});
-  });
-  if(!ok)return;
+  try{
+    const res=await api(`/api/requests/${encodeURIComponent(id)}/read`,{method:'POST'});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'確認を保存できませんでした。');
+      return;
+    }
+    const {read}=await res.json();
+    const r=(DB.requests||[]).find(x=>x.id===id);
+    if(r){
+      r.read_by=r.read_by||[];
+      if(!r.read_by.some(x=>x.user_id===ME.id))r.read_by.push(read);
+    }
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('確認の保存に失敗しました',e);
+    setSaveError('確認を保存できていません。通信状況をご確認ください。');
+    return;
+  }
   closeSheet();render();
   toast('確認しました');
 }
@@ -3860,17 +3915,29 @@ async function submitRequest(){
   if(!subject){err.textContent='件名を入力してください';err.classList.add('show');return;}
 
   btn.disabled=true;btn.textContent='送信中…';
-  const req={id:'rq_'+uid(),sender_id:ME.id,branch_id:ME.branch_id,
-    subject,body,
-    // 条件ではなく、送った時点の宛先を固定して持つ（上のコメント参照）
-    target_label:label,recipient_ids:ids,
-    read_by:[],created_at:nowISO()};
-  const ok=await mutate(db=>{
-    db.requests=db.requests||[];
-    db.requests.push(req);
-    pushNotification(db,'依頼',`${ME.nickname}さんから「${subject}」が届きました`);
-  });
-  if(!ok){btn.disabled=false;btn.textContent='この内容で送る';return;}
+  /* 依頼は専用APIで作る。あて先は送った時点で固定される（上のコメント参照）。
+     受け取った人への通知はサーバー側で一緒に積まれる */
+  try{
+    const res=await api('/api/requests',{method:'POST',
+      body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids})});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      err.textContent=d.error||'送信できませんでした';err.classList.add('show');
+      btn.disabled=false;btn.textContent='この内容で送る';
+      return;
+    }
+    const {request,notification}=await res.json();
+    DB.requests=[...(DB.requests||[]),request];
+    // あて先への通知はサーバー側で一緒に積まれるので、手元の一覧にも反映する
+    if(notification)DB.notifications=[...(DB.notifications||[]),notification];
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('依頼の送信に失敗しました',e);
+    err.textContent='送信できませんでした。通信状況をご確認ください';err.classList.add('show');
+    btn.disabled=false;btn.textContent='この内容で送る';
+    return;
+  }
   REQFORM=null;REQTAB='sent';
   closeSheet();updateBell();render();
   toast(`${ids.length}名に送りました`);

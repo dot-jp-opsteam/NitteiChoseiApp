@@ -334,6 +334,68 @@
       return json({ updatedAt: touch() });
     }
 
+    /* --- 依頼・出欠・通知（本番では専用テーブルを持つ専用API） --- */
+    if (path === '/api/requests' && method === 'POST') {
+      var rq = {
+        id: 'rq_' + uid(), sender_id: ME.id, branch_id: ME.branch_id,
+        subject: (body && body.subject) || '', body: (body && body.body) || '',
+        target_label: (body && body.target_label) || null,
+        recipient_ids: (body && body.recipient_ids) || [],
+        read_by: [], created_at: new Date().toISOString(),
+      };
+      STORE.requests = STORE.requests || [];
+      STORE.requests.push(rq);
+      var noti = {
+        id: 'nt_' + uid(), type: '依頼', branch_id: ME.branch_id,
+        msg: ME.nickname + 'さんから「' + rq.subject + '」が届きました', at: new Date().toISOString(),
+      };
+      STORE.notifications = STORE.notifications || [];
+      STORE.notifications.push(noti);
+      touch();
+      return json({ ok: true, request: rq, notification: noti });
+    }
+    var readMatch = /^\/api\/requests\/([^/]+)\/read$/.exec(path);
+    if (readMatch && method === 'POST') {
+      var target = (STORE.requests || []).filter(function (r) { return r.id === readMatch[1]; })[0];
+      if (!target) return json({ error: '依頼が見つかりません' }, 404);
+      var at = new Date().toISOString();
+      target.read_by = target.read_by || [];
+      if (!target.read_by.some(function (x) { return x.user_id === ME.id; })) {
+        target.read_by.push({ user_id: ME.id, at: at });
+      }
+      touch();
+      return json({ ok: true, read: { user_id: ME.id, at: at } });
+    }
+    var voteMatch = /^\/api\/events\/([^/]+)\/response$/.exec(path);
+    if (voteMatch && method === 'PUT') {
+      STORE.event_responses = STORE.event_responses || [];
+      var prev = STORE.event_responses.filter(function (r) {
+        return r.event_id === voteMatch[1] && r.user_id === ME.id;
+      })[0];
+      STORE.event_responses = STORE.event_responses.filter(function (r) { return r !== prev; });
+      // 同じ答えをもう一度押したら取り消し
+      if (prev && prev.response === (body && body.response)) { touch(); return json({ ok: true, response: null }); }
+      var saved = {
+        id: (prev && prev.id) || 'er_' + uid(), event_id: voteMatch[1],
+        user_id: ME.id, response: body && body.response,
+      };
+      STORE.event_responses.push(saved);
+      touch();
+      return json({ ok: true, response: saved });
+    }
+    if (path === '/api/notifications' && method === 'POST') {
+      STORE.notifications = STORE.notifications || [];
+      var added = ((body && body.items) || []).map(function (it) {
+        return {
+          id: 'nt_' + uid(), type: it.type, msg: it.msg,
+          branch_id: ME.branch_id, at: new Date().toISOString(),
+        };
+      });
+      added.forEach(function (n) { STORE.notifications.push(n); });
+      touch();
+      return json({ ok: true, added: added });
+    }
+
     /* --- メール送信（本当には送らず、履歴にだけ残す） --- */
     if (path === '/api/mail/send') {
       STORE.emails = STORE.emails || [];

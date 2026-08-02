@@ -345,12 +345,19 @@ async function listNotificationsFor(user) {
   return rs.rows.map((r) => ({ id: r.id, type: r.type, msg: r.msg, branch_id: r.branch_id, at: r.at }));
 }
 
-/* 通知は依頼の送信などに付随して積まれる。専用APIの中から呼ぶ */
+/* 通知は依頼の送信などに付随して積まれる。専用APIの中から呼ぶ。
+   画面側が積まれた通知をその場で表示できるよう、作った1件を返す */
 async function insertNotification({ type, msg, branch_id }) {
+  const row = {
+    id: 'nt_' + crypto.randomBytes(6).toString('hex'),
+    type: type || null, msg: msg || '', branch_id: branch_id || null,
+    at: new Date().toISOString(),
+  };
   await client.execute({
     sql: 'INSERT INTO notifications (id, type, msg, branch_id, at) VALUES (?,?,?,?,?)',
-    args: ['nt_' + crypto.randomBytes(6).toString('hex'), type || null, msg || '', branch_id || null, new Date().toISOString()],
+    args: [row.id, row.type, row.msg, row.branch_id, row.at],
   });
+  return row;
 }
 
 async function writeDB(obj) {
@@ -1814,11 +1821,11 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       args: [request.id, request.sender_id, request.branch_id, request.subject,
         request.body, request.target_label, JSON.stringify(ids), request.created_at],
     });
-    await insertNotification({
+    const notification = await insertNotification({
       type: '依頼', branch_id: actor.branch_id || null,
       msg: `${actor.nickname}さんから「${request.subject}」が届きました`,
     });
-    res.json({ ok: true, request });
+    res.json({ ok: true, request, notification });
   } catch (e) {
     console.error('依頼の送信に失敗しました', e);
     res.status(500).json({ error: '送信に失敗しました' });
@@ -1846,6 +1853,26 @@ app.post('/api/requests/:id/read', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('依頼の確認に失敗しました', e);
     res.status(500).json({ error: '確認できませんでした' });
+  }
+});
+
+/* 通知を積む。面談の申請・確定やイベント作成に付随して呼ばれる。
+   支部は本人の所属で固定する（他支部あてに流し込めないようにするため） */
+app.post('/api/notifications', requireAuth, async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return res.json({ ok: true, added: 0 });
+  // 一度にたくさん送られても困るので上限を設ける
+  if (items.length > 20) return res.status(400).json({ error: '一度に積める通知が多すぎます' });
+  try {
+    const added = [];
+    for (const it of items) {
+      if (!it || !it.msg) continue;
+      added.push(await insertNotification({ type: it.type, msg: String(it.msg), branch_id: req.authUser.branch_id || null }));
+    }
+    res.json({ ok: true, added });
+  } catch (e) {
+    console.error('通知の記録に失敗しました', e);
+    res.status(500).json({ error: '通知を記録できませんでした' });
   }
 });
 
