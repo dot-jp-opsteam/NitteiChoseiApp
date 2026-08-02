@@ -122,6 +122,60 @@ async function initDB() {
       updated_at TEXT NOT NULL
     )
   `);
+  /* ---------- 一斉に書き込まれるデータの置き場 ----------
+     store（DB全体で1行のJSON）は、誰か1人が保存すると他の全員の保存が
+     はじかれる仕組みのため、大人数が同時に操作するデータを置くと破綻する。
+     依頼の確認・イベントの出欠・面談の申請は「配ったあと全員が一斉に押す」
+     性質があるので、1件1行のテーブルに分けて置く。
+     こうすると各自が別々の行に書くだけになり、待ち合わせが発生しない。 */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS requests (
+      id TEXT PRIMARY KEY,
+      sender_id TEXT NOT NULL,
+      branch_id TEXT,
+      subject TEXT NOT NULL,
+      body TEXT,
+      target_label TEXT,
+      recipient_ids TEXT NOT NULL,   -- JSON配列。あて先は送信時に固定されるので分解しない
+      created_at TEXT NOT NULL
+    )
+  `);
+  /* 「確認しました」を依頼の行に配列で持つと、300人が同じ1行を奪い合うことになる。
+     1人1行にすることで、何人が同時に押しても衝突しない */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS request_reads (
+      request_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      read_at TEXT NOT NULL,
+      PRIMARY KEY (request_id, user_id)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS event_responses (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      response TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (event_id, user_id)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      type TEXT,
+      msg TEXT,
+      branch_id TEXT,
+      at TEXT NOT NULL
+    )
+  `);
+  for (const ddl of [
+    'CREATE INDEX IF NOT EXISTS idx_requests_branch ON requests(branch_id)',
+    'CREATE INDEX IF NOT EXISTS idx_request_reads_user ON request_reads(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_event_responses_event ON event_responses(event_id)',
+    'CREATE INDEX IF NOT EXISTS idx_notifications_branch ON notifications(branch_id)',
+  ]) await client.execute(ddl);
+
   // 既存DBへの追加カラム。既に存在する場合のエラーは無視する
   for (const ddl of [
     'ALTER TABLE users ADD COLUMN google_sub TEXT',   // Googleでログイン用
@@ -194,6 +248,109 @@ async function readDBForWrite() {
 function invalidateDBCache() {
   dbCache = null;
   dbCacheLoaded = false;
+}
+
+/* ---------- store から専用テーブルへの引っ越し ----------
+   以前は依頼・出欠・通知も store の中に入れていた。
+   一度だけ行に展開して移し、store 側からは取り除く。
+   移し終えた印を store に残し、二度は動かさない */
+const MIGRATION_FLAG = 'movedToTablesV1';
+
+async function migrateStoreToTables() {
+  await withDBLock(async () => {
+    const db = await readDBForWrite();
+    if (!db || db[MIGRATION_FLAG]) return;
+
+    let moved = 0;
+    for (const rq of db.requests || []) {
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at)
+              VALUES (?,?,?,?,?,?,?,?)`,
+        args: [rq.id, rq.sender_id, rq.branch_id || null, rq.subject || '', rq.body || '',
+          rq.target_label || null, JSON.stringify(rq.recipient_ids || []), rq.created_at || new Date().toISOString()],
+      });
+      for (const r of rq.read_by || []) {
+        await client.execute({
+          sql: 'INSERT OR IGNORE INTO request_reads (request_id, user_id, read_at) VALUES (?,?,?)',
+          args: [rq.id, r.user_id, r.at || new Date().toISOString()],
+        });
+      }
+      moved++;
+    }
+    for (const er of db.event_responses || []) {
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO event_responses (id, event_id, user_id, response, updated_at) VALUES (?,?,?,?,?)`,
+        args: [er.id, er.event_id, er.user_id, er.response, new Date().toISOString()],
+      });
+      moved++;
+    }
+    for (const n of db.notifications || []) {
+      await client.execute({
+        sql: 'INSERT OR IGNORE INTO notifications (id, type, msg, branch_id, at) VALUES (?,?,?,?,?)',
+        args: [n.id, n.type || null, n.msg || '', n.branch_id || null, n.at || new Date().toISOString()],
+      });
+      moved++;
+    }
+
+    delete db.requests;
+    delete db.event_responses;
+    delete db.notifications;
+    db[MIGRATION_FLAG] = true;
+    await writeDB(db);
+    console.log(`依頼・出欠・通知を専用テーブルへ移しました（${moved}件）`);
+  });
+}
+
+/* ---------- 専用テーブルの読み書き ---------- */
+const parseIds = (s) => { try { return JSON.parse(s) || []; } catch { return []; } };
+
+/* 依頼を、フロントが期待する形（read_by 付き）に組み立てて返す */
+async function listRequestsFor(user) {
+  const isAdmin = user.role === 'admin';
+  const rs = isAdmin
+    ? await client.execute('SELECT * FROM requests')
+    : await client.execute({
+      // 自分が送ったもの、または自分があて先のもの。あて先はJSON配列なので部分一致で絞ってから厳密に確認する
+      sql: 'SELECT * FROM requests WHERE sender_id = ? OR recipient_ids LIKE ?',
+      args: [user.id, '%"' + user.id + '"%'],
+    });
+  const rows = rs.rows.filter((r) => isAdmin || r.sender_id === user.id || parseIds(r.recipient_ids).includes(user.id));
+  if (!rows.length) return [];
+  const reads = await client.execute('SELECT * FROM request_reads');
+  const byRequest = new Map();
+  for (const r of reads.rows) {
+    if (!byRequest.has(r.request_id)) byRequest.set(r.request_id, []);
+    byRequest.get(r.request_id).push({ user_id: r.user_id, at: r.read_at });
+  }
+  return rows.map((r) => ({
+    id: r.id, sender_id: r.sender_id, branch_id: r.branch_id,
+    subject: r.subject, body: r.body, target_label: r.target_label,
+    recipient_ids: parseIds(r.recipient_ids), created_at: r.created_at,
+    read_by: byRequest.get(r.id) || [],
+  }));
+}
+
+async function listEventResponses() {
+  const rs = await client.execute('SELECT * FROM event_responses');
+  return rs.rows.map((r) => ({ id: r.id, event_id: r.event_id, user_id: r.user_id, response: r.response }));
+}
+
+async function listNotificationsFor(user) {
+  const rs = user.role === 'admin'
+    ? await client.execute('SELECT * FROM notifications')
+    : await client.execute({
+      sql: 'SELECT * FROM notifications WHERE branch_id IS NULL OR branch_id = ?',
+      args: [user.branch_id || null],
+    });
+  return rs.rows.map((r) => ({ id: r.id, type: r.type, msg: r.msg, branch_id: r.branch_id, at: r.at }));
+}
+
+/* 通知は依頼の送信などに付随して積まれる。専用APIの中から呼ぶ */
+async function insertNotification({ type, msg, branch_id }) {
+  await client.execute({
+    sql: 'INSERT INTO notifications (id, type, msg, branch_id, at) VALUES (?,?,?,?,?)',
+    args: ['nt_' + crypto.randomBytes(6).toString('hex'), type || null, msg || '', branch_id || null, new Date().toISOString()],
+  });
 }
 
 async function writeDB(obj) {
@@ -554,13 +711,13 @@ function visibleEventsFor(obj, user) {
     : user.role === 'admin' || e.branch_id === user.branch_id));
 }
 
-/* その人が見てよいデータだけに絞り込む */
+/* store に残っている項目だけを、その人に見える範囲へ絞る。
+   依頼・出欠・通知は専用テーブルへ移したのでここでは扱わない
+   （GET /api/db 側でテーブルから読んで合成する） */
 function scopeDBForUser(obj, user, users) {
   const events = visibleEventsFor(obj, user);
-  const eventIds = new Set(events.map((e) => e.id));
-  const event_responses = (obj.event_responses || []).filter((r) => eventIds.has(r.event_id));
   // 全体管理者でも、他の人の「自分だけ」の予定は見えない
-  if (user.role === 'admin') return { ...obj, events, event_responses };
+  if (user.role === 'admin') return { ...obj, events };
   const branchId = user.branch_id;
   const isIntern = user.role === 'intern';
   const userById = new Map(users.map((u) => [u.id, u]));
@@ -573,8 +730,6 @@ function scopeDBForUser(obj, user, users) {
     isIntern ? iv.intern_id === user.id : (iv.staff_id === user.id || inBranch(iv.intern_id)));
   // メールは当事者だけ。以前は全員が全員分の本文を読めていた
   const emails = (obj.emails || []).filter((m) => m.receiver_id === user.id || m.sender_id === user.id);
-  // branch_id を持たない通知は、この仕組みを入れる前の古いレコード
-  const notifications = (obj.notifications || []).filter((n) => !n.branch_id || n.branch_id === branchId);
 
   /* 空き日程は面談の予約画面で必要なので自支部のスタッフ分を返す。
      ただしインターン生には予定の中身（「アルバイト」など私的な情報）を伏せ、
@@ -591,12 +746,6 @@ function scopeDBForUser(obj, user, users) {
       : av;
   }
 
-  /* 依頼は「自分が送った」か「自分が宛先」のものだけ。
-     宛先は送信時点で recipient_ids に固定されるので、それを見れば足りる。
-     支部で絞るだけでは足りない：同じ支部でも自分宛でない依頼は読ませない */
-  const requests = (obj.requests || []).filter((r) =>
-    r.sender_id === user.id || (r.recipient_ids || []).includes(user.id));
-
   // インターン先マスタは支部ごとの持ち物
   const internships = (obj.internships || []).filter((p) => p.branch_id === branchId);
 
@@ -606,16 +755,22 @@ function scopeDBForUser(obj, user, users) {
     if (id === user.id || inBranch(id)) profiles[id] = p;
   }
 
-  return { ...obj, interviews, events, event_responses, emails, notifications, availability, requests, internships, profiles };
+  return { ...obj, interviews, events, emails, availability, internships, profiles };
 }
 
 /* 絞り込んだデータを受け取ったクライアントが書き戻してきたとき、
    その人には見えていなかった分を元のデータから戻して1つに合成する。
    これをしないと、見えていないデータが保存のたびに消えてしまう */
+/* 専用テーブルへ移した項目。PUT /api/db から送られてきても採用しない。
+   古い画面を開いたままのタブが、テーブル側の最新の内容を
+   自分の持っている古い一覧で上書きしてしまうのを防ぐ */
+const TABLE_BACKED_KEYS = ['requests', 'event_responses', 'notifications'];
+
 function mergeScoped(oldDB, clientDB, user, users) {
   const isAdmin = user.role === 'admin';
   const visible = scopeDBForUser(oldDB, user, users);
   const merged = isAdmin ? { ...clientDB } : { ...oldDB };
+  for (const key of TABLE_BACKED_KEYS) delete merged[key];
   /* 全体管理者に見えていないのは他の人の「自分だけ」の予定だけなので、
      そこだけ戻せばよい。戻さないと、管理者が保存するたびに消えてしまう */
   /* ここに並べるキーは「クライアントから送られてきた内容を採用する」もの。
@@ -624,8 +779,8 @@ function mergeScoped(oldDB, clientDB, user, users) {
      全体管理者以外の保存が消える不具合になっていた（2026-08-02修正）。
      フロントのDBに項目を増やしたら、必ずここにも足すこと */
   const keys = isAdmin
-    ? ['events', 'event_responses', 'requests']
-    : ['interviews', 'events', 'event_responses', 'notifications', 'requests'];
+    ? ['events']
+    : ['interviews', 'events'];
   for (const key of keys) {
     const visibleIds = new Set((visible[key] || []).map((x) => x.id));
     const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
@@ -742,22 +897,6 @@ function validateDiff(oldDB, newDB, actor, users) {
     if (!isAdmin && prev.creator_id !== actor.id) errs.push('このイベントを削除する権限がありません');
   }
 
-  // ---- イベント回答：自分の回答だけ ----
-  const oldRs = byId(oldDB.event_responses);
-  const newRs = byId(newDB.event_responses);
-  for (const [id, r] of newRs) {
-    const prev = oldRs.get(id);
-    if ((!prev || !sameJSON(prev, r)) && r.user_id !== actor.id) {
-      errs.push('他の人の出欠回答は変更できません');
-    }
-  }
-  for (const [id, prev] of oldRs) {
-    if (newRs.has(id)) continue;
-    // イベントごと削除された場合は、その回答も一緒に消えてよい
-    if (removedEventIds.has(prev.event_id)) continue;
-    if (!isAdmin && prev.user_id !== actor.id) errs.push('他の人の出欠回答は削除できません');
-  }
-
   // ---- 空き日程：自分の分だけ ----
   const avKeys = new Set([...Object.keys(oldDB.availability || {}), ...Object.keys(newDB.availability || {})]);
   for (const key of avKeys) {
@@ -767,45 +906,13 @@ function validateDiff(oldDB, newDB, actor, users) {
     }
   }
 
-  // ---- 通知：追加のみ。消して履歴を隠せないようにする ----
-  const newNotiIds = new Set((newDB.notifications || []).map((n) => n.id));
-  if (!isAdmin && (oldDB.notifications || []).some((n) => !newNotiIds.has(n.id))) {
-    errs.push('通知は削除できません');
-  }
-
   // ---- メール履歴：専用APIでのみ変更する ----
   if (!sameJSON(oldDB.emails, newDB.emails)) {
     errs.push('メール履歴はこの方法では変更できません');
   }
 
-  /* ---- 依頼：送信はスタッフ側だけ。受け取った人は「確認した」印だけ付けられる ----
-     依頼は一度送ったら中身を変えられない設計（宛先を送信時に固定しているため、
-     あとから件名や本文が変わると、受け取った人が見たものと食い違う） */
-  const oldRq = byId(oldDB.requests);
-  const newRq = byId(newDB.requests);
-  for (const [id, rq] of newRq) {
-    const prev = oldRq.get(id);
-    if (!prev) {
-      if (!isStaffLike) errs.push('依頼を送れるのはスタッフだけです');
-      else if (rq.sender_id !== actor.id) errs.push('依頼の送信者が不正です');
-      else if (!isAdmin && rq.branch_id !== actor.branch_id) errs.push('他の支部に依頼は送れません');
-      continue;
-    }
-    if (sameJSON(prev, rq)) continue;
-    // 中身が同じで read_by だけが増えている、かつ増えた分が自分だけなら許す
-    const onlyReadChanged = sameJSON({ ...prev, read_by: null }, { ...rq, read_by: null });
-    const prevReaders = new Set((prev.read_by || []).map((x) => x.user_id));
-    const nextReaders = (rq.read_by || []).map((x) => x.user_id);
-    const added = nextReaders.filter((u) => !prevReaders.has(u));
-    const removed = [...prevReaders].filter((u) => !nextReaders.includes(u));
-    if (!isAdmin && !onlyReadChanged) errs.push('送った依頼の内容はあとから変更できません');
-    else if (!isAdmin && (removed.length || added.some((u) => u !== actor.id))) {
-      errs.push('他の人の確認状況は変更できません');
-    }
-  }
-  for (const [id] of oldRq) {
-    if (!newRq.has(id) && !isAdmin) errs.push('依頼は削除できません');
-  }
+  /* 依頼・出欠・通知はここでは検証しない。専用テーブルへ移し、
+     それぞれの専用APIの中で権限を確かめている */
 
   /* ---- インターン先マスタ：自支部のものをスタッフ側だけが編集できる ---- */
   const oldIp = byId(oldDB.internships);
@@ -1004,6 +1111,8 @@ app.get('/api/bootstrap', async (req, res) => {
     const users = await listActiveUsers();
     const db = obj ? scopeDBForUser(obj, user, users) : {};
     db.users = scopeUsers(users, user);
+    // 専用テーブルへ移した分（依頼・出欠・通知）もここで合わせて返す
+    Object.assign(db, await readTableBacked(user));
     res.json({ config, user: toPublicUser(user), db });
   } catch (e) {
     console.error('起動情報の取得に失敗しました', e);
@@ -1576,15 +1685,25 @@ app.get('/api/db', requireAuth, async (req, res) => {
   try {
     const obj = await readDB();
     const users = await listActiveUsers();
-    if (!obj) return res.json({ users: scopeUsers(users, req.authUser) });
+    if (!obj) return res.json({ users: scopeUsers(users, req.authUser), ...await readTableBacked(req.authUser) });
     const scoped = scopeDBForUser(obj, req.authUser, users);
     scoped.users = scopeUsers(users, req.authUser);
+    // 専用テーブルへ移した分を合成する。画面から見える形は今までと同じ
+    Object.assign(scoped, await readTableBacked(req.authUser));
     res.json(scoped);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'db read failed' });
   }
 });
+
+/* 専用テーブルへ移した項目を、フロントが期待するキー名で返す */
+async function readTableBacked(user) {
+  const [requests, event_responses, notifications] = await Promise.all([
+    listRequestsFor(user), listEventResponses(), listNotificationsFor(user),
+  ]);
+  return { requests, event_responses, notifications };
+}
 
 /* インターン生には、面談の申し込み先として必要な自支部のスタッフだけを見せる。
    全支部の全ユーザー一覧を配る必要はない */
@@ -1635,13 +1754,135 @@ app.put('/api/db', requireAuth, async (req, res) => {
          ただし通信が走るのは面談が「確定」に変わった瞬間だけで頻度は低い。
          面談を専用APIへ移す段階で、この呼び出しもそちらへ移すこと */
       await syncInterviewsToGoogle(oldDB, merged, users);
-      return { status: 200, payload: { ok: true, updatedAt: await writeDB(merged) } };
+      const updatedAt = await writeDB(merged);
+
+      /* イベントが消えたら、その出欠回答も片付ける。
+         残しても画面には出ないが、いつまでも溜まり続けてしまう */
+      const newEventIds = new Set((merged.events || []).map((e) => e.id));
+      const goneIds = (oldDB.events || []).map((e) => e.id).filter((id) => !newEventIds.has(id));
+      for (const id of goneIds) {
+        await client.execute({ sql: 'DELETE FROM event_responses WHERE event_id = ?', args: [id] });
+      }
+      return { status: 200, payload: { ok: true, updatedAt } };
     });
     res.status(result.status).json(result.payload);
   } catch (e) {
     console.error(e);
     invalidateDBCache();
     res.status(500).json({ error: 'db write failed' });
+  }
+});
+
+/* =========================================================
+   一斉に使われる操作の専用API
+
+   これらは PUT /api/db を通さない。DB全体を1行のJSONで保存する仕組みは、
+   誰か1人が保存すると他の全員の保存がはじかれるため、
+   「配ったあと全員が一斉に押す」種類の操作には耐えられない。
+   ここでは触る1行だけを読み書きするので、何人が同時に押しても待ち合わせが起きない。
+   ========================================================= */
+
+/* 依頼を送る。スタッフ・支部管理者だけ */
+app.post('/api/requests', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
+    return res.status(403).json({ error: '依頼を送れるのはスタッフだけです' });
+  }
+  const { subject, body, target_label, recipient_ids } = req.body || {};
+  if (!subject || !String(subject).trim()) return res.status(400).json({ error: '件名を入力してください' });
+  const ids = Array.isArray(recipient_ids) ? recipient_ids.filter(Boolean) : [];
+  if (!ids.length) return res.status(400).json({ error: 'あて先を選んでください' });
+  try {
+    // あて先は自分の支部の人だけ（全体管理者は制限なし）
+    if (actor.role !== 'admin') {
+      const users = await listActiveUsers();
+      const byId = new Map(users.map((u) => [u.id, u]));
+      if (ids.some((id) => byId.get(id)?.branch_id !== actor.branch_id)) {
+        return res.status(403).json({ error: '他の支部の方には送れません' });
+      }
+    }
+    const request = {
+      id: 'rq_' + crypto.randomBytes(6).toString('hex'),
+      sender_id: actor.id, branch_id: actor.branch_id || null,
+      subject: String(subject).trim(), body: String(body || ''),
+      target_label: target_label || null, recipient_ids: ids,
+      created_at: new Date().toISOString(), read_by: [],
+    };
+    await client.execute({
+      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at)
+            VALUES (?,?,?,?,?,?,?,?)`,
+      args: [request.id, request.sender_id, request.branch_id, request.subject,
+        request.body, request.target_label, JSON.stringify(ids), request.created_at],
+    });
+    await insertNotification({
+      type: '依頼', branch_id: actor.branch_id || null,
+      msg: `${actor.nickname}さんから「${request.subject}」が届きました`,
+    });
+    res.json({ ok: true, request });
+  } catch (e) {
+    console.error('依頼の送信に失敗しました', e);
+    res.status(500).json({ error: '送信に失敗しました' });
+  }
+});
+
+/* 依頼を「確認しました」にする。何人が同時に押しても衝突しない。
+   二度押しても状態が変わらない（同じ行を上書きするだけ） */
+app.post('/api/requests/:id/read', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  try {
+    const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '依頼が見つかりません' });
+    // あて先の人だけが確認できる（見えない依頼に印を付けられないようにする）
+    if (!parseIds(row.recipient_ids).includes(actor.id)) {
+      return res.status(403).json({ error: 'この依頼のあて先ではありません' });
+    }
+    const at = new Date().toISOString();
+    await client.execute({
+      sql: 'INSERT INTO request_reads (request_id, user_id, read_at) VALUES (?,?,?) ON CONFLICT(request_id, user_id) DO NOTHING',
+      args: [req.params.id, actor.id, at],
+    });
+    res.json({ ok: true, read: { user_id: actor.id, at } });
+  } catch (e) {
+    console.error('依頼の確認に失敗しました', e);
+    res.status(500).json({ error: '確認できませんでした' });
+  }
+});
+
+/* イベントの出欠を答える。同じ答えをもう一度押すと取り消し（従来どおりの操作感） */
+app.put('/api/events/:id/response', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  const { response } = req.body || {};
+  try {
+    const db = await readDB();
+    const event = (db?.events || []).find((e) => e.id === req.params.id);
+    if (!event) return res.status(404).json({ error: 'イベントが見つかりません' });
+    // 自分に見えないイベントには答えられない
+    if (!visibleEventsFor(db, actor).some((e) => e.id === event.id)) {
+      return res.status(403).json({ error: 'このイベントには回答できません' });
+    }
+    const cur = await client.execute({
+      sql: 'SELECT * FROM event_responses WHERE event_id = ? AND user_id = ?',
+      args: [event.id, actor.id],
+    });
+    const existing = cur.rows[0];
+    if (existing && existing.response === response) {
+      await client.execute({ sql: 'DELETE FROM event_responses WHERE id = ?', args: [existing.id] });
+      return res.json({ ok: true, response: null });
+    }
+    const saved = {
+      id: existing?.id || 'er_' + crypto.randomBytes(6).toString('hex'),
+      event_id: event.id, user_id: actor.id, response,
+    };
+    await client.execute({
+      sql: `INSERT INTO event_responses (id, event_id, user_id, response, updated_at) VALUES (?,?,?,?,?)
+            ON CONFLICT(event_id, user_id) DO UPDATE SET response = excluded.response, updated_at = excluded.updated_at`,
+      args: [saved.id, saved.event_id, saved.user_id, saved.response, new Date().toISOString()],
+    });
+    res.json({ ok: true, response: saved });
+  } catch (e) {
+    console.error('出欠の登録に失敗しました', e);
+    res.status(500).json({ error: '回答できませんでした' });
   }
 });
 
@@ -1994,6 +2235,8 @@ app.get('*', (req, res) => {
 });
 
 initDB()
+  // 依頼・出欠・通知が store に残っていれば、一度だけ専用テーブルへ移す
+  .then(() => migrateStoreToTables())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`OPS日調アプリ サーバー起動: http://localhost:${PORT}`);

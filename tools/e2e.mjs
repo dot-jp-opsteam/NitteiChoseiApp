@@ -89,15 +89,21 @@ async function setupDB(dbPath) {
 
   const store = {
     branches: [{ id: 'b1', name: '東京' }, { id: 'b2', name: '大阪' }],
-    interviews: [], events: [], event_responses: [], emails: [], availability: {}, notifications: [],
+    interviews: [], emails: [], availability: {},
+    events: [{ id: 'ev_old', creator_id: 'u_e2e_staff2', branch_id: 'b2', title: '旧イベント', date: '2026-01-01', visibility: 'branch' }],
     // b2（他支部）のデータ。b1のユーザーからは見えても触れてもいけない
     profiles: { u_e2e_staff2: { departments: ['大阪の部署'] } },
     internships: [{ id: 'ip_osaka', branch_id: 'b2', name: '大阪の企業', created_by: 'u_e2e_staff2', created_at: now }],
+    /* 以下の3つは専用テーブルへ引っ越す対象。
+       起動時の移行処理が正しく動くか確かめるため、あえて store 側に入れておく */
     requests: [{
       id: 'rq_osaka', branch_id: 'b2', sender_id: 'u_e2e_staff2',
       subject: '【大阪支部の内部連絡】', body: '他支部に見えてはいけない内容',
-      target_label: '大阪支部全員', recipient_ids: ['u_e2e_staff2'], read_by: [], created_at: now,
+      target_label: '大阪支部全員', recipient_ids: ['u_e2e_staff2'],
+      read_by: [{ user_id: 'u_e2e_staff2', at: now }], created_at: now,
     }],
+    event_responses: [{ id: 'er_old', event_id: 'ev_old', user_id: 'u_e2e_staff2', response: 'yes' }],
+    notifications: [{ id: 'nt_old', type: 'info', msg: '引っ越し前の通知', branch_id: 'b2', at: now }],
   };
   await c.execute({
     sql: 'INSERT INTO store (id,data,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at',
@@ -155,6 +161,25 @@ async function getDB(token) {
   if (!r.ok) throw new Error('GET /api/db が ' + r.status);
   return r.json();
 }
+/* store の生の中身を直接のぞく（APIを通さない）。引っ越しの確認に使う */
+let DB_PATH = null;
+async function readStoreRaw() {
+  const c = createClient({ url: 'file:' + DB_PATH });
+  const rs = await c.execute('SELECT data FROM store WHERE id = 1');
+  c.close();
+  return JSON.parse(rs.rows[0].data);
+}
+
+/* 専用APIの呼び出し */
+async function api(token, method, pathname, payload) {
+  const r = await fetch(BASE + pathname, {
+    method, headers: H(token),
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+  });
+  return { status: r.status, json: await r.json().catch(() => ({})) };
+}
+let REQ_ID = null;   // テストの中で作った依頼のID
+
 /* フロントの mutate() と同じ流れ：受け取った内容を書き換えて丸ごと送り返す */
 async function putDB(token, mutateFn) {
   const cur = await getDB(token);
@@ -213,6 +238,25 @@ async function testLockLogic() {
    テスト本体
    ========================================================= */
 async function run() {
+  console.log('\n─────── store から専用テーブルへの引っ越し ───────');
+  {
+    /* 起動時に一度だけ動く。テスト用DBには依頼1件・出欠1件・通知1件を
+       store に入れてあるので、それがテーブル側で読めていれば移行できている */
+    const admin = await getDB(TOKENS.admin);
+    check('引っ越し前からあった依頼が読める', (admin.requests || []).some((r) => r.id === 'rq_osaka'), true);
+    check('引っ越し前からあった出欠が読める', (admin.event_responses || []).some((r) => r.id === 'er_old'), true);
+    check('引っ越し前からあった通知が読める', (admin.notifications || []).some((n) => n.id === 'nt_old'), true);
+    check('依頼の確認状況も引き継がれている',
+      (admin.requests || []).find((r) => r.id === 'rq_osaka')?.read_by?.some((x) => x.user_id === 'u_e2e_staff2'), true);
+
+    // store 側からは取り除かれているはず（二重管理になると必ず食い違う）
+    const raw = await readStoreRaw();
+    check('store から依頼が取り除かれている', 'requests' in raw, false);
+    check('store から出欠が取り除かれている', 'event_responses' in raw, false);
+    check('store から通知が取り除かれている', 'notifications' in raw, false);
+    check('引っ越し済みの印が付いている', raw.movedToTablesV1, true);
+  }
+
   console.log('\n─────── 情報漏えい（他支部のデータが見えないこと） ───────');
   {
     const intern = await getDB(TOKENS.intern);
@@ -234,11 +278,6 @@ async function run() {
   console.log('\n─────── データ消失（保存した内容が残ること） ───────');
   {
     const res = await putDB(TOKENS.staff, (db) => {
-      db.requests = [...(db.requests || []), {
-        id: 'rq_tokyo', branch_id: 'b1', sender_id: 'u_e2e_staff',
-        subject: '東京の依頼', body: 'テスト本文', target_label: '支部全員',
-        recipient_ids: ['u_e2e_intern', 'u_e2e_intern2'], read_by: [], created_at: new Date().toISOString(),
-      }];
       db.profiles = { ...(db.profiles || {}), u_e2e_staff: { departments: ['企画局'] } };
       db.internships = [...(db.internships || []), {
         id: 'ip_tokyo', branch_id: 'b1', name: '東京の企業',
@@ -248,7 +287,6 @@ async function run() {
     check('スタッフの保存が成功する', res.status, 200);
 
     const after = await getDB(TOKENS.staff);
-    check('依頼が保存されている', (after.requests || []).some((r) => r.id === 'rq_tokyo'), true);
     check('所属部署が保存されている', (after.profiles || {}).u_e2e_staff?.departments, ['企画局']);
     check('インターン先マスタが保存されている', (after.internships || []).some((p) => p.id === 'ip_tokyo'), true);
 
@@ -259,17 +297,76 @@ async function run() {
     check('他支部のプロフィールを巻き添えで消していない', !!(admin.profiles || {}).u_e2e_staff2, true);
   }
 
-  console.log('\n─────── 依頼の確認（read_by への追記） ───────');
+  console.log('\n─────── 依頼（専用API） ───────');
   {
-    const res = await putDB(TOKENS.intern, (db) => {
-      const r = (db.requests || []).find((x) => x.id === 'rq_tokyo');
-      if (r) { r.read_by = [...(r.read_by || []), { user_id: 'u_e2e_intern', at: new Date().toISOString() }]; }
+    const sent = await api(TOKENS.staff, 'POST', '/api/requests', {
+      subject: '東京の依頼', body: 'テスト本文', target_label: '支部全員',
+      recipient_ids: ['u_e2e_intern', 'u_e2e_intern2'],
     });
-    check('インターン生が確認を保存できる', res.status, 200);
-    const after = await getDB(TOKENS.intern);
-    const r = (after.requests || []).find((x) => x.id === 'rq_tokyo');
+    check('スタッフが依頼を送れる', sent.status, 200);
+    REQ_ID = sent.json.request?.id;
+    check('依頼IDが返る', typeof REQ_ID === 'string', true);
+
+    const internView = await getDB(TOKENS.intern);
+    const mine = (internView.requests || []).find((r) => r.id === REQ_ID);
+    check('あて先のインターン生に依頼が見えている', !!mine, true);
+    check('通知が積まれている', (internView.notifications || []).some((n) => n.msg?.includes('東京の依頼')), true);
+
+    const other = await getDB(TOKENS.staff2);
+    check('他支部のスタッフには見えない', (other.requests || []).some((r) => r.id === REQ_ID), false);
+
+    const read = await api(TOKENS.intern, 'POST', `/api/requests/${REQ_ID}/read`);
+    check('あて先の人が確認できる', read.status, 200);
+    const afterRead = await getDB(TOKENS.intern);
+    const r = (afterRead.requests || []).find((x) => x.id === REQ_ID);
     check('自分の確認が記録されている', (r?.read_by || []).some((x) => x.user_id === 'u_e2e_intern'), true);
-    check('宛先のインターン生には依頼が見えている', !!r, true);
+
+    // 二度押しても増えない（回線の再送や連打で二重に記録されないこと）
+    await api(TOKENS.intern, 'POST', `/api/requests/${REQ_ID}/read`);
+    const twice = await getDB(TOKENS.intern);
+    const r2 = (twice.requests || []).find((x) => x.id === REQ_ID);
+    check('二度確認しても記録は1件のまま', (r2?.read_by || []).filter((x) => x.user_id === 'u_e2e_intern').length, 1);
+
+    const notMine = await api(TOKENS.staff2, 'POST', `/api/requests/${REQ_ID}/read`);
+    check('あて先でない人は確認できない', notMine.status, 403);
+    const byIntern = await api(TOKENS.intern, 'POST', '/api/requests', {
+      subject: 'なりすまし', recipient_ids: ['u_e2e_intern2'],
+    });
+    check('インターン生は依頼を送れない', byIntern.status, 403);
+    const crossBranch = await api(TOKENS.staff, 'POST', '/api/requests', {
+      subject: '他支部あて', recipient_ids: ['u_e2e_staff2'],
+    });
+    check('他支部あてには送れない', crossBranch.status, 403);
+  }
+
+  console.log('\n─────── イベント出欠（専用API） ───────');
+  {
+    const mk = await putDB(TOKENS.staff, (db) => {
+      db.events = [...(db.events || []), {
+        id: 'ev_e2e', creator_id: 'u_e2e_staff', branch_id: 'b1',
+        title: '説明会', date: '2026-09-01', visibility: 'branch',
+      }];
+    });
+    check('イベントを作成できる', mk.status, 200);
+
+    const v1 = await api(TOKENS.intern, 'PUT', '/api/events/ev_e2e/response', { response: 'yes' });
+    check('出欠に回答できる', v1.status, 200);
+    let view = await getDB(TOKENS.intern);
+    check('回答が記録されている',
+      (view.event_responses || []).some((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_intern' && r.response === 'yes'), true);
+
+    await api(TOKENS.intern, 'PUT', '/api/events/ev_e2e/response', { response: 'no' });
+    view = await getDB(TOKENS.intern);
+    check('回答を変えると上書きされる（重複しない）',
+      (view.event_responses || []).filter((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_intern').map((r) => r.response), ['no']);
+
+    await api(TOKENS.intern, 'PUT', '/api/events/ev_e2e/response', { response: 'no' });
+    view = await getDB(TOKENS.intern);
+    check('同じ回答をもう一度押すと取り消される',
+      (view.event_responses || []).some((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_intern'), false);
+
+    const outsider = await api(TOKENS.staff2, 'PUT', '/api/events/ev_e2e/response', { response: 'yes' });
+    check('見えないイベントには回答できない', outsider.status, 403);
   }
 
   console.log('\n─────── 権限（許されない変更が拒否されること） ───────');
@@ -284,25 +381,6 @@ async function run() {
     });
     check('インターン生がインターン先マスタを追加できない', res.status, 403);
 
-    res = await putDB(TOKENS.intern, (db) => {
-      db.requests = [...(db.requests || []), {
-        id: 'rq_hack', branch_id: 'b1', sender_id: 'u_e2e_staff', subject: 'なりすまし',
-        recipient_ids: ['u_e2e_intern2'], read_by: [], created_at: new Date().toISOString(),
-      }];
-    });
-    check('インターン生が依頼を送れない', res.status, 403);
-
-    res = await putDB(TOKENS.intern, (db) => {
-      const r = (db.requests || []).find((x) => x.id === 'rq_tokyo');
-      if (r) r.subject = '改ざんされた件名';
-    });
-    check('宛先の人が依頼の中身を書き換えられない', res.status, 403);
-
-    res = await putDB(TOKENS.intern, (db) => {
-      db.requests = (db.requests || []).filter((x) => x.id !== 'rq_tokyo');
-    });
-    check('依頼を削除できない', res.status, 403);
-
     /* 他支部のものは絞り込みで既に見えないので「書き換え」は送りようがない。
        意味のある攻撃は「他支部あてに新しく作る」ほうなので、そちらを試す */
     res = await putDB(TOKENS.staff, (db) => {
@@ -310,13 +388,17 @@ async function run() {
     });
     check('他支部あてにインターン先を追加できない', res.status, 403);
 
+    /* 古い画面を開いたままのタブが、専用テーブルへ移した項目を
+       自分の持っている古い一覧で上書きしないこと */
     res = await putDB(TOKENS.staff, (db) => {
-      db.requests = [...(db.requests || []), {
-        id: 'rq_cross', branch_id: 'b2', sender_id: 'u_e2e_staff', subject: '他支部あて',
-        recipient_ids: ['u_e2e_staff2'], read_by: [], created_at: new Date().toISOString(),
-      }];
+      db.requests = [];
+      db.notifications = [];
+      db.event_responses = [];
     });
-    check('他支部あてに依頼を送れない', res.status, 403);
+    check('古い画面からの保存は受け付けても害がない', res.status, 200);
+    const survived = await getDB(TOKENS.staff);
+    check('依頼が消えていない', (survived.requests || []).some((r) => r.id === REQ_ID), true);
+    check('通知が消えていない', (survived.notifications || []).length > 0, true);
   }
 
   console.log('\n─────── スタッフによる代理設定（許される変更） ───────');
@@ -372,10 +454,55 @@ async function run() {
     const saved = (afterRace.internships || []).filter((p) => String(p.id).startsWith('ip_race')).length;
     check('成功した1件だけが保存されている', saved, 1);
   }
+
+  console.log('\n─────── 一斉アクセス（この設計変更の目的） ───────');
+  {
+    /* 依頼を配ったあと全員が「確認」を押す状況。
+       専用APIへ移す前は、DB全体に1本しかないロックを奪い合うため
+       同時100人なら大半が「保存できていません」になっていた。
+       いまは1人1行の追記になるので、全員が成功するはず */
+    const N = 100;
+    const users = [];
+    const c = createClient({ url: 'file:' + DB_PATH });
+    const now = new Date().toISOString();
+    const exp = new Date(Date.now() + 3600e3).toISOString();
+    for (let i = 0; i < N; i++) {
+      const id = 'u_load' + i;
+      const token = 'loadtoken' + i;
+      await c.execute({
+        sql: 'INSERT OR REPLACE INTO users (id,email,password_hash,nickname,role,branch_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)',
+        args: [id, `load${i}@example.com`, 'dummy:dummy', '負荷' + i, 'intern', 'b1', 'active', now],
+      });
+      await c.execute({
+        sql: 'INSERT OR REPLACE INTO sessions (token_hash,user_id,created_at,expires_at) VALUES (?,?,?,?)',
+        args: [crypto.createHash('sha256').update(token).digest('hex'), id, now, exp],
+      });
+      users.push({ id, token });
+    }
+    c.close();
+
+    const blast = await api(TOKENS.staff, 'POST', '/api/requests', {
+      subject: '一斉テスト', body: '全員確認してください',
+      target_label: '支部全員', recipient_ids: users.map((u) => u.id),
+    });
+    const blastId = blast.json.request?.id;
+
+    const t0 = Date.now();
+    const codes = await Promise.all(users.map((u) => rawPost(u.token, `/api/requests/${blastId}/read`, {})));
+    const ms = Date.now() - t0;
+    const okCount = codes.filter((s) => s === 200).length;
+    check(`${N}人が同時に確認して全員成功する`, okCount, N);
+
+    const view = await getDB(TOKENS.staff);
+    const rq = (view.requests || []).find((r) => r.id === blastId);
+    check(`確認が${N}件すべて記録されている`, (rq?.read_by || []).length, N);
+    console.log(`       （${N}件の同時確認にかかった時間: ${ms}ms）`);
+  }
 }
 
 /* ---------- 実行 ---------- */
 const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ops-e2e-')), 'e2e.db');
+DB_PATH = dbPath;
 await setupDB(dbPath);
 const { child, log } = startServer(dbPath);
 let exitCode = 0;
