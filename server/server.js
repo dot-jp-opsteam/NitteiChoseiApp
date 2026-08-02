@@ -151,25 +151,71 @@ async function initDB() {
   }
 }
 
-async function readDB() {
+/* ---------- storeの読み書き ----------
+   DB全体を1行のJSONで持っているため、素直に実装すると
+   「1リクエストごとにTursoへ往復し、数MBのJSONをparseする」ことになる。
+   500人規模だと1リクエストあたり約5MBのヒープを使い、
+   Render無料プランの512MBでは同時30リクエスト程度で枯渇する。
+
+   そこでパース済みの内容をプロセス内に1つだけ持ち、読み出しはそれを使う。
+   【前提】このアプリを動かすインスタンスは常に1つであること。
+   複数インスタンスに増やすと、片方の書き込みがもう片方に伝わらず
+   古い内容を返してしまう。増やす場合はこのキャッシュを外すこと。 */
+let dbCache = null;          // { obj, updatedAt } パース済みの内容
+let dbCacheLoaded = false;   // 「storeがまだ空」も正しく覚えておくための旗
+
+async function loadDBFromStore() {
   const rs = await client.execute('SELECT data, updated_at FROM store WHERE id = 1');
   const row = rs.rows[0];
-  if (!row) return null;
-  const obj = JSON.parse(row.data);
-  obj.updatedAt = row.updated_at;
-  return obj;
+  dbCache = row ? { obj: JSON.parse(row.data), updatedAt: row.updated_at } : null;
+  dbCacheLoaded = true;
+}
+
+/* 読み取り専用の用途で使う。返り値を書き換えてはいけない（キャッシュ本体そのもの）。
+   書き換えたい場合は readDBForWrite() を使うこと */
+async function readDB() {
+  if (!dbCacheLoaded) await loadDBFromStore();
+  if (!dbCache) return null;
+  // updatedAt は保存のたびに変わるので、都度この場で載せる
+  return { ...dbCache.obj, updatedAt: dbCache.updatedAt };
+}
+
+/* 中身を書き換えてから writeDB() する用途。キャッシュを壊さないよう複製を返す */
+async function readDBForWrite() {
+  if (!dbCacheLoaded) await loadDBFromStore();
+  if (!dbCache) return null;
+  return { ...structuredClone(dbCache.obj), updatedAt: dbCache.updatedAt };
+}
+
+/* 書き込みに失敗したときに呼ぶ。次回の読み出しでTursoから取り直す。
+   readDB() が返すのは浅い複製なので、途中まで書き換えた内容が
+   キャッシュ側に残っている可能性がある。そのまま配ると
+   「保存に失敗したのに画面には反映されている」状態になるため、捨てて読み直す */
+function invalidateDBCache() {
+  dbCache = null;
+  dbCacheLoaded = false;
 }
 
 async function writeDB(obj) {
   const updatedAt = new Date().toISOString();
-  const data = JSON.stringify(obj);
+  const { updatedAt: _ignored, ...body } = obj;
+  const data = JSON.stringify(body);
   await client.execute({
     sql: `INSERT INTO store (id, data, updated_at) VALUES (1, ?, ?)
           ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
     args: [data, updatedAt],
   });
+  // 書けたときだけキャッシュを進める。失敗時は次回Tursoから読み直す
+  dbCache = { obj: structuredClone(body), updatedAt };
+  dbCacheLoaded = true;
   return updatedAt;
 }
+
+/* 「読んで、変えて、書く」の区間を1本の列にして順番に通す（実体は dblock.js）。
+   PUT /api/db は楽観ロック（updatedAt照合）で守られているが、
+   メール履歴の追記やGoogleカレンダーの取り込みには照合が無く、
+   同時実行で片方が消える状態だった */
+const { withDBLock } = require('./dblock');
 
 /* ---------- users テーブル操作 ---------- */
 function toPublicUser(row) {
@@ -1506,17 +1552,21 @@ app.post('/api/mail/send', requireAuth, async (req, res) => {
       }
     }
 
-    const db = (await readDB()) || {};
-    db.emails = db.emails || [];
-    db.emails.push({
-      id: 'ml_' + crypto.randomBytes(4).toString('hex'),
-      sender_id: actor.id, receiver_id, subject: String(subject).trim(),
-      body: String(body || ''), sent_at: new Date().toISOString(), delivered: sent,
+    // 同時に何通も送られると、照合が無いぶん片方の履歴が消えるため列に並べる
+    await withDBLock(async () => {
+      const db = (await readDBForWrite()) || {};
+      db.emails = db.emails || [];
+      db.emails.push({
+        id: 'ml_' + crypto.randomBytes(4).toString('hex'),
+        sender_id: actor.id, receiver_id, subject: String(subject).trim(),
+        body: String(body || ''), sent_at: new Date().toISOString(), delivered: sent,
+      });
+      await writeDB(db);
     });
-    await writeDB(db);
     res.json({ ok: true, sent, warning });
   } catch (e) {
     console.error('メール送信処理に失敗しました', e);
+    invalidateDBCache();
     res.status(500).json({ error: '送信に失敗しました' });
   }
 });
@@ -1558,32 +1608,39 @@ app.put('/api/db', requireAuth, async (req, res) => {
   delete body.updatedAt;
   delete body.users;
   try {
-    const oldDB = await readDB();
-    // 申告が無い場合も競合扱いにする。古いクライアントが無条件に上書きするのを防ぐ
-    if (oldDB && oldDB.updatedAt !== baseUpdatedAt) {
-      return res.status(409).json({ error: '他の人が先に更新しました', code: 'conflict' });
-    }
-    const users = await listActiveUsers();
+    /* 照合してから書き込むまでの間に他の保存が入り込むと、
+       せっかくの楽観ロックをすり抜けて上書きが起きる。区間ごと列に並べる */
+    const result = await withDBLock(async () => {
+      const oldDB = await readDB();
+      // 申告が無い場合も競合扱いにする。古いクライアントが無条件に上書きするのを防ぐ
+      if (oldDB && oldDB.updatedAt !== baseUpdatedAt) {
+        return { status: 409, payload: { error: '他の人が先に更新しました', code: 'conflict' } };
+      }
+      const users = await listActiveUsers();
 
-    // 初回（データがまだ無い）は支部などの初期データ投入なので、そのまま受け入れる
-    if (!oldDB) {
-      const updatedAt = await writeDB(body);
-      return res.json({ ok: true, updatedAt });
-    }
+      // 初回（データがまだ無い）は支部などの初期データ投入なので、そのまま受け入れる
+      if (!oldDB) {
+        return { status: 200, payload: { ok: true, updatedAt: await writeDB(body) } };
+      }
 
-    // 送られてきた内容を、その人に見えていなかった分と合成してから権限を確かめる
-    const merged = mergeScoped(oldDB, body, req.authUser, users);
-    const errs = validateDiff(oldDB, merged, req.authUser, users);
-    if (errs.length) {
-      console.warn(`権限のない変更を拒否しました（user ${req.authUser.id} / ${req.authUser.role}）:`, errs);
-      return res.status(403).json({ error: errs[0], code: 'forbidden_change', details: errs });
-    }
+      // 送られてきた内容を、その人に見えていなかった分と合成してから権限を確かめる
+      const merged = mergeScoped(oldDB, body, req.authUser, users);
+      const errs = validateDiff(oldDB, merged, req.authUser, users);
+      if (errs.length) {
+        console.warn(`権限のない変更を拒否しました（user ${req.authUser.id} / ${req.authUser.role}）:`, errs);
+        return { status: 403, payload: { error: errs[0], code: 'forbidden_change', details: errs } };
+      }
 
-    await syncInterviewsToGoogle(oldDB, merged, users);
-    const updatedAt = await writeDB(merged);
-    res.json({ ok: true, updatedAt });
+      /* この中でGoogleへ通信することがあり、その間ほかの保存を待たせてしまう。
+         ただし通信が走るのは面談が「確定」に変わった瞬間だけで頻度は低い。
+         面談を専用APIへ移す段階で、この呼び出しもそちらへ移すこと */
+      await syncInterviewsToGoogle(oldDB, merged, users);
+      return { status: 200, payload: { ok: true, updatedAt: await writeDB(merged) } };
+    });
+    res.status(result.status).json(result.payload);
   } catch (e) {
     console.error(e);
+    invalidateDBCache();
     res.status(500).json({ error: 'db write failed' });
   }
 });
@@ -1844,32 +1901,38 @@ app.post('/api/webhooks/google-calendar', async (req, res) => {
     const { items, nextSyncToken } = await google.listChangedEvents(accessToken, tokenRow.calendar_id, tokenRow.sync_token);
     if (nextSyncToken) await updateSyncToken(tokenRow.staff_id, nextSyncToken);
 
-    const db = await readDB();
-    if (db && items.length) {
-      db.availability = db.availability || {};
-      db.availability[tokenRow.staff_id] = db.availability[tokenRow.staff_id] || { weekly: undefined, blocks: [] };
-      let blocks = db.availability[tokenRow.staff_id].blocks || [];
-      const changedIds = new Set(items.map((e) => e.id));
-      blocks = blocks.filter((b) => !(b.kind === 'external-google' && changedIds.has(b.googleEventId)));
-      for (const ev of items) {
-        if (ev.status === 'cancelled') continue;
-        const start = ev.start && (ev.start.dateTime || ev.start.date);
-        const end = ev.end && (ev.end.dateTime || ev.end.date);
-        if (!start || !end) continue;
-        blocks.push({
-          id: 'gcal_' + ev.id,
-          googleEventId: ev.id,
-          start: new Date(start).toISOString(),
-          end: new Date(end).toISOString(),
-          note: ev.summary || '外部予定',
-          kind: 'external-google',
-        });
-      }
-      db.availability[tokenRow.staff_id].blocks = blocks;
-      await writeDB(db);
+    /* Googleは複数のスタッフぶんの通知をほぼ同時に送ってくることがある。
+       列に並べないと、後から書いたほうが先の取り込みを消してしまう */
+    if (items.length) {
+      await withDBLock(async () => {
+        const db = await readDBForWrite();
+        if (!db) return;
+        db.availability = db.availability || {};
+        db.availability[tokenRow.staff_id] = db.availability[tokenRow.staff_id] || { weekly: undefined, blocks: [] };
+        let blocks = db.availability[tokenRow.staff_id].blocks || [];
+        const changedIds = new Set(items.map((e) => e.id));
+        blocks = blocks.filter((b) => !(b.kind === 'external-google' && changedIds.has(b.googleEventId)));
+        for (const ev of items) {
+          if (ev.status === 'cancelled') continue;
+          const start = ev.start && (ev.start.dateTime || ev.start.date);
+          const end = ev.end && (ev.end.dateTime || ev.end.date);
+          if (!start || !end) continue;
+          blocks.push({
+            id: 'gcal_' + ev.id,
+            googleEventId: ev.id,
+            start: new Date(start).toISOString(),
+            end: new Date(end).toISOString(),
+            note: ev.summary || '外部予定',
+            kind: 'external-google',
+          });
+        }
+        db.availability[tokenRow.staff_id].blocks = blocks;
+        await writeDB(db);
+      });
     }
   } catch (e) {
     console.error('webhook処理に失敗しました', e);
+    invalidateDBCache();
   }
   res.status(200).end();
 });

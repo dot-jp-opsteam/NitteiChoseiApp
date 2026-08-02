@@ -16,6 +16,7 @@
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -130,6 +131,25 @@ async function waitForServer() {
 
 /* ---------- APIの呼び出し ---------- */
 const H = (t) => ({ Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' });
+
+/* fetch は同じ宛先への接続を1本しか張らないため、Promise.all で並べても
+   実際には順番に処理されてしまい、同時アクセスの検証にならない。
+   同時アクセスの試験だけは、接続数を上げた生のHTTPで投げる */
+const agent = new http.Agent({ keepAlive: true, maxSockets: 256 });
+function rawPost(token, pathname, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const req = http.request({
+      host: 'localhost', port: PORT, path: pathname, method: 'POST', agent,
+      headers: { ...H(token), 'Content-Length': Buffer.byteLength(data) },
+    }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+}
 async function getDB(token) {
   const r = await fetch(BASE + '/api/db', { headers: H(token) });
   if (!r.ok) throw new Error('GET /api/db が ' + r.status);
@@ -144,6 +164,49 @@ async function putDB(token, mutateFn) {
   body._baseUpdatedAt = cur.updatedAt;
   const r = await fetch(BASE + '/api/db', { method: 'PUT', headers: H(token), body: JSON.stringify(body) });
   return { status: r.status, json: await r.json().catch(() => ({})) };
+}
+
+/* =========================================================
+   書き込みの直列化そのものの検証（HTTPを介さない）
+
+   本番のTursoはネットワーク越しなので「読む→書く」の間に待ちが入り、
+   別の処理が割り込む。ローカルのSQLiteでは待ちが入らないため
+   HTTP経由の試験では再現できない。そこで待ちを人工的に作り、
+   直列化が無いと壊れること・あると壊れないことの両方を確かめる。
+   ========================================================= */
+async function testLockLogic() {
+  console.log('\n─────── 書き込みの直列化（本番と同じ待ちを人工的に作る） ───────');
+  const { withDBLock, _resetForTest } = createRequire(path.join(ROOT, 'server', 'package.json'))('./dblock.js');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // storeの「読む→変える→書く」を模した処理。待ちは本番のネットワーク相当
+  const makeWorker = (state) => async () => {
+    const snapshot = await sleep(5).then(() => state.value);   // 読む
+    const next = [...snapshot, 'x'];                            // 変える
+    await sleep(5);
+    state.value = next;                                         // 書く
+  };
+
+  const bare = { value: [] };
+  await Promise.all(Array.from({ length: 20 }, () => makeWorker(bare)()));
+  check('直列化しないと20件の同時更新で書き込みが失われる（この失敗は想定どおり）',
+    bare.value.length < 20, true);
+
+  _resetForTest();
+  const locked = { value: [] };
+  await Promise.all(Array.from({ length: 20 }, () => withDBLock(makeWorker(locked))));
+  check('直列化すれば20件すべてが残る', locked.value.length, 20);
+
+  // 途中で失敗した処理があっても、後続を巻き添えにしない
+  _resetForTest();
+  const after = { value: [] };
+  const results = await Promise.allSettled([
+    withDBLock(async () => { throw new Error('わざと失敗'); }),
+    withDBLock(makeWorker(after)),
+    withDBLock(makeWorker(after)),
+  ]);
+  check('1件失敗しても後続は実行される', [results.map((r) => r.status), after.value.length],
+    [['rejected', 'fulfilled', 'fulfilled'], 2]);
 }
 
 /* =========================================================
@@ -274,6 +337,41 @@ async function run() {
     const r = await fetch(BASE + '/api/db', { method: 'PUT', headers: H(TOKENS.staff), body: JSON.stringify(body) });
     check('古いバージョンでの保存は409で拒否される', r.status, 409);
   }
+
+  console.log('\n─────── 同時アクセス ───────');
+  {
+    /* 【この検証の限界】
+       ローカルのSQLiteは execute() がI/O待ちを起こさずマイクロタスクで解決するため、
+       「読む→書く」の間に別のリクエストが割り込むことがない（検証済み）。
+       つまりここで競合が出ないのは、直列化が効いているからとは限らない。
+       本番のTursoはネットワーク越しなので割り込みが起き、競合は実際に起きうる。
+       直列化そのものが働いているかは、この下の「書き込みの直列化」で確かめる。
+       ここでは「多数の同時アクセスで落ちない・数が合う」ことを見ている */
+    const before = (await getDB(TOKENS.admin)).emails?.length || 0;
+    const N = 50;
+    const statuses = await Promise.all(Array.from({ length: N }, (_, i) =>
+      rawPost(TOKENS.staff, '/api/mail/send', { receiver_id: 'u_e2e_intern', subject: '同時送信テスト' + i, body: 'x', kind: 'note' })));
+    check(`メール${N}通の同時送信がすべて成功する`, statuses.every((s) => s === 200), true);
+    const after = (await getDB(TOKENS.admin)).emails?.length || 0;
+    check(`メール履歴が${N}件ぶん増えている（1件も消えない）`, after - before, N);
+
+    /* 同じバージョンを土台にした同時保存は、1つだけ成功して残りは409。
+       「両方200なのに片方の変更が消えている」が最も危険なので、それが起きないことを見る */
+    const base = await getDB(TOKENS.staff);
+    const mk = (n) => {
+      const b = { ...base };
+      delete b.users;
+      b._baseUpdatedAt = base.updatedAt;
+      b.internships = [...(base.internships || []), { id: 'ip_race' + n, branch_id: 'b1', name: '競合テスト' + n }];
+      return fetch(BASE + '/api/db', { method: 'PUT', headers: H(TOKENS.staff), body: JSON.stringify(b) });
+    };
+    const races = await Promise.all([mk(1), mk(2), mk(3)]);
+    const codes = races.map((r) => r.status).sort();
+    check('同じ版を土台にした3件の同時保存は1件だけ成功する', codes, [200, 409, 409]);
+    const afterRace = await getDB(TOKENS.staff);
+    const saved = (afterRace.internships || []).filter((p) => String(p.id).startsWith('ip_race')).length;
+    check('成功した1件だけが保存されている', saved, 1);
+  }
 }
 
 /* ---------- 実行 ---------- */
@@ -284,6 +382,7 @@ let exitCode = 0;
 try {
   if (!await waitForServer()) throw new Error('サーバーが起動しませんでした:\n' + log.join(''));
   await run();
+  await testLockLogic();
   console.log(`\n${'─'.repeat(56)}`);
   if (failures.length) {
     console.log(`結果: ${pass}件成功 / ${failures.length}件失敗\n\n失敗した項目:`);
