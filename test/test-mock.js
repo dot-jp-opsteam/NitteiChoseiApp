@@ -262,6 +262,12 @@
         seededAt: NOW, updatedAt: NOW,
       };
 
+  /* 【注意】ここは本番と違い、役割による絞り込みをしていない。
+     このページは見た目を確かめるためのものなので、どの役割で開いても
+     ダミーデータが全部入っている（例：インターン生の画面でも他人の面談が見える）。
+     本物のサーバーは scopeDBForUser() や listInterviewsFor() で絞り込んでおり、
+     その動作は tools/e2e.mjs で確かめている。
+     「テストページで他人のデータが見えた」を不具合と勘違いしないこと。 */
   function currentDB() {
     var db = JSON.parse(JSON.stringify(STORE));
     db.users = JSON.parse(JSON.stringify(users));

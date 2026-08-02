@@ -45,6 +45,7 @@ const TOKENS = {
   intern: 'e2etoken_intern',     // b1のインターン生
   admin: 'e2etoken_admin',       // 全体管理者
   staff2: 'e2etoken_staff2',     // b2のスタッフ（他支部の代表）
+  intern2: 'e2etoken_intern2',   // b1のもう1人のインターン生（同支部の他人）
 };
 const USERS = [
   ['u_e2e_staff', 'e2e_staff@dot-jp.or.jp', 'staff', 'b1'],
@@ -81,7 +82,7 @@ async function setupDB(dbPath) {
     });
   }
   for (const [key, token] of Object.entries(TOKENS)) {
-    const userId = { staff: 'u_e2e_staff', intern: 'u_e2e_intern', admin: 'u_e2e_admin', staff2: 'u_e2e_staff2' }[key];
+    const userId = { staff: 'u_e2e_staff', intern: 'u_e2e_intern', admin: 'u_e2e_admin', staff2: 'u_e2e_staff2', intern2: 'u_e2e_intern2' }[key];
     await c.execute({
       sql: 'INSERT OR REPLACE INTO sessions (token_hash,user_id,created_at,expires_at) VALUES (?,?,?,?)',
       args: [crypto.createHash('sha256').update(token).digest('hex'), userId, now, exp],
@@ -494,6 +495,10 @@ async function run() {
     check('状態が「申請中」で作られる', applied.json.interview?.status, 'applied');
     check('申請の通知が積まれる', !!applied.json.notification, true);
 
+    // 同じ支部の別のインターン生の面談。上の絞り込みが効いているか確かめるために作る
+    await api(TOKENS.intern2, 'POST', '/api/interviews',
+      { staff_id: 'u_e2e_staff', choice1: '2026-09-03T10:00:00.000Z', meeting_type: 'meet' });
+
     const byStaff = await api(TOKENS.staff, 'POST', '/api/interviews', { choice1: '2026-09-01T10:00:00.000Z' });
     check('スタッフは面談を申請できない', byStaff.status, 403);
     const crossStaff = await api(TOKENS.intern, 'POST', '/api/interviews',
@@ -507,6 +512,10 @@ async function run() {
     check('他支部のスタッフには見えない', (otherView.interviews || []).some((iv) => iv.id === IV_ID), false);
     const internView = await getDB(TOKENS.intern);
     check('申請した本人に見える', (internView.interviews || []).some((iv) => iv.id === IV_ID), true);
+    /* 同じ支部でも、他のインターン生の面談は見えてはいけない。
+       面談には希望日時や相談内容が入るため */
+    check('インターン生に見えるのは自分の面談だけ',
+      (internView.interviews || []).every((iv) => iv.intern_id === 'u_e2e_intern'), true);
     check('希望日時が保たれている',
       (internView.interviews || []).find((iv) => iv.id === IV_ID)?.choice1, '2026-09-01T10:00:00.000Z');
 
