@@ -182,6 +182,13 @@ async function readStoreRaw() {
   c.close();
   return JSON.parse(rs.rows[0].data);
 }
+/* 退避された store の原本を読む。引っ越し前の状態を確かめるのに使う */
+async function readStoreBackups() {
+  const c = createClient({ url: 'file:' + DB_PATH });
+  const rs = await c.execute('SELECT reason, data, taken_at FROM store_backup ORDER BY id');
+  c.close();
+  return rs.rows;
+}
 /* アーカイブの確認用。テーブルの件数を直接数える */
 async function countRows() {
   const c = createClient({ url: 'file:' + DB_PATH });
@@ -284,6 +291,20 @@ async function run() {
     check('store から出欠が取り除かれている', 'event_responses' in raw, false);
     check('store から通知が取り除かれている', 'notifications' in raw, false);
     check('引っ越し済みの印が付いている', raw.movedToTablesV1, true);
+
+    /* 引っ越しは後戻りしにくい処理なので、始める前に store の原本を
+       store_backup へ複製している。取れていなければ、やり直しの手段が無いということ */
+    const backups = await readStoreBackups();
+    check('引っ越し前に原本が退避されている', backups.length, 1);
+    check('退避した理由が記録されている', backups[0]?.reason, '専用テーブルへの引っ越し前');
+    const before = JSON.parse(backups[0].data);
+    check('退避した原本には引っ越し前の依頼が入っている',
+      (before.requests || []).some((r) => r.id === 'rq_osaka'), true);
+    check('退避した原本には引っ越し前のメールが入っている',
+      (before.emails || []).some((m) => m.id === 'ml_old'), true);
+    check('退避した原本には引っ越し前の面談が入っている',
+      (before.interviews || []).some((iv) => iv.id === 'iv_old'), true);
+    check('退避した原本にはまだ引っ越し済みの印が無い', before.movedToTablesV1 === undefined, true);
   }
 
   console.log('\n─────── 情報漏えい（他支部のデータが見えないこと） ───────');

@@ -1,3 +1,7 @@
+# 本番DBの退避先。個人情報とパスワードのハッシュが入るので絶対に上げない。
+# このリポジトリはpublicなので、ここが漏れると全員分の情報が公開される
+_backup/
+
 node_modules/
 server/ops_nittyou.local.db
 server/ops_nittyou.sqlite

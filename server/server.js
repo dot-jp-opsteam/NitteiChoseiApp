@@ -62,6 +62,18 @@ async function initDB() {
       updated_at TEXT NOT NULL
     )
   `);
+  /* store の中身を丸ごと取っておく場所。
+     引っ越しなど、後戻りしにくい処理の前に原本をここへ複製する。
+     元に戻すときは、この data をそのまま store へ書き戻せばよい */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS store_backup (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reason TEXT NOT NULL,
+      data TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      taken_at TEXT NOT NULL
+    )
+  `);
   await client.execute(`
     CREATE TABLE IF NOT EXISTS google_tokens (
       staff_id TEXT PRIMARY KEY,
@@ -306,10 +318,29 @@ function invalidateDBCache() {
    移し終えた印を store に残し、二度は動かさない */
 const MIGRATION_FLAG = 'movedToTablesV1';
 
+/* store の原本を store_backup へ複製する。
+   パースし直したものではなく、保存されている文字列をそのまま写す。
+   後戻りしにくい処理を始める前に必ず呼ぶこと。
+   ここで失敗したら先へ進んではいけないので、例外はそのまま投げる */
+async function backupStore(reason) {
+  const rs = await client.execute('SELECT data, updated_at FROM store WHERE id = 1');
+  const row = rs.rows[0];
+  if (!row) return false;   // まだ何も保存されていない
+  await client.execute({
+    sql: 'INSERT INTO store_backup (reason, data, updated_at, taken_at) VALUES (?,?,?,?)',
+    args: [reason, row.data, row.updated_at, new Date().toISOString()],
+  });
+  console.log(`storeの原本を退避しました（理由: ${reason} / ${row.data.length}文字 / 元の更新時刻: ${row.updated_at}）`);
+  return true;
+}
+
 async function migrateStoreToTables() {
   await withDBLock(async () => {
     const db = await readDBForWrite();
     if (!db || db[MIGRATION_FLAG]) return;
+
+    // 消す前に原本を取っておく。失敗したら引っ越しそのものを中止する
+    await backupStore('専用テーブルへの引っ越し前');
 
     let moved = 0;
     for (const rq of db.requests || []) {
