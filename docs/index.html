@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OPS日調アプリ</title>
+<meta name="description" content="ドットジェイピー OPS 日程調整アプリの入口ページです。">
+<!-- 検索結果に出す必要がないページなので、クロールさせない -->
+<meta name="robots" content="noindex">
+<!-- JSが無効でも本番へ飛ぶようにする保険（2秒後） -->
+<noscript><meta http-equiv="refresh" content="2;url=https://ops-nittyou-app.onrender.com/"></noscript>
+<style>
+  :root{
+    --navy:#132a4d;
+    --blue:#2f6fd0;
+    --ink:#1f2937;
+    --muted:#6b7280;
+    --bg:#f5f7fb;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;
+    background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",system-ui,sans-serif;
+    line-height:1.7;
+  }
+  .card{
+    width:min(100%,420px);background:#fff;border-radius:16px;padding:40px 32px;
+    box-shadow:0 10px 30px rgba(19,42,77,.10);text-align:center;
+  }
+  .logo{
+    width:56px;height:56px;margin:0 auto 20px;border-radius:14px;
+    background:linear-gradient(135deg,var(--navy),var(--blue));
+    display:grid;place-items:center;color:#fff;font-weight:700;letter-spacing:.05em;
+  }
+  h1{margin:0 0 6px;font-size:20px;color:var(--navy)}
+  p{margin:0;font-size:14px;color:var(--muted)}
+  .spinner{
+    width:28px;height:28px;margin:24px auto 16px;border-radius:50%;
+    border:3px solid #dbe3ef;border-top-color:var(--blue);
+    animation:spin .9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.spinner{animation-duration:3s}}
+  .note{margin-top:20px;font-size:12px;color:var(--muted)}
+  a.manual{color:var(--blue);font-weight:600}
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="logo">OPS</div>
+    <h1>OPS日調アプリ</h1>
+    <p>アプリを開いています…</p>
+    <div class="spinner" role="status" aria-label="読み込み中"></div>
+    <p class="note">
+      しばらく使われていなかった場合、起動に20〜60秒かかることがあります。<br>
+      画面が変わらないときは <a class="manual" href="https://ops-nittyou-app.onrender.com/">こちらから開いてください</a>。
+    </p>
+  </main>
+<script>
+  // 本番アプリの場所。移転したらここ1行だけ書き換える。
+  var APP = 'https://ops-nittyou-app.onrender.com/';
+  // パスワード再設定リンク等でクエリ・ハッシュが付いて来ることがあるので、
+  // 失わずにそのまま本番へ引き継ぐ。
+  var url = APP.replace(/\/$/, '/') + location.search + location.hash;
+  // replace を使い、戻るボタンでこのページに戻ってループしないようにする。
+  location.replace(url);
+</script>
+</body>
+</html>
