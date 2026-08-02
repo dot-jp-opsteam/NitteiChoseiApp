@@ -544,7 +544,23 @@ function scopeDBForUser(obj, user, users) {
       }
       : av;
   }
-  return { ...obj, interviews, events, event_responses, emails, notifications, availability };
+
+  /* 依頼は「自分が送った」か「自分が宛先」のものだけ。
+     宛先は送信時点で recipient_ids に固定されるので、それを見れば足りる。
+     支部で絞るだけでは足りない：同じ支部でも自分宛でない依頼は読ませない */
+  const requests = (obj.requests || []).filter((r) =>
+    r.sender_id === user.id || (r.recipient_ids || []).includes(user.id));
+
+  // インターン先マスタは支部ごとの持ち物
+  const internships = (obj.internships || []).filter((p) => p.branch_id === branchId);
+
+  // プロフィール（所属部署・インターン先）は自支部のメンバーの分だけ
+  const profiles = {};
+  for (const [id, p] of Object.entries(obj.profiles || {})) {
+    if (id === user.id || inBranch(id)) profiles[id] = p;
+  }
+
+  return { ...obj, interviews, events, event_responses, emails, notifications, availability, requests, internships, profiles };
 }
 
 /* 絞り込んだデータを受け取ったクライアントが書き戻してきたとき、
@@ -556,9 +572,14 @@ function mergeScoped(oldDB, clientDB, user, users) {
   const merged = isAdmin ? { ...clientDB } : { ...oldDB };
   /* 全体管理者に見えていないのは他の人の「自分だけ」の予定だけなので、
      そこだけ戻せばよい。戻さないと、管理者が保存するたびに消えてしまう */
+  /* ここに並べるキーは「クライアントから送られてきた内容を採用する」もの。
+     並べ忘れると、その項目は oldDB のまま＝保存が黙って捨てられる。
+     実際 requests / profiles / internships の追加時に並べ忘れがあり、
+     全体管理者以外の保存が消える不具合になっていた（2026-08-02修正）。
+     フロントのDBに項目を増やしたら、必ずここにも足すこと */
   const keys = isAdmin
-    ? ['events', 'event_responses']
-    : ['interviews', 'events', 'event_responses', 'notifications'];
+    ? ['events', 'event_responses', 'requests']
+    : ['interviews', 'events', 'event_responses', 'notifications', 'requests'];
   for (const key of keys) {
     const visibleIds = new Set((visible[key] || []).map((x) => x.id));
     const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
@@ -567,6 +588,34 @@ function mergeScoped(oldDB, clientDB, user, users) {
   if (isAdmin) {
     merged.emails = oldDB.emails || [];
     return merged;
+  }
+
+  /* インターン先マスタ。見えていなかった他支部の分を戻したうえで、
+     送られてきた分をそのまま採用する。他支部あての不正な追加をここで黙って捨てず、
+     validateDiff に届けて403で知らせるため（黙って捨てると、
+     登録できたつもりで消えている状態になり、今回直した不具合と同じことが起きる） */
+  {
+    const visibleIds = new Set((visible.internships || []).map((p) => p.id));
+    const hidden = (oldDB.internships || []).filter((p) => !visibleIds.has(p.id));
+    merged.internships = [...hidden, ...(clientDB.internships || [])];
+  }
+
+  /* プロフィールは、その人に見えていた範囲（自分＋自支部）だけを差し替える。
+     スタッフがインターン生のインターン先を代理設定する運用があるため、
+     自分の分だけに絞ってしまうと代理設定が保存できなくなる。
+     まだ存在しないユーザーの分を新規に作る場合もあるので、
+     「元データにあるか」ではなく「その人に見える相手か」で判断する */
+  {
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const canTouch = (id) => id === user.id || userById.get(id)?.branch_id === user.branch_id;
+    merged.profiles = { ...(oldDB.profiles || {}) };
+    for (const id of Object.keys(clientDB.profiles || {})) {
+      if (canTouch(id)) merged.profiles[id] = clientDB.profiles[id];
+    }
+    // 見えていたのに送り返されてこなかったものは、その人が消したということ
+    for (const id of Object.keys(visible.profiles || {})) {
+      if (!Object.prototype.hasOwnProperty.call(clientDB.profiles || {}, id)) delete merged.profiles[id];
+    }
   }
   merged.branches = clientDB.branches || oldDB.branches || [];
   // メール履歴はサーバー（POST /api/mail/send）だけが書き込む
@@ -681,6 +730,70 @@ function validateDiff(oldDB, newDB, actor, users) {
   // ---- メール履歴：専用APIでのみ変更する ----
   if (!sameJSON(oldDB.emails, newDB.emails)) {
     errs.push('メール履歴はこの方法では変更できません');
+  }
+
+  /* ---- 依頼：送信はスタッフ側だけ。受け取った人は「確認した」印だけ付けられる ----
+     依頼は一度送ったら中身を変えられない設計（宛先を送信時に固定しているため、
+     あとから件名や本文が変わると、受け取った人が見たものと食い違う） */
+  const oldRq = byId(oldDB.requests);
+  const newRq = byId(newDB.requests);
+  for (const [id, rq] of newRq) {
+    const prev = oldRq.get(id);
+    if (!prev) {
+      if (!isStaffLike) errs.push('依頼を送れるのはスタッフだけです');
+      else if (rq.sender_id !== actor.id) errs.push('依頼の送信者が不正です');
+      else if (!isAdmin && rq.branch_id !== actor.branch_id) errs.push('他の支部に依頼は送れません');
+      continue;
+    }
+    if (sameJSON(prev, rq)) continue;
+    // 中身が同じで read_by だけが増えている、かつ増えた分が自分だけなら許す
+    const onlyReadChanged = sameJSON({ ...prev, read_by: null }, { ...rq, read_by: null });
+    const prevReaders = new Set((prev.read_by || []).map((x) => x.user_id));
+    const nextReaders = (rq.read_by || []).map((x) => x.user_id);
+    const added = nextReaders.filter((u) => !prevReaders.has(u));
+    const removed = [...prevReaders].filter((u) => !nextReaders.includes(u));
+    if (!isAdmin && !onlyReadChanged) errs.push('送った依頼の内容はあとから変更できません');
+    else if (!isAdmin && (removed.length || added.some((u) => u !== actor.id))) {
+      errs.push('他の人の確認状況は変更できません');
+    }
+  }
+  for (const [id] of oldRq) {
+    if (!newRq.has(id) && !isAdmin) errs.push('依頼は削除できません');
+  }
+
+  /* ---- インターン先マスタ：自支部のものをスタッフ側だけが編集できる ---- */
+  const oldIp = byId(oldDB.internships);
+  const newIp = byId(newDB.internships);
+  for (const [id, ip] of newIp) {
+    const prev = oldIp.get(id);
+    if (prev && sameJSON(prev, ip)) continue;
+    if (!isStaffLike) errs.push('インターン先を登録・変更できるのはスタッフだけです');
+    else if (!isAdmin && ip.branch_id !== actor.branch_id) errs.push('他の支部のインターン先は変更できません');
+    else if (!isAdmin && prev && prev.branch_id !== actor.branch_id) errs.push('他の支部のインターン先は変更できません');
+  }
+  for (const [id, prev] of oldIp) {
+    if (newIp.has(id)) continue;
+    if (!isStaffLike) errs.push('インターン先を削除できるのはスタッフだけです');
+    else if (!isAdmin && prev.branch_id !== actor.branch_id) errs.push('他の支部のインターン先は削除できません');
+    // 登録中の人がいるインターン先は消せない（フロントにも同じ確認があるが、そちらは迂回できる）
+    else if (Object.values(newDB.profiles || {}).some((p) => p && p.internship_id === id)) {
+      errs.push('登録中のインターン生がいるため削除できません');
+    }
+  }
+
+  /* ---- プロフィール：自分の分。スタッフは同支部インターン生のインターン先だけ代理設定できる ---- */
+  const profKeys = new Set([...Object.keys(oldDB.profiles || {}), ...Object.keys(newDB.profiles || {})]);
+  for (const key of profKeys) {
+    if (isAdmin || key === actor.id) continue;
+    const before = (oldDB.profiles || {})[key];
+    const after = (newDB.profiles || {})[key];
+    if (sameJSON(before, after)) continue;
+    if (!isStaffLike) { errs.push('他の人のプロフィールは変更できません'); continue; }
+    if (!sameBranch(key)) { errs.push('他の支部の人のプロフィールは変更できません'); continue; }
+    // スタッフでも、代理で触ってよいのはインターン先だけ（所属部署は本人が決めるもの）
+    if (!sameJSON({ ...(before || {}), internship_id: null }, { ...(after || {}), internship_id: null })) {
+      errs.push('他の人のプロフィールで変更できるのはインターン先だけです');
+    }
   }
 
   return [...new Set(errs)];
