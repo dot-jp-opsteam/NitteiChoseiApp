@@ -1039,7 +1039,8 @@ function setTheme(t){
 }
 function toggleTheme(){
   setTheme(currentTheme()==='light'?'dark':'light');
-  const v=document.querySelector('#sbTheme .sv');
+  // テーマの入口はプロフィールの「ほかの設定」。開いていればその場で表示を更新する
+  const v=document.getElementById('profThemeVal');
   if(v)v.textContent=currentTheme()==='light'?'ライト':'ダーク';
   // カレンダーの予定チップは明暗で色の計算式が変わるので、開いている画面を描き直す
   if(ME&&!document.getElementById('app').classList.contains('hidden'))render();
@@ -1167,6 +1168,33 @@ let currentTab='home';
 let APPLY=null;              // 面談申請の一時状態
 let calYM=null, calSel=null; // イベントカレンダーの表示月・選択日
 let calMode='month';         // 'month' | 'list'（表示切替）
+let calFull=false;           // カレンダーだけを画面いっぱいに出しているか
+let calChips=null;           // 'dot' | 'text'（null のあいだは未決定）
+
+/* 予定の見せ方。狭い画面では1日ぶんが50px程度しかなく、
+   文字を入れても数文字で切れて読めないので、既定は色の丸にする。
+   一度選んだら端末に覚えさせる（画面幅が変わっても勝手に戻さない） */
+const CHIPS_KEY='ops_cal_chips_v1';
+function chipsMode(){
+  if(calChips)return calChips;
+  let saved=null;
+  try{saved=localStorage.getItem(CHIPS_KEY);}catch(e){}
+  calChips=(saved==='dot'||saved==='text')?saved:(isNarrow()?'dot':'text');
+  return calChips;
+}
+function setChipsMode(m){
+  calChips=m;
+  try{localStorage.setItem(CHIPS_KEY,m);}catch(e){}
+  render();
+}
+/* カレンダーの全画面表示。サイドバーと本文の余白を退かせて幅を最大まで使う */
+function setCalFull(on){
+  calFull=!!on;
+  document.documentElement.setAttribute('data-calfull',calFull?'1':'0');
+  if(calFull)collapseSidebar();
+  render();
+  window.scrollTo(0,0);
+}
 let IVFILTER={status:'all',branch:'all',q:''}; // 面談一覧フィルタ
 let AVSET=null;              // スタッフ不可時間エディタの一時状態
 let BLKFORM=null;            // 「日時でまとめて追加」フォームの状態
@@ -1188,22 +1216,20 @@ function buildNav(){
     `<button class="sb-item" data-tab="${t.id}" onclick="sbGo('${t.id}')" title="${t.label}">
       <span class="si">${ic(t.ic)}</span><span class="sl">${t.label}</span></button>`).join('');
 
+  /* 下段は「日常的に使う道具」だけを置く。
+     設定まわり（所属部署・テーマ・パスワード・ログアウト）は
+     プロフィールの「ほかの設定」に集約したので、ここには出さない */
   document.getElementById('sbAct').innerHTML=`
     ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す登録リンクを作る">
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
-    ${canSendRequest()?`<button class="sb-item" onclick="openMyDepartments()" title="自分の所属部署を設定する">
-      <span class="si">${ic('sitemap')}</span><span class="sl">所属部署</span></button>
-    <button class="sb-item" onclick="openInternshipMaster()" title="支部のインターン先を登録・編集する">
+    ${canSendRequest()?`<button class="sb-item" onclick="openInternshipMaster()" title="支部のインターン先を登録・編集する">
       <span class="si">${ic('workplace')}</span><span class="sl">インターン先</span></button>`:''}
     ${ME.role==='intern'?`<button class="sb-item" onclick="openMyInternshipForm()" title="自分のインターン先を設定する">
       <span class="si">${ic('workplace')}</span><span class="sl">インターン先</span></button>`:''}
-    <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="テーマを切り替える">
-      <span class="si">${ic('contrast')}</span><span class="sl">テーマ</span>
-      <span class="sv">${currentTheme()==='light'?'ライト':'ダーク'}</span></button>
-    <button class="sb-item" onclick="openPasswordChange()" title="パスワードを変更">
-      <span class="si">${ic('key')}</span><span class="sl">パスワードを変更</span></button>
-    <button class="sb-item" onclick="logout()" title="ログアウト">
-      <span class="si">${ic('power')}</span><span class="sl">ログアウト</span></button>`;
+    <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
+      <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
+    ${ME.role==='intern'?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
+      <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`:''}`;
 }
 /* インターン生が自分の担当スタッフを選び直す */
 /* インターン生から見た担当スタッフ。見るだけで、変更はできない。
@@ -1265,6 +1291,8 @@ function go(tab){
   if(tab==='apply')APPLY=null;      // 申請画面は毎回リセット
   if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
   if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
+  // ほかの画面へ移るときは全画面を解除する。解除し忘れるとサイドバーが隠れたままになる
+  if(tab!=='home'&&calFull){calFull=false;document.documentElement.setAttribute('data-calfull','0');}
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
   document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   window.scrollTo(0,0);
@@ -1274,7 +1302,9 @@ function render(){
   const m=document.getElementById('main');
   const r=ME.role, t=currentTab;
   let html='';
-  if(t==='home')html=viewHome();
+  // 全画面のときは、ホームの挨拶・入口タイルを出さずカレンダーだけにする
+  if(t==='home'&&calFull)html=eventsSection();
+  else if(t==='home')html=viewHome();
   else if(t==='apply')html=viewApply();
   else if(t==='my')html=viewMyInterviews();
   else if(t==='interviews')html=viewStaffInterviews();
@@ -1328,18 +1358,13 @@ function viewHome(){
     let statusCard='';
     if(latest){const s=STATUS[latest.status];
       statusCard=`<div class="hint">${ic('bulb')}<span>あなたの面談は現在 <b>「${s.t}」</b> です。${latest.status==='failed'?'再申請をお願いします。':''}</span></div>`;}
-    const inbox=DB.emails.filter(m=>m.receiver_id===ME.id).length;
-    const myStaff=findUser(ME.staff_id);
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
-    const myPlace=findInternship(getProfile(ME.id).internship_id);
+    /* ここは「これからやること」だけに絞る。
+       インターン先・受信メール・カレンダー連携は左メニューへ移した */
     return hi+statusCard+hexgrid([
       hex("go('apply')",'edit','面談を申請','希望日時を3つ提出'),
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
       hex("go('requests')",'megaphone','依頼','スタッフからの連絡',unread),
-      hex('openMyStaffForm()','staff','担当スタッフ',myStaff?esc(myStaff.nickname)+'さん':'まだ設定していません'),
-      hex('openMyInternshipForm()','workplace','インターン先',myPlace?esc(myPlace.name):'まだ設定していません'),
-      hex('openMailHistory()','mail','受信メール','面談確定などの通知',inbox),
-      hex('openGoogleCalendarSettings()','calendar','カレンダー連携','確定面談を自動登録'),
     ])+eventsSection();
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
@@ -1348,13 +1373,12 @@ function viewHome(){
     const items=[];
     if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
+    /* 所属部署はプロフィールの「ほかの設定」、カレンダー連携は左メニューへ移した。
+       「面談できない時間」は面談可能時間帯の中から開く（前提関係にあるため） */
     items.push(
       hex("go('interviews')",'list','面談一覧・確定','担当インターン生の面談',pend),
       hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread),
-      hex('openMyDepartments()','sitemap','所属部署',deptLabel(ME.id)),
-      hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごとに設定'),
-      hex("go('avset')",'ban','面談できない時間','30分枠で登録'),
-      hex('openGoogleCalendarSettings()','calendar','カレンダー連携','予定を自動で反映'),
+      hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごと・不可時間も'),
       hex('openMailHistory()','mail','メール履歴','送信済みメール'),
     );
     return hi+
@@ -2142,11 +2166,22 @@ function eventsSection(){
       const cls=['calcell',has?'has':'',key===todayKey?'today':'',key===calSel?'sel':'',hol?'holiday':''].join(' ');
       let chipsHtml='';
       if(has){
-        const showN=has>3?2:has;
-        const shown=items.slice(0,showN).map(it=>`<span class="chip" style="background:${chipBg(it.color)};color:${chipFg(it.color)}">${esc(it.label)}</span>`).join('');
-        const more=has>showN?`<span class="chipmore">+${has-showN}</span>`:'';
         // 予定そのものを押したときは作成フォームではなく、その日の一覧を開く
-        chipsHtml=`<div class="chips" onclick="event.stopPropagation();calSelect('${key}')">${shown}${more}</div>`;
+        const open=`onclick="event.stopPropagation();calSelect('${key}')"`;
+        if(chipsMode()==='dot'){
+          // 色の丸だけ。中身はこの下の一覧で読ませる
+          const maxDots=4;
+          const dots=items.slice(0,maxDots).map(it=>`<span class="cdotm" style="background:${it.color}"></span>`).join('');
+          const more=has>maxDots?`<span class="dotmore">…</span>`:'';
+          chipsHtml=`<div class="dots" ${open}>${dots}${more}</div>`;
+        }else{
+          // 全画面のほうが1日ぶんの幅も高さもあるので、1件多く見せる
+          const cap=calFull?4:3;
+          const showN=has>cap?cap-1:has;
+          const shown=items.slice(0,showN).map(it=>`<span class="chip" style="background:${chipBg(it.color)};color:${chipFg(it.color)}">${esc(it.label)}</span>`).join('');
+          const more=has>showN?`<span class="chipmore">+${has-showN}</span>`:'';
+          chipsHtml=`<div class="chips" ${open}>${shown}${more}</div>`;
+        }
       }
       cells+=`<div class="${cls} add"${hol?` title="${esc(hol)}"`:''} onclick="openEventForm(null,'${key}')"><span class="dn">${d}</span>${chipsHtml}</div>`;
     }
@@ -2156,7 +2191,7 @@ function eventsSection(){
     body=`<div class="calgrid">${dow}${cells}</div>`;
   }
 
-  const cal=`<div class="card cal"><div class="cb">
+  const cal=`<div class="card cal ${calMode==='month'&&chipsMode()==='dot'?'dots':''}"><div class="cb">
       <div class="calhead">
         <span class="cm"><span class="cm-m">${m+1}月</span><span class="cm-y">${y}</span></span>
         <span class="calnav">
@@ -2188,13 +2223,36 @@ function eventsSection(){
   const cards=(below.length||ivBelow.length||shBelow.length)?shCards+ivCards+below.map(eventCard).join('')
     :`<div class="empty"><div class="ei">${ic('calendar')}</div><p>${calSel?'この日の予定はありません。':'この月のイベントはありません。'}</p></div>`;
 
-  return `<div class="divider" style="margin:22px 0 14px"></div>
-    <div style="display:flex;align-items:center;margin:0 2px 10px;gap:8px">
-      <h2 style="margin:0;font-size:18px;display:flex;align-items:center;gap:8px">${ic('calendar')}カレンダー</h2>
-      <div class="calview-tabs" style="margin-left:auto">
+  const viewTabs=`<div class="calview-tabs">
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
-      </div></div>
+      </div>`;
+  // 予定の見せ方は月表示のときだけ意味がある（リストは元から全文が出る）
+  const chipTabs=calMode==='month'?`<div class="calview-tabs">
+        <button class="${chipsMode()==='dot'?'on':''}" onclick="setChipsMode('dot')" title="予定を色の丸で示す">ドット</button>
+        <button class="${chipsMode()==='text'?'on':''}" onclick="setChipsMode('text')" title="予定を文字で示す">文字</button>
+      </div>`:'';
+  const listBlock=`<div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
+    ${cards}`;
+
+  /* 全画面。説明文やお知らせは出さず、操作バーとカレンダーだけにする。
+     選んだ日の予定は、これまでどおり下にスクロールすれば読める */
+  if(calFull){
+    return `<div class="calfull-bar">
+        <button class="btn ghost sm" onclick="setCalFull(false)">${ic('back')}戻る</button>
+        <span class="calfull-tabs">${chipTabs}${viewTabs}</span>
+      </div>
+      ${cal}
+      <div style="padding:0 12px">${listBlock}</div>`;
+  }
+
+  return `<div class="divider" style="margin:22px 0 14px"></div>
+    <div class="calsec-head">
+      <h2>${ic('calendar')}カレンダー</h2>
+      <span class="calsec-tools">
+        ${chipTabs}${viewTabs}
+        <button class="btn ghost sm calfull-btn" onclick="setCalFull(true)" title="カレンダーを画面いっぱいに表示">${ic('panel')}全画面</button>
+      </span></div>
     <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定を追加できます。予定の帯をクリックすると、その日の一覧が下に出ます。</p>
     ${sharedCalOn()&&SHARED_CAL.configured?`<div class="hint">
       <span style="width:14px;height:14px;border-radius:4px;background:${SHARED_CAL_COLOR};flex:none"></span>
@@ -2206,8 +2264,7 @@ function eventsSection(){
       いまも支部の全員に見えているので、<b>個人的なものを「自分だけ」に変えられます</b>。タップして見直す。</span></div>`:''}
     <button class="btn pri block quiet" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しい予定を作成</button>
     ${cal}
-    <div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
-    ${cards}`;
+    ${listBlock}`;
 }
 // リスト（アジェンダ）表示：当月のイベント＋面談を時系列で
 function agendaView(list,ivs,shared,y,m){
@@ -2415,6 +2472,14 @@ function openAvailabilitySettings(){
     <div class="hint">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に不可時間として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
     <div style="margin-top:8px">${rows}</div>
     <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
+
+    <!-- 曜日ごとの設定と、日を指定した「この日のここは無理」は表裏一体なので
+         ここから続けて開けるようにする。逆向きの導線は viewAvailSet() 側にある -->
+    <div class="divider" style="margin:20px 0 14px"></div>
+    <p class="fl">個別の予定で埋まっている時間</p>
+    <p class="page-sub" style="margin-top:2px">上で決めた時間帯のうち、特定の日だけ空けられないときはこちらで30分枠を指定します。</p>
+    <button class="btn block" style="margin-top:10px" onclick="closeSheet();go('avset')">
+      ${ic('ban')}面談できない時間を登録</button>
     ${openCalendarButton()}`);
 }
 function toggleWk(d){
@@ -3209,17 +3274,25 @@ function canChangeMyBranch(u){u=u||ME;return !!u&&u.role!=='intern';}
 
 /* プロフィールの下に並べる「ほかの設定」。
    すでにある画面を作り直さず、ここから開けるようにしているだけ */
-function profileLinks(){
-  return [
-    ME.role==='intern'?['staff','担当スタッフ','openMyStaffForm()']:null,
-    ME.role==='intern'?['workplace','インターン先','openMyInternshipForm()']:null,
-    canSendRequest()?['workplace','インターン先の一覧','openInternshipMaster()']:null,
-    ['key','パスワードを変更','openPasswordChange()'],
-    ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
-  ].filter(Boolean).map(([icon,label,act])=>`<div class="row" style="cursor:pointer" onclick="${act}">
+/* 1行ぶんの見た目。右端はふつう「＞」だが、テーマのように
+   別画面へ行かず値が変わるだけのものは、そこに現在値を出す */
+function profileRow(icon,label,act,right){
+  return `<div class="row" style="cursor:pointer" onclick="${act}">
       <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic(icon)}</span>
       <span class="rmain"><span class="rt">${label}</span></span>
-      <span class="tile-arrow">${ic('chevron')}</span></div>`).join('');
+      ${right||`<span class="tile-arrow">${ic('chevron')}</span>`}</div>`;
+}
+function profileLinks(){
+  const themeVal=`<span id="profThemeVal" style="color:var(--mut);font-size:13px;font-weight:700">${currentTheme()==='light'?'ライト':'ダーク'}</span>`;
+  return [
+    ME.role==='intern'?['workplace','インターン先','openMyInternshipForm()']:null,
+    canSendRequest()?['workplace','インターン先の一覧','openInternshipMaster()']:null,
+    canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
+    ['key','パスワードを変更','openPasswordChange()'],
+    ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
+    // テーマだけは押しても画面が変わらないので、右端に「いまどちらか」を出す
+    ['contrast','テーマ','toggleTheme()',themeVal],
+  ].filter(Boolean).map(([icon,label,act,right])=>profileRow(icon,label,act,right)).join('');
 }
 function profileHead(){
   return `<div class="profhead">
@@ -3248,7 +3321,11 @@ function openMyProfile(){
 
     <div class="divider" style="margin-top:22px"></div>
     <p class="fl" style="margin-top:14px">ほかの設定</p>
-    <div class="card" style="margin-top:8px"><div class="rowlist">${profileLinks()}</div></div>`);
+    <div class="card" style="margin-top:8px"><div class="rowlist">${profileLinks()}</div></div>
+
+    <!-- ログアウトは戻せない操作なので、ほかの設定と混ぜず、間を空けて最後に置く -->
+    <button class="btn ghost block" style="margin-top:18px;color:var(--bad)"
+      onclick="logout()">${ic('power')}ログアウト</button>`);
 }
 
 /* ---------- 編集する画面 ---------- */

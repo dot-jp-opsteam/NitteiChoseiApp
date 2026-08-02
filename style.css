@@ -559,6 +559,44 @@
   .calcell .chip{width:100%;font-size:9px;font-weight:600;line-height:1.6;padding:1px 4px;
     border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
   .calcell .chipmore{font-size:9.5px;color:var(--mut);font-weight:700;padding:0 2px;line-height:1.4}
+
+  /* 予定を色の丸で示すモード。狭い画面では1日ぶんが50px程度しかなく、
+     文字を入れても数文字で切れて読めない。「その日に何かある」ことだけを
+     確実に伝え、中身はカレンダーの下の一覧で読ませる */
+  .calcell .dots{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;
+    gap:3px;width:100%;padding:0 2px}
+  .calcell .cdotm{width:5px;height:5px;border-radius:50%;flex:none}
+  .calcell .dotmore{font-size:9px;color:var(--mut);font-weight:800;line-height:1}
+
+  /* ---------- カレンダーの全画面表示 ---------- */
+  /* サイドバーと本文の余白を退かせて、幅を最後の1pxまで使う */
+  :root[data-calfull="1"] #sidebar{transform:translateX(-100%)}
+  :root[data-calfull="1"] #app{padding-left:0}
+  :root[data-calfull="1"] main{padding:0 0 40px}
+  /* 全画面では main の余白が0なので、下の打ち消し用マイナスマージンは要らない */
+  :root[data-calfull="1"] .cal{margin-left:0;margin-right:0}
+  .calfull-bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;
+    padding:10px 12px;background:var(--glass);
+    backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    border-bottom:1px solid var(--line)}
+  .calfull-tabs{margin-left:auto;display:flex;gap:6px;align-items:center}
+  /* 全画面ボタンは、幅が足りない画面でしか意味がない */
+  @media(min-width:761px){.calfull-btn{display:none}}
+
+  /* カレンダーの見出し行。広い画面では見出しと操作を左右に振り分ける */
+  .calsec-head{display:flex;align-items:center;margin:0 2px 10px;gap:8px}
+  .calsec-head h2{margin:0;font-size:18px;display:flex;align-items:center;gap:8px}
+  .calsec-tools{margin-left:auto;display:flex;gap:6px;align-items:center}
+  /* ボタンのラベルは折り返させない。折り返すと「ドッ／ト」のように割れる */
+  .calview-tabs button,.calfull-btn{white-space:nowrap}
+  /* 狭い画面では見出しと同じ行に5つも入らないので、操作だけ次の行に落とす */
+  @media(max-width:760px){
+    .calsec-head{flex-wrap:wrap}
+    .calsec-head h2{width:100%}
+    /* 5つ並べると 390px の端末では入りきらず、はみ出して横スクロールが出る。
+       縮めるとラベルが「ドッ／ト」のように割れるので、行を増やして逃がす */
+    .calsec-tools{margin-left:0;width:100%;flex-wrap:wrap}
+  }
   /* インターン生に渡す登録リンク。長いので折り返して全文を見せる */
   .invite-url{margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:var(--radius);
     background:var(--panel2);color:var(--brand);font-size:12.5px;font-weight:600;
@@ -792,10 +830,31 @@
      （押し出すと本文がほとんど読めなくなるため） */
   @media(max-width:760px){
     :root{--sb-w:56px}
+    /* expanded / collapsed の両方に同じ詳細度で指定する。
+       片方だけだと、メディアクエリの外にある :root[data-sb="collapsed"]{--sb-w:68px}
+       のほうが詳細度で勝ってしまい、レールは56pxなのに本文が68px押し出される
+       （12px ぶんが誰も使わない余白になる） */
     :root[data-sb="expanded"]{--sb-w:56px}   /* 中身は押し出さない */
+    :root[data-sb="collapsed"]{--sb-w:56px}
     #sidebar{width:236px}
     [data-sb="collapsed"] #sidebar{width:56px}
     main{padding:18px 14px 40px}
+
+    /* ---------- カレンダーだけは端まで使う ----------
+       1日ぶんの幅がすべてなので、カードの飾り（枠・角丸・影・角のマーカー）と
+       内側の余白を外し、main の左右余白も負マージンで打ち消す。
+       これだけで 1日 35px → 45px になる */
+    .cal{border:0;border-radius:0;box-shadow:none;background:transparent;
+      margin-left:-14px;margin-right:-14px}
+    .cal::before{display:none}
+    .cal>.cb{padding:10px 6px 6px}
+    .calcell{min-height:78px;padding:5px 2px}
+    .calcell .dn{font-size:15px}
+    .calcell.today .dn{width:24px;height:24px;font-size:13px}
+    .calcell .chip{font-size:10px;padding:1px 3px}
+    .caldow{font-size:12px}
+    /* ドット表示は文字が入らないぶん低くでき、月全体が一度に見渡せる */
+    .cal.dots .calcell{min-height:56px;gap:5px}
   }
 
   /* ---------- 六角形ハニカム ----------
