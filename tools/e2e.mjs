@@ -62,6 +62,7 @@ async function setupDB(dbPath) {
   const c = createClient({ url: 'file:' + dbPath });
   const now = new Date().toISOString();
   const exp = new Date(Date.now() + 3600e3).toISOString();
+  const oneYearAgo = new Date(Date.now() - 365 * 24 * 3600e3).toISOString();
 
   // server.js の initDB() と同じ形。起動時にCREATE TABLE IF NOT EXISTSされるので最低限だけ先に作る
   await c.execute(`CREATE TABLE IF NOT EXISTS users (
@@ -89,7 +90,13 @@ async function setupDB(dbPath) {
 
   const store = {
     branches: [{ id: 'b1', name: '東京' }, { id: 'b2', name: '大阪' }],
-    interviews: [], emails: [], availability: {},
+    interviews: [], availability: {},
+    /* メール履歴も専用テーブルへ引っ越す対象。
+       1件は最近のもの、1件は1年前（アーカイブされるはず）にしておく */
+    emails: [
+      { id: 'ml_old', sender_id: 'u_e2e_staff', receiver_id: 'u_e2e_intern', subject: '引っ越し前のメール', body: 'x', sent_at: now, delivered: false },
+      { id: 'ml_ancient', sender_id: 'u_e2e_staff', receiver_id: 'u_e2e_intern', subject: '1年前のメール', body: 'x', sent_at: oneYearAgo, delivered: false },
+    ],
     events: [{ id: 'ev_old', creator_id: 'u_e2e_staff2', branch_id: 'b2', title: '旧イベント', date: '2026-01-01', visibility: 'branch' }],
     // b2（他支部）のデータ。b1のユーザーからは見えても触れてもいけない
     profiles: { u_e2e_staff2: { departments: ['大阪の部署'] } },
@@ -103,7 +110,10 @@ async function setupDB(dbPath) {
       read_by: [{ user_id: 'u_e2e_staff2', at: now }], created_at: now,
     }],
     event_responses: [{ id: 'er_old', event_id: 'ev_old', user_id: 'u_e2e_staff2', response: 'yes' }],
-    notifications: [{ id: 'nt_old', type: 'info', msg: '引っ越し前の通知', branch_id: 'b2', at: now }],
+    notifications: [
+      { id: 'nt_old', type: 'info', msg: '引っ越し前の通知', branch_id: 'b2', at: now },
+      { id: 'nt_ancient', type: 'info', msg: '1年前の通知', branch_id: 'b2', at: oneYearAgo },
+    ],
   };
   await c.execute({
     sql: 'INSERT INTO store (id,data,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at',
@@ -168,6 +178,21 @@ async function readStoreRaw() {
   const rs = await c.execute('SELECT data FROM store WHERE id = 1');
   c.close();
   return JSON.parse(rs.rows[0].data);
+}
+/* アーカイブの確認用。テーブルの件数を直接数える */
+async function countRows() {
+  const c = createClient({ url: 'file:' + DB_PATH });
+  const cutoff = new Date(Date.now() - 183 * 24 * 60 * 60 * 1000).toISOString();
+  const one = async (sql, args = []) => Number((await c.execute({ sql, args })).rows[0].n);
+  const out = {
+    emails_old: await one('SELECT COUNT(*) n FROM emails WHERE sent_at < ?', [cutoff]),
+    emails_recent: await one('SELECT COUNT(*) n FROM emails WHERE sent_at >= ?', [cutoff]),
+    archived_emails: await one('SELECT COUNT(*) n FROM archived_emails'),
+    notifications_old: await one('SELECT COUNT(*) n FROM notifications WHERE at < ?', [cutoff]),
+    archived_notifications: await one('SELECT COUNT(*) n FROM archived_notifications'),
+  };
+  c.close();
+  return out;
 }
 
 /* 専用APIの呼び出し */
@@ -453,6 +478,38 @@ async function run() {
     const afterRace = await getDB(TOKENS.staff);
     const saved = (afterRace.internships || []).filter((p) => String(p.id).startsWith('ip_race')).length;
     check('成功した1件だけが保存されている', saved, 1);
+  }
+
+  console.log('\n─────── メール履歴 ───────');
+  {
+    const sent = await api(TOKENS.staff, 'POST', '/api/mail/send',
+      { receiver_id: 'u_e2e_intern', subject: '履歴テスト', body: '本文', kind: 'note' });
+    check('メールを送れる', sent.status, 200);
+    check('書き込んだ1件が返る', typeof sent.json.email?.id === 'string', true);
+
+    const senderView = await getDB(TOKENS.staff);
+    check('送った人には見える', (senderView.emails || []).some((m) => m.subject === '履歴テスト'), true);
+    const receiverView = await getDB(TOKENS.intern);
+    check('受け取った人にも見える', (receiverView.emails || []).some((m) => m.subject === '履歴テスト'), true);
+    const other = await getDB(TOKENS.staff2);
+    check('当事者以外には見えない', (other.emails || []).some((m) => m.subject === '履歴テスト'), false);
+
+    // 引っ越し前から store にあったメールも読めること
+    check('引っ越し前のメールも読める', (senderView.emails || []).some((m) => m.id === 'ml_old'), true);
+    const raw = await readStoreRaw();
+    check('store からメール履歴が取り除かれている', 'emails' in raw, false);
+  }
+
+  console.log('\n─────── 古い履歴のアーカイブ ───────');
+  {
+    /* 6ヶ月より古いものは、消さずにアーカイブ用テーブルへ移す。
+       セットアップで1年前のメールと通知を1件ずつ仕込んである */
+    const rows = await countRows();
+    check('古いメールが本体から消えている', rows.emails_old, 0);
+    check('古いメールがアーカイブに残っている', rows.archived_emails, 1);
+    check('古い通知が本体から消えている', rows.notifications_old, 0);
+    check('古い通知がアーカイブに残っている', rows.archived_notifications, 1);
+    check('新しいメールは残っている', rows.emails_recent > 0, true);
   }
 
   console.log('\n─────── 一斉アクセス（この設計変更の目的） ───────');

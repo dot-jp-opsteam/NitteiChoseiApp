@@ -2011,8 +2011,10 @@ async function sendMail(receiverId,kind){
     }
     closeSheet();
     toast(data.warning||(data.sent?'メールを送信しました':'履歴に記録しました'));
-    // 履歴はサーバーが書き込むので、取り直して画面に反映する
-    try{DB=await apiGetDB();sessionStorage.setItem(DB_KEY,JSON.stringify(DB));}catch(e){}
+    /* 履歴はサーバーが書き込む。書き込んだ1件が返ってくるので、
+       DB全体を取り直さずにそれだけ手元へ足す */
+    if(data.email)DB.emails=[...(DB.emails||[]),data.email];
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
     render();
   }catch(e){
     err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');
@@ -3947,7 +3949,7 @@ async function submitRequest(){
    メール履歴の閲覧
    ========================================================= */
 function openMailHistory(){
-  let list=DB.emails.slice();
+  let list=(DB.emails||[]).slice();
   if(ME.role==='intern')list=list.filter(m=>m.receiver_id===ME.id);        // 受信
   else if(ME.role==='staff'||ME.role==='branch_admin')list=list.filter(m=>m.sender_id===ME.id); // 送信
   list.sort((a,b)=>new Date(b.sent_at||0)-new Date(a.sent_at||0));
@@ -3966,7 +3968,7 @@ function openMailHistory(){
     <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>`);
 }
 function openMailDetail(id){
-  const m=DB.emails.find(x=>x.id===id);if(!m)return;
+  const m=(DB.emails||[]).find(x=>x.id===id);if(!m)return;
   const from=findUser(m.sender_id),to=findUser(m.receiver_id);
   openSheet(`<h3>${esc(m.subject)}</h3>
     <dl class="kv" style="margin:12px 0">

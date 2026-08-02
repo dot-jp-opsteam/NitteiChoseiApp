@@ -169,11 +169,43 @@ async function initDB() {
       at TEXT NOT NULL
     )
   `);
+  /* メール履歴。件数がいちばん増えやすく、store に入れておくと
+     関係ない保存のたびに全文を読み書きすることになる */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS emails (
+      id TEXT PRIMARY KEY,
+      sender_id TEXT,
+      receiver_id TEXT,
+      subject TEXT,
+      body TEXT,
+      sent_at TEXT NOT NULL,
+      delivered INTEGER
+    )
+  `);
+  /* 古くなった履歴の置き場。消すのではなく移すだけにして、
+     必要になったときに取り出せるようにしておく */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS archived_emails (
+      id TEXT PRIMARY KEY, sender_id TEXT, receiver_id TEXT,
+      subject TEXT, body TEXT, sent_at TEXT NOT NULL, delivered INTEGER,
+      archived_at TEXT NOT NULL
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS archived_notifications (
+      id TEXT PRIMARY KEY, type TEXT, msg TEXT, branch_id TEXT,
+      at TEXT NOT NULL, archived_at TEXT NOT NULL
+    )
+  `);
   for (const ddl of [
     'CREATE INDEX IF NOT EXISTS idx_requests_branch ON requests(branch_id)',
     'CREATE INDEX IF NOT EXISTS idx_request_reads_user ON request_reads(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_event_responses_event ON event_responses(event_id)',
     'CREATE INDEX IF NOT EXISTS idx_notifications_branch ON notifications(branch_id)',
+    'CREATE INDEX IF NOT EXISTS idx_notifications_at ON notifications(at)',
+    'CREATE INDEX IF NOT EXISTS idx_emails_sender ON emails(sender_id)',
+    'CREATE INDEX IF NOT EXISTS idx_emails_receiver ON emails(receiver_id)',
+    'CREATE INDEX IF NOT EXISTS idx_emails_sent_at ON emails(sent_at)',
   ]) await client.execute(ddl);
 
   // 既存DBへの追加カラム。既に存在する場合のエラーは無視する
@@ -291,13 +323,22 @@ async function migrateStoreToTables() {
       });
       moved++;
     }
+    for (const m of db.emails || []) {
+      await client.execute({
+        sql: 'INSERT OR IGNORE INTO emails (id, sender_id, receiver_id, subject, body, sent_at, delivered) VALUES (?,?,?,?,?,?,?)',
+        args: [m.id, m.sender_id || null, m.receiver_id || null, m.subject || '', m.body || '',
+          m.sent_at || new Date().toISOString(), m.delivered ? 1 : 0],
+      });
+      moved++;
+    }
 
     delete db.requests;
     delete db.event_responses;
     delete db.notifications;
+    delete db.emails;
     db[MIGRATION_FLAG] = true;
     await writeDB(db);
-    console.log(`依頼・出欠・通知を専用テーブルへ移しました（${moved}件）`);
+    console.log(`依頼・出欠・通知・メール履歴を専用テーブルへ移しました（${moved}件）`);
   });
 }
 
@@ -343,6 +384,62 @@ async function listNotificationsFor(user) {
       args: [user.branch_id || null],
     });
   return rs.rows.map((r) => ({ id: r.id, type: r.type, msg: r.msg, branch_id: r.branch_id, at: r.at }));
+}
+
+/* ---------- 古い履歴の片付け ----------
+   メール履歴と通知は放っておくと際限なく増える。
+   一定より古いものはアーカイブ用のテーブルへ移す。
+   消さずに移すだけなので、後から必要になっても取り出せる。 */
+const ARCHIVE_AFTER_DAYS = 183;   // およそ6ヶ月。ドットジェイピーの期の区切りに合わせている
+const ARCHIVE_BATCH = 1000;       // 一度に動かす上限。起動を遅くしないため小分けにする
+
+async function archiveOldRecords() {
+  const cutoff = new Date(Date.now() - ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const archivedAt = new Date().toISOString();
+  let total = 0;
+  try {
+    for (const t of [
+      { from: 'emails', to: 'archived_emails', dateCol: 'sent_at',
+        cols: 'id, sender_id, receiver_id, subject, body, sent_at, delivered' },
+      { from: 'notifications', to: 'archived_notifications', dateCol: 'at',
+        cols: 'id, type, msg, branch_id, at' },
+    ]) {
+      // 移してから消す。順番が逆だと、途中で失敗したときに記録そのものが消えてしまう
+      const ins = await client.execute({
+        sql: `INSERT OR IGNORE INTO ${t.to} (${t.cols}, archived_at)
+              SELECT ${t.cols}, ? FROM ${t.from} WHERE ${t.dateCol} < ? LIMIT ${ARCHIVE_BATCH}`,
+        args: [archivedAt, cutoff],
+      });
+      const moved = Number(ins.rowsAffected || 0);
+      if (moved) {
+        await client.execute({
+          sql: `DELETE FROM ${t.from} WHERE ${t.dateCol} < ? AND id IN (SELECT id FROM ${t.to})`,
+          args: [cutoff],
+        });
+        total += moved;
+      }
+    }
+    if (total) console.log(`${ARCHIVE_AFTER_DAYS}日より古い履歴を${total}件アーカイブしました`);
+  } catch (e) {
+    // 片付けに失敗してもアプリの動作には影響しないので、記録だけ残して続行する
+    console.error('古い履歴の片付けに失敗しました', e);
+  }
+  return total;
+}
+
+/* メール履歴は当事者だけが読める（送った人・受け取った人）。
+   以前は全員が全員分の本文を読めていた */
+async function listEmailsFor(user) {
+  const rs = user.role === 'admin'
+    ? await client.execute('SELECT * FROM emails')
+    : await client.execute({
+      sql: 'SELECT * FROM emails WHERE sender_id = ? OR receiver_id = ?',
+      args: [user.id, user.id],
+    });
+  return rs.rows.map((r) => ({
+    id: r.id, sender_id: r.sender_id, receiver_id: r.receiver_id,
+    subject: r.subject, body: r.body, sent_at: r.sent_at, delivered: !!r.delivered,
+  }));
 }
 
 /* 通知は依頼の送信などに付随して積まれる。専用APIの中から呼ぶ。
@@ -735,9 +832,6 @@ function scopeDBForUser(obj, user, users) {
 
   const interviews = (obj.interviews || []).filter((iv) =>
     isIntern ? iv.intern_id === user.id : (iv.staff_id === user.id || inBranch(iv.intern_id)));
-  // メールは当事者だけ。以前は全員が全員分の本文を読めていた
-  const emails = (obj.emails || []).filter((m) => m.receiver_id === user.id || m.sender_id === user.id);
-
   /* 空き日程は面談の予約画面で必要なので自支部のスタッフ分を返す。
      ただしインターン生には予定の中身（「アルバイト」など私的な情報）を伏せ、
      時間帯だけを渡す */
@@ -762,7 +856,7 @@ function scopeDBForUser(obj, user, users) {
     if (id === user.id || inBranch(id)) profiles[id] = p;
   }
 
-  return { ...obj, interviews, events, emails, availability, internships, profiles };
+  return { ...obj, interviews, events, availability, internships, profiles };
 }
 
 /* 絞り込んだデータを受け取ったクライアントが書き戻してきたとき、
@@ -771,7 +865,7 @@ function scopeDBForUser(obj, user, users) {
 /* 専用テーブルへ移した項目。PUT /api/db から送られてきても採用しない。
    古い画面を開いたままのタブが、テーブル側の最新の内容を
    自分の持っている古い一覧で上書きしてしまうのを防ぐ */
-const TABLE_BACKED_KEYS = ['requests', 'event_responses', 'notifications'];
+const TABLE_BACKED_KEYS = ['requests', 'event_responses', 'notifications', 'emails'];
 
 function mergeScoped(oldDB, clientDB, user, users) {
   const isAdmin = user.role === 'admin';
@@ -793,10 +887,7 @@ function mergeScoped(oldDB, clientDB, user, users) {
     const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
     merged[key] = [...hidden, ...(clientDB[key] || [])];
   }
-  if (isAdmin) {
-    merged.emails = oldDB.emails || [];
-    return merged;
-  }
+  if (isAdmin) return merged;
 
   /* インターン先マスタ。見えていなかった他支部の分を戻したうえで、
      送られてきた分をそのまま採用する。他支部あての不正な追加をここで黙って捨てず、
@@ -826,8 +917,6 @@ function mergeScoped(oldDB, clientDB, user, users) {
     }
   }
   merged.branches = clientDB.branches || oldDB.branches || [];
-  // メール履歴はサーバー（POST /api/mail/send）だけが書き込む
-  merged.emails = oldDB.emails || [];
   /* 空き日程は自分の分だけを採用し、他人の分は送られてきても黙って捨てる。
      403で弾かないのは、インターン生には予定名を伏せた「削った状態」で渡しているため。
      送り返された内容と元データを直接比べると、正常な保存まで毎回はじいてしまう。
@@ -913,12 +1002,7 @@ function validateDiff(oldDB, newDB, actor, users) {
     }
   }
 
-  // ---- メール履歴：専用APIでのみ変更する ----
-  if (!sameJSON(oldDB.emails, newDB.emails)) {
-    errs.push('メール履歴はこの方法では変更できません');
-  }
-
-  /* 依頼・出欠・通知はここでは検証しない。専用テーブルへ移し、
+  /* 依頼・出欠・通知・メール履歴はここでは検証しない。専用テーブルへ移し、
      それぞれの専用APIの中で権限を確かめている */
 
   /* ---- インターン先マスタ：自支部のものをスタッフ側だけが編集できる ---- */
@@ -1668,18 +1752,19 @@ app.post('/api/mail/send', requireAuth, async (req, res) => {
       }
     }
 
-    // 同時に何通も送られると、照合が無いぶん片方の履歴が消えるため列に並べる
-    await withDBLock(async () => {
-      const db = (await readDBForWrite()) || {};
-      db.emails = db.emails || [];
-      db.emails.push({
-        id: 'ml_' + crypto.randomBytes(4).toString('hex'),
-        sender_id: actor.id, receiver_id, subject: String(subject).trim(),
-        body: String(body || ''), sent_at: new Date().toISOString(), delivered: sent,
-      });
-      await writeDB(db);
+    /* 履歴は専用テーブルに1行足すだけ。以前は store 全体を読み書きしており、
+       同時に送ると片方の履歴が消えていた */
+    const record = {
+      id: 'ml_' + crypto.randomBytes(4).toString('hex'),
+      sender_id: actor.id, receiver_id, subject: String(subject).trim(),
+      body: String(body || ''), sent_at: new Date().toISOString(), delivered: sent,
+    };
+    await client.execute({
+      sql: 'INSERT INTO emails (id, sender_id, receiver_id, subject, body, sent_at, delivered) VALUES (?,?,?,?,?,?,?)',
+      args: [record.id, record.sender_id, record.receiver_id, record.subject,
+        record.body, record.sent_at, record.delivered ? 1 : 0],
     });
-    res.json({ ok: true, sent, warning });
+    res.json({ ok: true, sent, warning, email: record });
   } catch (e) {
     console.error('メール送信処理に失敗しました', e);
     invalidateDBCache();
@@ -1706,10 +1791,10 @@ app.get('/api/db', requireAuth, async (req, res) => {
 
 /* 専用テーブルへ移した項目を、フロントが期待するキー名で返す */
 async function readTableBacked(user) {
-  const [requests, event_responses, notifications] = await Promise.all([
-    listRequestsFor(user), listEventResponses(), listNotificationsFor(user),
+  const [requests, event_responses, notifications, emails] = await Promise.all([
+    listRequestsFor(user), listEventResponses(), listNotificationsFor(user), listEmailsFor(user),
   ]);
-  return { requests, event_responses, notifications };
+  return { requests, event_responses, notifications, emails };
 }
 
 /* インターン生には、面談の申し込み先として必要な自支部のスタッフだけを見せる。
@@ -2273,6 +2358,9 @@ initDB()
         renewExpiringWatches();
         setInterval(renewExpiringWatches, 6 * 60 * 60 * 1000); // 6時間ごと
       }
+      // 古い履歴の片付け。起動時に一度と、その後は1日おき
+      archiveOldRecords();
+      setInterval(archiveOldRecords, 24 * 60 * 60 * 1000);
     });
   })
   .catch((e) => {

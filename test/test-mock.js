@@ -398,14 +398,15 @@
 
     /* --- メール送信（本当には送らず、履歴にだけ残す） --- */
     if (path === '/api/mail/send') {
-      STORE.emails = STORE.emails || [];
-      STORE.emails.push({
+      var mail = {
         id: 'ml_' + uid(), sender_id: ME.id, receiver_id: (body && body.receiver_id) || null,
         subject: (body && body.subject) || '', body: (body && body.body) || '',
         sent_at: new Date().toISOString(), delivered: false, kind: (body && body.kind) || null,
-      });
+      };
+      STORE.emails = STORE.emails || [];
+      STORE.emails.push(mail);
       touch();
-      return json({ ok: true, sent: false, warning: 'テストページのため、実際には送信していません' });
+      return json({ ok: true, sent: false, email: mail, warning: 'テストページのため、実際には送信していません' });
     }
 
     /* --- 招待リンク --- */
