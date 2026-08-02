@@ -362,6 +362,32 @@ async function putDB(){
   const {users,...body}=DB;
   return api('/api/db',{method:'PUT',body:JSON.stringify({...body,_baseUpdatedAt:DB.updatedAt})});
 }
+/* 専用APIを1回呼んで、作られた（または更新された）1件を受け取る。
+   一斉に押される操作は、DB全体を送り直す mutate() ではなくこちらを使う。
+   通信や権限の失敗は画面上部の帯で知らせ、null を返す。
+   key は応答の中の受け取りたい項目名（'interview' など） */
+async function apiCall(path,opts,key){
+  try{
+    const res=await api(path,opts);
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'保存できませんでした。');
+      return null;
+    }
+    const data=await res.json();
+    // 付随して積まれた通知があれば、手元の一覧にも反映する
+    if(data.notification)DB.notifications=[...(DB.notifications||[]),data.notification];
+    setSaveError(null);
+    return key?(data[key]??null):data;
+  }catch(e){
+    console.warn('保存に失敗しました',path,e);
+    setSaveError('保存できていません。通信状況をご確認ください。');
+    return null;
+  }
+}
+const apiCreate=(path,body,key)=>apiCall(path,{method:'POST',body:JSON.stringify(body)},key);
+const apiPatch=(path,body,key)=>apiCall(path,{method:'PATCH',body:JSON.stringify(body)},key);
+
 async function mutate(fn){
   NOTI_QUEUE=[];              // やり直しのたびに積み直すので、始める前に空にする
   fn(DB);
@@ -531,7 +557,7 @@ function hm(iso){const d=new Date(iso);return `${pad(d.getHours())}:${pad(d.getM
 function genSlots(staffId,days=14){
   const weekly=getWeekly(staffId);
   const blocks=((DB.availability[staffId]||{}).blocks||[]).map(b=>[new Date(b.start).getTime(),new Date(b.end).getTime()]);
-  const taken=DB.interviews.filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
+  const taken=(DB.interviews||[]).filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
     .map(i=>new Date(i.confirmed_datetime).getTime());
   const now=Date.now();const out=[];
   for(let off=0;off<days;off++){
@@ -558,7 +584,7 @@ function genSlots(staffId,days=14){
 function genEditGrid(staffId,weekOffset){
   const weekly=getWeekly(staffId);
   const blocks=((DB.availability[staffId]||{}).blocks||[]);
-  const taken=DB.interviews.filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
+  const taken=(DB.interviews||[]).filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
     .map(i=>new Date(i.confirmed_datetime).getTime());
   const now=Date.now();
   const today=new Date();today.setHours(0,0,0,0);
@@ -1360,7 +1386,7 @@ function viewHome(){
   const hi=`<h1 class="page">こんにちは、${esc(ME.nickname)}さん</h1>
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
   if(ME.role==='intern'){
-    const mine=DB.interviews.filter(i=>i.intern_id===ME.id);
+    const mine=(DB.interviews||[]).filter(i=>i.intern_id===ME.id);
     const latest=mine.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
     let statusCard='';
     if(latest){const s=STATUS[latest.status];
@@ -1376,7 +1402,7 @@ function viewHome(){
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
   if(ME.role==='staff'||ME.role==='branch_admin'){
-    const pend=DB.interviews.filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
+    const pend=(DB.interviews||[]).filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
     const items=[];
     if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
@@ -1669,7 +1695,7 @@ async function disconnectGoogleCalendar(){
 function genApplyGrid(staffId,weekOffset){
   const weekly=getWeekly(staffId);
   const blocks=((DB.availability[staffId]||{}).blocks||[]).map(b=>[new Date(b.start).getTime(),new Date(b.end).getTime()]);
-  const taken=DB.interviews.filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
+  const taken=(DB.interviews||[]).filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
     .map(i=>new Date(i.confirmed_datetime).getTime());
   const now=Date.now();
   const today=new Date();today.setHours(0,0,0,0);
@@ -1783,14 +1809,16 @@ async function submitApply(){
   if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
   // 選択順を第1〜第3希望に。空きスロットのみ選択できるため過去・重複は発生しない。
   const sorted=APPLY.sel.slice(); // 選択順を尊重
-  const iv={id:'iv_'+uid(),intern_id:ME.id,staff_id:APPLY.staff||null,status:'applied',
+  /* 申請は専用APIで送る。締切前は全員がここに集中するため、
+     DB全体を保存し直す方式では大半が保存できなくなる */
+  const iv=await apiCreate('/api/interviews',{
+    staff_id:APPLY.staff||null,
     choice1:sorted[0]||null,choice2:sorted[1]||null,choice3:sorted[2]||null,
-    meeting_type:APPLY.mtype,confirmed_datetime:null,note:(APPLY.note||'').trim(),created_at:nowISO()};
-  const ok=await mutate(db=>{
-    db.interviews.push(iv);
-    pushNotification(db,'面談申請',`${ME.nickname}さんが面談を申請しました`);
-  });
-  if(!ok)return;   // 保存できていないので「申請しました」とは言わない
+    meeting_type:APPLY.mtype,note:(APPLY.note||'').trim(),
+  },'interview');
+  if(!iv)return;   // 保存できていないので「申請しました」とは言わない
+  DB.interviews=[...(DB.interviews||[]),iv];
+  sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
   updateBell();
   toast('面談を申請しました');
   go('my');
@@ -1800,7 +1828,7 @@ async function submitApply(){
    面談状況（インターン生）
    ========================================================= */
 function viewMyInterviews(){
-  const mine=DB.interviews.filter(i=>i.intern_id===ME.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const mine=(DB.interviews||[]).filter(i=>i.intern_id===ME.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   if(!mine.length)return `<h1 class="page">面談状況</h1>
     <div class="empty"><div class="ei">${ic('list')}</div><p>まだ面談の申請がありません。</p>
     <button class="btn pri" onclick="go('apply')">面談を申請する</button></div>`;
@@ -1830,7 +1858,7 @@ function viewMyInterviews(){
    ========================================================= */
 function viewStaffInterviews(){
   // staff sees interviews of own branch (assigned to them or their branch)
-  const all=DB.interviews.filter(iv=>{
+  const all=(DB.interviews||[]).filter(iv=>{
     const intern=findUser(iv.intern_id);
     return iv.staff_id===ME.id || (intern&&intern.branch_id===ME.branch_id);
   }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||new Date(b.created_at)-new Date(a.created_at);});
@@ -1873,7 +1901,7 @@ function viewStaffInterviews(){
 function setIvFilter(key,val){IVFILTER[key]=val;render();}
 function clearIvFilter(){IVFILTER={status:'all',branch:'all',q:''};render();}
 function openInterview(id){
-  const iv=DB.interviews.find(x=>x.id===id);const intern=findUser(iv.intern_id);const s=STATUS[iv.status];
+  const iv=(DB.interviews||[]).find(x=>x.id===id);const intern=findUser(iv.intern_id);const s=STATUS[iv.status];
   const choiceRow=(n,val)=>`<div class="choice ${iv.confirmed_datetime===val?'sel':''}">
       <span class="cn">${n}</span><span>${fmtDT(val)}</span>
       ${iv.status==='applied'?`<button class="btn pri sm pick" onclick="confirmInterview('${id}','${val}')">これで確定</button>`:
@@ -1908,16 +1936,18 @@ function openInterview(id){
     ${iv.note?`<div class="hint" style="margin-bottom:12px">${ic('message')}<span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
     ${actions}`);
 }
+/* 手元の面談一覧を、サーバーが返した内容で入れ替える */
+function applyInterview(next){
+  DB.interviews=(DB.interviews||[]).map(x=>x.id===next.id?next:x);
+  sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+}
 async function confirmInterview(id,dt){
-  const iv=DB.interviews.find(x=>x.id===id);
+  const iv=(DB.interviews||[]).find(x=>x.id===id);
   if(!iv)return;
-  const ok=await mutate(db=>{
-    const t=db.interviews.find(x=>x.id===id);
-    if(!t)return;
-    t.status='fixed';t.confirmed_datetime=dt;
-    pushNotification(db,'面談確定',`${findUser(t.intern_id)?.nickname}さんの面談が確定しました`);
-  });
-  if(!ok)return;
+  const next=await apiPatch(`/api/interviews/${encodeURIComponent(id)}`,
+    {status:'fixed',confirmed_datetime:dt},'interview');
+  if(!next)return;
+  applyInterview(next);
   updateBell();
   closeSheet();
   toast('面談を確定しました（カレンダー登録・通知済み）');
@@ -1940,19 +1970,15 @@ function doCustomConfirm(id){
   confirmInterview(id,new Date(v).toISOString());
 }
 async function failInterview(id){
-  const iv=DB.interviews.find(x=>x.id===id);
+  const iv=(DB.interviews||[]).find(x=>x.id===id);
   if(!iv)return;
   const intern=findUser(iv.intern_id);
   if(!await confirmSheet('面談を不成立にする',
     `${intern?.nickname||'この学生'}さんの面談を「不成立」にします。続けて、再提出依頼メールの作成画面に進みます。`,
     '不成立にする'))return;
-  const ok=await mutate(db=>{
-    const t=db.interviews.find(x=>x.id===id);
-    if(!t)return;
-    t.status='failed';t.confirmed_datetime=null;
-    pushNotification(db,'面談不成立',`${findUser(t.intern_id)?.nickname}さんの面談が不成立になりました`);
-  });
-  if(!ok)return;
+  const next=await apiPatch(`/api/interviews/${encodeURIComponent(id)}`,{status:'failed'},'interview');
+  if(!next)return;
+  applyInterview(next);
   updateBell();
   closeSheet();
   // show mail template per spec
@@ -1960,11 +1986,9 @@ async function failInterview(id){
     `お疲れ様です。\n\nご提出いただいた候補日では面談日程の調整が難しかったため、お手数ですが再度候補日をご提出いただけますでしょうか。\n\nご迷惑をおかけし申し訳ありません。\n\nよろしくお願いいたします。`,'failed');
 }
 async function reopenInterview(id){
-  const ok=await mutate(db=>{
-    const t=db.interviews.find(x=>x.id===id);
-    if(t)t.status='applied';
-  });
-  if(!ok)return;
+  const next=await apiPatch(`/api/interviews/${encodeURIComponent(id)}`,{status:'applied'},'interview');
+  if(!next)return;
+  applyInterview(next);
   closeSheet();toast('申請中に戻しました');go('interviews');
 }
 
@@ -2128,7 +2152,7 @@ function reloadSharedCal(){SHARED_CAL.events={};SHARED_CAL.loading={};render();}
 
 // 自分に関係する確定面談を取得（カレンダー併記用）
 function myInterviewsForCal(){
-  return DB.interviews.filter(iv=>{
+  return (DB.interviews||[]).filter(iv=>{
     if(iv.status!=='fixed'||!iv.confirmed_datetime)return false;
     if(ME.role==='admin')return true;
     if(ME.role==='intern')return iv.intern_id===ME.id;
@@ -3208,7 +3232,7 @@ function viewMyInterns(){
   }
   const rows=list.map(u=>{
     const place=findInternship(getProfile(u.id).internship_id);
-    const pend=DB.interviews.filter(i=>i.intern_id===u.id&&i.status==='applied').length;
+    const pend=(DB.interviews||[]).filter(i=>i.intern_id===u.id&&i.status==='applied').length;
     return `<div class="row" style="cursor:pointer" onclick="openInternCard('${u.id}')">
       <span class="av hexav">${esc(initials(u.nickname))}</span>
       <span class="rmain"><span class="rt">${esc(u.nickname)}

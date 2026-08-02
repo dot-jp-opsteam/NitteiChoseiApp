@@ -396,6 +396,54 @@
       return json({ ok: true, added: added });
     }
 
+    /* --- 面談（本番では専用テーブルを持つ専用API） --- */
+    if (path === '/api/interviews' && method === 'POST') {
+      var iv = {
+        id: 'iv_' + uid(), intern_id: ME.id, staff_id: (body && body.staff_id) || null,
+        branch_id: ME.branch_id, status: 'applied',
+        choice1: body && body.choice1, choice2: (body && body.choice2) || null,
+        choice3: (body && body.choice3) || null,
+        meeting_type: (body && body.meeting_type) || 'meet',
+        confirmed_datetime: null, note: (body && body.note) || '',
+        created_at: new Date().toISOString(),
+      };
+      STORE.interviews = STORE.interviews || [];
+      STORE.interviews.push(iv);
+      var applyNoti = {
+        id: 'nt_' + uid(), type: '面談申請', branch_id: ME.branch_id,
+        msg: ME.nickname + 'さんが面談を申請しました', at: new Date().toISOString(),
+      };
+      STORE.notifications = STORE.notifications || [];
+      STORE.notifications.push(applyNoti);
+      touch();
+      return json({ ok: true, interview: iv, notification: applyNoti });
+    }
+    var ivMatch = /^\/api\/interviews\/([^/]+)$/.exec(path);
+    if (ivMatch && method === 'PATCH') {
+      var target2 = (STORE.interviews || []).filter(function (x) { return x.id === ivMatch[1]; })[0];
+      if (!target2) return json({ error: '面談が見つかりません' }, 404);
+      target2.status = body && body.status;
+      target2.confirmed_datetime = target2.status === 'fixed' ? (body && body.confirmed_datetime) : null;
+      var noti2 = null;
+      if (target2.status === 'fixed' || target2.status === 'failed') {
+        var who = users.filter(function (u) { return u.id === target2.intern_id; })[0];
+        noti2 = {
+          id: 'nt_' + uid(), type: target2.status === 'fixed' ? '面談確定' : '面談不成立',
+          branch_id: ME.branch_id, at: new Date().toISOString(),
+          msg: (who ? who.nickname : '') + 'さんの面談が' + (target2.status === 'fixed' ? '確定' : '不成立に') + 'しました',
+        };
+        STORE.notifications = STORE.notifications || [];
+        STORE.notifications.push(noti2);
+      }
+      touch();
+      return json({ ok: true, interview: target2, notification: noti2 });
+    }
+    if (ivMatch && method === 'DELETE') {
+      STORE.interviews = (STORE.interviews || []).filter(function (x) { return x.id !== ivMatch[1]; });
+      touch();
+      return json({ ok: true });
+    }
+
     /* --- メール送信（本当には送らず、履歴にだけ残す） --- */
     if (path === '/api/mail/send') {
       var mail = {

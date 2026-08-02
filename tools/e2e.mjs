@@ -90,7 +90,9 @@ async function setupDB(dbPath) {
 
   const store = {
     branches: [{ id: 'b1', name: '東京' }, { id: 'b2', name: '大阪' }],
-    interviews: [], availability: {},
+    availability: {},
+    // 面談も専用テーブルへ引っ越す対象
+    interviews: [{ id: 'iv_old', intern_id: 'u_e2e_intern', staff_id: 'u_e2e_staff', status: 'applied', choice1: '2026-03-01T10:00:00.000Z', meeting_type: 'meet', created_at: now }],
     /* メール履歴も専用テーブルへ引っ越す対象。
        1件は最近のもの、1件は1年前（アーカイブされるはず）にしておく */
     emails: [
@@ -204,6 +206,7 @@ async function api(token, method, pathname, payload) {
   return { status: r.status, json: await r.json().catch(() => ({})) };
 }
 let REQ_ID = null;   // テストの中で作った依頼のID
+let IV_ID = null;    // テストの中で作った面談のID
 
 /* フロントの mutate() と同じ流れ：受け取った内容を書き換えて丸ごと送り返す */
 async function putDB(token, mutateFn) {
@@ -480,6 +483,70 @@ async function run() {
     check('成功した1件だけが保存されている', saved, 1);
   }
 
+  console.log('\n─────── 面談（専用API） ───────');
+  {
+    const applied = await api(TOKENS.intern, 'POST', '/api/interviews', {
+      staff_id: 'u_e2e_staff', choice1: '2026-09-01T10:00:00.000Z',
+      choice2: '2026-09-02T10:00:00.000Z', meeting_type: 'meet', note: 'よろしくお願いします',
+    });
+    check('インターン生が面談を申請できる', applied.status, 200);
+    IV_ID = applied.json.interview?.id;
+    check('状態が「申請中」で作られる', applied.json.interview?.status, 'applied');
+    check('申請の通知が積まれる', !!applied.json.notification, true);
+
+    const byStaff = await api(TOKENS.staff, 'POST', '/api/interviews', { choice1: '2026-09-01T10:00:00.000Z' });
+    check('スタッフは面談を申請できない', byStaff.status, 403);
+    const crossStaff = await api(TOKENS.intern, 'POST', '/api/interviews',
+      { staff_id: 'u_e2e_staff2', choice1: '2026-09-01T10:00:00.000Z' });
+    check('他支部のスタッフには申請できない', crossStaff.status, 403);
+
+    // 見える範囲
+    const staffView = await getDB(TOKENS.staff);
+    check('担当スタッフに見える', (staffView.interviews || []).some((iv) => iv.id === IV_ID), true);
+    const otherView = await getDB(TOKENS.staff2);
+    check('他支部のスタッフには見えない', (otherView.interviews || []).some((iv) => iv.id === IV_ID), false);
+    const internView = await getDB(TOKENS.intern);
+    check('申請した本人に見える', (internView.interviews || []).some((iv) => iv.id === IV_ID), true);
+    check('希望日時が保たれている',
+      (internView.interviews || []).find((iv) => iv.id === IV_ID)?.choice1, '2026-09-01T10:00:00.000Z');
+
+    // 状態の変更
+    const byIntern = await api(TOKENS.intern, 'PATCH', `/api/interviews/${IV_ID}`,
+      { status: 'fixed', confirmed_datetime: '2026-09-01T10:00:00.000Z' });
+    check('インターン生は面談を確定できない', byIntern.status, 403);
+    const noDate = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'fixed' });
+    check('日時なしでは確定できない', noDate.status, 400);
+    const badStatus = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'なにか' });
+    check('知らない状態は受け付けない', badStatus.status, 400);
+
+    const fixed = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`,
+      { status: 'fixed', confirmed_datetime: '2026-09-01T10:00:00.000Z' });
+    check('スタッフが面談を確定できる', fixed.status, 200);
+    check('確定日時が入る', fixed.json.interview?.confirmed_datetime, '2026-09-01T10:00:00.000Z');
+    check('確定の通知が積まれる', fixed.json.notification?.type, '面談確定');
+
+    const failed = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'failed' });
+    check('不成立にすると確定日時が消える', failed.json.interview?.confirmed_datetime, null);
+
+    const crossBranch = await api(TOKENS.staff2, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'applied' });
+    check('他支部のスタッフは変更できない', crossBranch.status, 403);
+    await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'applied' });
+
+    // 取り下げ
+    const otherDelete = await api(TOKENS.staff2, 'DELETE', `/api/interviews/${IV_ID}`);
+    check('関係ない人は取り下げできない', otherDelete.status, 403);
+    const own = await api(TOKENS.intern, 'DELETE', `/api/interviews/${IV_ID}`);
+    check('本人が申請中のものを取り下げできる', own.status, 200);
+    const gone = await getDB(TOKENS.intern);
+    check('取り下げた面談は消えている', (gone.interviews || []).some((iv) => iv.id === IV_ID), false);
+
+    // 引っ越し前からあった面談
+    const admin = await getDB(TOKENS.admin);
+    check('引っ越し前の面談も読める', (admin.interviews || []).some((iv) => iv.id === 'iv_old'), true);
+    const raw = await readStoreRaw();
+    check('store から面談が取り除かれている', 'interviews' in raw, false);
+  }
+
   console.log('\n─────── メール履歴 ───────');
   {
     const sent = await api(TOKENS.staff, 'POST', '/api/mail/send',
@@ -554,6 +621,18 @@ async function run() {
     const rq = (view.requests || []).find((r) => r.id === blastId);
     check(`確認が${N}件すべて記録されている`, (rq?.read_by || []).length, N);
     console.log(`       （${N}件の同時確認にかかった時間: ${ms}ms）`);
+
+    /* 締切前にインターン生が一斉に面談を申請する状況。
+       ここも専用APIへ移したので、全員が申請できるはず */
+    const t1 = Date.now();
+    const applyCodes = await Promise.all(users.map((u) => rawPost(u.token, '/api/interviews',
+      { staff_id: 'u_e2e_staff', choice1: '2026-10-01T10:00:00.000Z', meeting_type: 'meet' })));
+    const applyMs = Date.now() - t1;
+    check(`${N}人が同時に面談を申請して全員成功する`, applyCodes.filter((s) => s === 200).length, N);
+    const staffView = await getDB(TOKENS.staff);
+    const applied = (staffView.interviews || []).filter((iv) => String(iv.intern_id).startsWith('u_load'));
+    check(`申請が${N}件すべて記録されている`, applied.length, N);
+    console.log(`       （${N}件の同時申請にかかった時間: ${applyMs}ms）`);
   }
 }
 

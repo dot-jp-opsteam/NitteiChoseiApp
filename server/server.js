@@ -169,6 +169,21 @@ async function initDB() {
       at TEXT NOT NULL
     )
   `);
+  /* 面談。締切前にインターン生が一斉に申請するため、
+     store に置いたままだと大半の申請がはじかれてしまう。
+     希望日時など形が固まりきっていない項目は data にJSONでまとめて持つ */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS interviews (
+      id TEXT PRIMARY KEY,
+      intern_id TEXT NOT NULL,
+      staff_id TEXT,
+      branch_id TEXT,
+      status TEXT NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
   /* メール履歴。件数がいちばん増えやすく、store に入れておくと
      関係ない保存のたびに全文を読み書きすることになる */
   await client.execute(`
@@ -206,6 +221,9 @@ async function initDB() {
     'CREATE INDEX IF NOT EXISTS idx_emails_sender ON emails(sender_id)',
     'CREATE INDEX IF NOT EXISTS idx_emails_receiver ON emails(receiver_id)',
     'CREATE INDEX IF NOT EXISTS idx_emails_sent_at ON emails(sent_at)',
+    'CREATE INDEX IF NOT EXISTS idx_interviews_intern ON interviews(intern_id)',
+    'CREATE INDEX IF NOT EXISTS idx_interviews_staff ON interviews(staff_id)',
+    'CREATE INDEX IF NOT EXISTS idx_interviews_branch ON interviews(branch_id)',
   ]) await client.execute(ddl);
 
   // 既存DBへの追加カラム。既に存在する場合のエラーは無視する
@@ -323,6 +341,20 @@ async function migrateStoreToTables() {
       });
       moved++;
     }
+    // 面談。支部はインターン生の所属から補う（元データには入っていないことがある）
+    const usersForMigration = await listActiveUsers();
+    const branchOf = new Map(usersForMigration.map((u) => [u.id, u.branch_id]));
+    for (const iv of db.interviews || []) {
+      const { id, intern_id, staff_id, branch_id, status, created_at, ...rest } = iv;
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO interviews (id, intern_id, staff_id, branch_id, status, data, created_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?)`,
+        args: [id, intern_id, staff_id || null, branch_id || branchOf.get(intern_id) || null,
+          status || 'applied', JSON.stringify(rest),
+          created_at || new Date().toISOString(), new Date().toISOString()],
+      });
+      moved++;
+    }
     for (const m of db.emails || []) {
       await client.execute({
         sql: 'INSERT OR IGNORE INTO emails (id, sender_id, receiver_id, subject, body, sent_at, delivered) VALUES (?,?,?,?,?,?,?)',
@@ -336,9 +368,10 @@ async function migrateStoreToTables() {
     delete db.event_responses;
     delete db.notifications;
     delete db.emails;
+    delete db.interviews;
     db[MIGRATION_FLAG] = true;
     await writeDB(db);
-    console.log(`依頼・出欠・通知・メール履歴を専用テーブルへ移しました（${moved}件）`);
+    console.log(`依頼・出欠・通知・メール履歴・面談を専用テーブルへ移しました（${moved}件）`);
   });
 }
 
@@ -425,6 +458,51 @@ async function archiveOldRecords() {
     console.error('古い履歴の片付けに失敗しました', e);
   }
   return total;
+}
+
+/* 面談。テーブルの列とJSON部分を、画面が期待する1つの形に戻す */
+function rowToInterview(r) {
+  let data = {};
+  try { data = JSON.parse(r.data) || {}; } catch { /* 壊れていても他の列は返す */ }
+  return {
+    ...data,
+    id: r.id, intern_id: r.intern_id, staff_id: r.staff_id,
+    branch_id: r.branch_id, status: r.status, created_at: r.created_at,
+  };
+}
+/* インターン生は自分の面談だけ。スタッフは自分が担当するものと自支部のインターン生の分 */
+async function listInterviewsFor(user, users) {
+  if (user.role === 'admin') {
+    const rs = await client.execute('SELECT * FROM interviews');
+    return rs.rows.map(rowToInterview);
+  }
+  if (user.role === 'intern') {
+    const rs = await client.execute({ sql: 'SELECT * FROM interviews WHERE intern_id = ?', args: [user.id] });
+    return rs.rows.map(rowToInterview);
+  }
+  const rs = await client.execute({
+    sql: 'SELECT * FROM interviews WHERE staff_id = ? OR branch_id = ?',
+    args: [user.id, user.branch_id || null],
+  });
+  // branch_id が入っていない古い行のために、インターン生の所属でも確かめる
+  const inBranch = new Set((users || []).filter((u) => u.branch_id === user.branch_id).map((u) => u.id));
+  return rs.rows.map(rowToInterview).filter((iv) => iv.staff_id === user.id || inBranch.has(iv.intern_id));
+}
+async function getInterview(id) {
+  const rs = await client.execute({ sql: 'SELECT * FROM interviews WHERE id = ?', args: [id] });
+  return rs.rows[0] ? rowToInterview(rs.rows[0]) : null;
+}
+async function saveInterview(iv) {
+  const { id, intern_id, staff_id, branch_id, status, created_at, ...rest } = iv;
+  await client.execute({
+    sql: `INSERT INTO interviews (id, intern_id, staff_id, branch_id, status, data, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET staff_id = excluded.staff_id, branch_id = excluded.branch_id,
+            status = excluded.status, data = excluded.data, updated_at = excluded.updated_at`,
+    args: [id, intern_id, staff_id || null, branch_id || null, status,
+      JSON.stringify(rest), created_at, new Date().toISOString()],
+  });
+  return iv;
 }
 
 /* メール履歴は当事者だけが読める（送った人・受け取った人）。
@@ -719,7 +797,7 @@ async function registerWatch(staffId, accessToken, calendarId) {
   await updateWatch(staffId, { channelId: watch.channelId, resourceId: watch.resourceId, channelToken: watch.channelToken, expiration: watch.expiration });
 }
 
-/* ---------- 面談確定/取消をGoogleカレンダーへ反映（PUT /api/db 保存時） ----------
+/* ---------- 面談確定/取消をGoogleカレンダーへ反映 ----------
    確定した面談は、担当スタッフ・インターン生それぞれが個別にGoogle連携していれば
    両者のカレンダーに独立してイベントを作成する（片方だけの連携でも動作する） */
 const IV_GOOGLE_SYNC_TARGETS = [
@@ -739,60 +817,52 @@ async function deleteGoogleEventFor(userId, eventId) {
   }
 }
 
-async function syncInterviewsToGoogle(oldDB, newBody, users) {
-  if (!GOOGLE_ENABLED) return;
-  const oldMap = new Map((oldDB?.interviews || []).map((iv) => [iv.id, iv]));
-  const newIds = new Set((newBody.interviews || []).map((iv) => iv.id));
+/* 面談1件ぶんの同期。確定に変わったら作り、確定でなくなったら消す。
+   iv を書き換えて googleEventId を持たせるので、呼び出し側はこのあと保存すること */
+async function syncInterviewToGoogle(old, iv, users) {
+  if (!GOOGLE_ENABLED) return iv;
+  const wasFixed = old && old.status === 'fixed';
+  const isFixed = iv.status === 'fixed';
+  const intern = (users || []).find((u) => u.id === iv.intern_id);
+  const staff = (users || []).find((u) => u.id === iv.staff_id);
 
-  for (const iv of newBody.interviews || []) {
-    const old = oldMap.get(iv.id);
-    const wasFixed = old && old.status === 'fixed';
-    const isFixed = iv.status === 'fixed';
-    const intern = (users || []).find((u) => u.id === iv.intern_id);
-    const staff = (users || []).find((u) => u.id === iv.staff_id);
-
-    for (const t of IV_GOOGLE_SYNC_TARGETS) {
-      const userId = iv[t.userIdField];
-      try {
-        if (isFixed && !iv[t.eventIdField] && old && old[t.eventIdField] && wasFixed) {
-          // 同一面談に対する保存リクエストがほぼ同時に届いた場合、後発リクエストは
-          // クライアント側が把握していない直前のgoogleEventIdを引き継ぐ（上書き消失防止）
-          iv[t.eventIdField] = old[t.eventIdField];
-        } else if (!wasFixed && isFixed && iv.confirmed_datetime) {
-          if (!userId) continue;
-          const tokenRow = await getTokenRow(userId);
-          if (!tokenRow) {
-            console.log(`Googleカレンダー未連携のためスキップ（interview ${iv.id}, user ${userId}）`);
-            continue;
-          }
-          const accessToken = await accessTokenFor(tokenRow);
-          const start = new Date(iv.confirmed_datetime);
-          const end = new Date(start.getTime() + 30 * 60000);
-          const created = await google.createEvent(accessToken, tokenRow.calendar_id, {
-            summary: t.summary(intern, staff),
-            description: `OPS日調アプリで確定した面談です。\n面談方法: ${iv.meeting_type === 'zoom' ? 'Zoom' : 'Google Meet'}`,
-            start: { dateTime: start.toISOString(), timeZone: 'Asia/Tokyo' },
-            end: { dateTime: end.toISOString(), timeZone: 'Asia/Tokyo' },
-          });
-          iv[t.eventIdField] = created.id;
-          console.log(`Googleカレンダーにイベントを作成しました（interview ${iv.id}, user ${userId}, event ${created.id}）`);
-        } else if (wasFixed && !isFixed && old[t.eventIdField]) {
-          await deleteGoogleEventFor(userId, old[t.eventIdField]);
-          iv[t.eventIdField] = null;
+  for (const t of IV_GOOGLE_SYNC_TARGETS) {
+    const userId = iv[t.userIdField];
+    try {
+      if (!wasFixed && isFixed && iv.confirmed_datetime) {
+        if (!userId) continue;
+        const tokenRow = await getTokenRow(userId);
+        if (!tokenRow) {
+          console.log(`Googleカレンダー未連携のためスキップ（interview ${iv.id}, user ${userId}）`);
+          continue;
         }
-      } catch (e) {
-        console.warn(`Googleカレンダー同期に失敗しました（interview ${iv.id}, ${t.eventIdField}）`, e.message || e);
+        const accessToken = await accessTokenFor(tokenRow);
+        const start = new Date(iv.confirmed_datetime);
+        const end = new Date(start.getTime() + 30 * 60000);
+        const created = await google.createEvent(accessToken, tokenRow.calendar_id, {
+          summary: t.summary(intern, staff),
+          description: `OPS日調アプリで確定した面談です。\n面談方法: ${iv.meeting_type === 'zoom' ? 'Zoom' : 'Google Meet'}`,
+          start: { dateTime: start.toISOString(), timeZone: 'Asia/Tokyo' },
+          end: { dateTime: end.toISOString(), timeZone: 'Asia/Tokyo' },
+        });
+        iv[t.eventIdField] = created.id;
+        console.log(`Googleカレンダーにイベントを作成しました（interview ${iv.id}, user ${userId}, event ${created.id}）`);
+      } else if (wasFixed && !isFixed && old[t.eventIdField]) {
+        await deleteGoogleEventFor(userId, old[t.eventIdField]);
+        iv[t.eventIdField] = null;
       }
+    } catch (e) {
+      console.warn(`Googleカレンダー同期に失敗しました（interview ${iv.id}, ${t.eventIdField}）`, e.message || e);
     }
   }
+  return iv;
+}
 
-  // アプリ側で削除された確定済み面談のイベントも掃除する
-  for (const old of oldDB?.interviews || []) {
-    if (!newIds.has(old.id) && old.status === 'fixed') {
-      for (const t of IV_GOOGLE_SYNC_TARGETS) {
-        await deleteGoogleEventFor(old[t.userIdField], old[t.eventIdField]);
-      }
-    }
+/* 面談ごと消したときの後始末 */
+async function removeInterviewFromGoogle(iv) {
+  if (!GOOGLE_ENABLED || !iv || iv.status !== 'fixed') return;
+  for (const t of IV_GOOGLE_SYNC_TARGETS) {
+    await deleteGoogleEventFor(iv[t.userIdField], iv[t.eventIdField]);
   }
 }
 
@@ -830,8 +900,6 @@ function scopeDBForUser(obj, user, users) {
     return !!u && u.branch_id === branchId;
   };
 
-  const interviews = (obj.interviews || []).filter((iv) =>
-    isIntern ? iv.intern_id === user.id : (iv.staff_id === user.id || inBranch(iv.intern_id)));
   /* 空き日程は面談の予約画面で必要なので自支部のスタッフ分を返す。
      ただしインターン生には予定の中身（「アルバイト」など私的な情報）を伏せ、
      時間帯だけを渡す */
@@ -856,7 +924,7 @@ function scopeDBForUser(obj, user, users) {
     if (id === user.id || inBranch(id)) profiles[id] = p;
   }
 
-  return { ...obj, interviews, events, availability, internships, profiles };
+  return { ...obj, events, availability, internships, profiles };
 }
 
 /* 絞り込んだデータを受け取ったクライアントが書き戻してきたとき、
@@ -865,7 +933,7 @@ function scopeDBForUser(obj, user, users) {
 /* 専用テーブルへ移した項目。PUT /api/db から送られてきても採用しない。
    古い画面を開いたままのタブが、テーブル側の最新の内容を
    自分の持っている古い一覧で上書きしてしまうのを防ぐ */
-const TABLE_BACKED_KEYS = ['requests', 'event_responses', 'notifications', 'emails'];
+const TABLE_BACKED_KEYS = ['requests', 'event_responses', 'notifications', 'emails', 'interviews'];
 
 function mergeScoped(oldDB, clientDB, user, users) {
   const isAdmin = user.role === 'admin';
@@ -881,7 +949,7 @@ function mergeScoped(oldDB, clientDB, user, users) {
      フロントのDBに項目を増やしたら、必ずここにも足すこと */
   const keys = isAdmin
     ? ['events']
-    : ['interviews', 'events'];
+    : ['events'];
   for (const key of keys) {
     const visibleIds = new Set((visible[key] || []).map((x) => x.id));
     const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
@@ -946,29 +1014,6 @@ function validateDiff(oldDB, newDB, actor, users) {
   // ---- 支部：全体管理者のみ ----
   if (!isAdmin && !sameJSON(oldDB.branches, newDB.branches)) {
     errs.push('支部を変更できるのは全体管理者だけです');
-  }
-
-  // ---- 面談 ----
-  const oldIv = byId(oldDB.interviews);
-  const newIv = byId(newDB.interviews);
-  for (const [id, iv] of newIv) {
-    const prev = oldIv.get(id);
-    if (!prev) {
-      if (iv.intern_id !== actor.id) errs.push('面談を申請できるのは本人だけです');
-      else if (iv.status !== 'applied') errs.push('申請時のステータスが不正です');
-    } else if (!sameJSON(prev, iv)) {
-      if (!isStaffLike) errs.push('面談を変更する権限がありません');
-      else if (!isAdmin && iv.staff_id !== actor.id && !sameBranch(iv.intern_id)) {
-        errs.push('他の支部の面談は変更できません');
-      }
-    }
-  }
-  for (const [id, prev] of oldIv) {
-    if (newIv.has(id)) continue;
-    // 本人が申請中のものを取り下げる場合のみ許す
-    if (!isAdmin && !(prev.intern_id === actor.id && prev.status === 'applied')) {
-      errs.push('この面談を削除する権限がありません');
-    }
   }
 
   // ---- イベント ----
@@ -1203,7 +1248,7 @@ app.get('/api/bootstrap', async (req, res) => {
     const db = obj ? scopeDBForUser(obj, user, users) : {};
     db.users = scopeUsers(users, user);
     // 専用テーブルへ移した分（依頼・出欠・通知）もここで合わせて返す
-    Object.assign(db, await readTableBacked(user));
+    Object.assign(db, await readTableBacked(user, users));
     res.json({ config, user: toPublicUser(user), db });
   } catch (e) {
     console.error('起動情報の取得に失敗しました', e);
@@ -1777,11 +1822,11 @@ app.get('/api/db', requireAuth, async (req, res) => {
   try {
     const obj = await readDB();
     const users = await listActiveUsers();
-    if (!obj) return res.json({ users: scopeUsers(users, req.authUser), ...await readTableBacked(req.authUser) });
+    if (!obj) return res.json({ users: scopeUsers(users, req.authUser), ...await readTableBacked(req.authUser, users) });
     const scoped = scopeDBForUser(obj, req.authUser, users);
     scoped.users = scopeUsers(users, req.authUser);
     // 専用テーブルへ移した分を合成する。画面から見える形は今までと同じ
-    Object.assign(scoped, await readTableBacked(req.authUser));
+    Object.assign(scoped, await readTableBacked(req.authUser, users));
     res.json(scoped);
   } catch (e) {
     console.error(e);
@@ -1790,11 +1835,12 @@ app.get('/api/db', requireAuth, async (req, res) => {
 });
 
 /* 専用テーブルへ移した項目を、フロントが期待するキー名で返す */
-async function readTableBacked(user) {
-  const [requests, event_responses, notifications, emails] = await Promise.all([
-    listRequestsFor(user), listEventResponses(), listNotificationsFor(user), listEmailsFor(user),
+async function readTableBacked(user, users) {
+  const [requests, event_responses, notifications, emails, interviews] = await Promise.all([
+    listRequestsFor(user), listEventResponses(), listNotificationsFor(user),
+    listEmailsFor(user), listInterviewsFor(user, users),
   ]);
-  return { requests, event_responses, notifications, emails };
+  return { requests, event_responses, notifications, emails, interviews };
 }
 
 /* インターン生には、面談の申し込み先として必要な自支部のスタッフだけを見せる。
@@ -1842,10 +1888,8 @@ app.put('/api/db', requireAuth, async (req, res) => {
         return { status: 403, payload: { error: errs[0], code: 'forbidden_change', details: errs } };
       }
 
-      /* この中でGoogleへ通信することがあり、その間ほかの保存を待たせてしまう。
-         ただし通信が走るのは面談が「確定」に変わった瞬間だけで頻度は低い。
-         面談を専用APIへ移す段階で、この呼び出しもそちらへ移すこと */
-      await syncInterviewsToGoogle(oldDB, merged, users);
+      /* Googleカレンダーへの反映は面談の専用APIへ移したので、ここでは通信しない。
+         この区間は列に並んでいるため、待たせる処理を置かないこと */
       const updatedAt = await writeDB(merged);
 
       /* イベントが消えたら、その出欠回答も片付ける。
@@ -1995,6 +2039,103 @@ app.put('/api/events/:id/response', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('出欠の登録に失敗しました', e);
     res.status(500).json({ error: '回答できませんでした' });
+  }
+});
+
+/* 面談を申請する。締切前にインターン生が一斉に押す場所 */
+app.post('/api/interviews', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  if (actor.role !== 'intern') return res.status(403).json({ error: '面談を申請できるのはインターン生だけです' });
+  const { staff_id, choice1, choice2, choice3, meeting_type, note } = req.body || {};
+  if (!choice1) return res.status(400).json({ error: '希望する枠を選んでください' });
+  try {
+    // 担当スタッフは自分の支部の人だけ
+    if (staff_id) {
+      const staff = await findUserById(staff_id);
+      if (!staff || (staff.branch_id !== actor.branch_id)) {
+        return res.status(403).json({ error: '他の支部のスタッフには申請できません' });
+      }
+    }
+    const iv = {
+      id: 'iv_' + crypto.randomBytes(6).toString('hex'),
+      intern_id: actor.id, staff_id: staff_id || null, branch_id: actor.branch_id || null,
+      status: 'applied', choice1, choice2: choice2 || null, choice3: choice3 || null,
+      meeting_type: meeting_type || 'meet', confirmed_datetime: null,
+      note: String(note || '').trim(), created_at: new Date().toISOString(),
+    };
+    await saveInterview(iv);
+    const notification = await insertNotification({
+      type: '面談申請', branch_id: actor.branch_id || null,
+      msg: `${actor.nickname}さんが面談を申請しました`,
+    });
+    res.json({ ok: true, interview: iv, notification });
+  } catch (e) {
+    console.error('面談の申請に失敗しました', e);
+    res.status(500).json({ error: '申請できませんでした' });
+  }
+});
+
+/* 面談の状態を変える（確定・不成立・申請中に戻す）。スタッフ側だけ */
+app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
+    return res.status(403).json({ error: '面談を変更する権限がありません' });
+  }
+  const { status, confirmed_datetime } = req.body || {};
+  if (!['fixed', 'failed', 'applied'].includes(status)) {
+    return res.status(400).json({ error: '指定された状態が不正です' });
+  }
+  if (status === 'fixed' && !confirmed_datetime) {
+    return res.status(400).json({ error: '確定する日時が必要です' });
+  }
+  try {
+    const old = await getInterview(req.params.id);
+    if (!old) return res.status(404).json({ error: '面談が見つかりません' });
+    if (actor.role !== 'admin' && old.staff_id !== actor.id && old.branch_id !== actor.branch_id) {
+      return res.status(403).json({ error: '他の支部の面談は変更できません' });
+    }
+    const next = {
+      ...old, status,
+      confirmed_datetime: status === 'fixed' ? confirmed_datetime : null,
+    };
+    /* Googleへの反映を先に済ませてから保存する。
+       先に保存すると、通信に失敗したときイベントIDを取りこぼす */
+    const users = await listActiveUsers();
+    await syncInterviewToGoogle(old, next, users);
+    await saveInterview(next);
+
+    let notification = null;
+    if (old.status !== status && (status === 'fixed' || status === 'failed')) {
+      const intern = users.find((u) => u.id === next.intern_id);
+      notification = await insertNotification({
+        type: status === 'fixed' ? '面談確定' : '面談不成立',
+        branch_id: next.branch_id || actor.branch_id || null,
+        msg: `${intern ? intern.nickname : ''}さんの面談が${status === 'fixed' ? '確定' : '不成立に'}しました`,
+      });
+    }
+    res.json({ ok: true, interview: next, notification });
+  } catch (e) {
+    console.error('面談の変更に失敗しました', e);
+    res.status(500).json({ error: '変更できませんでした' });
+  }
+});
+
+/* 申請を取り下げる。本人が申請中のものだけ */
+app.delete('/api/interviews/:id', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  try {
+    const iv = await getInterview(req.params.id);
+    if (!iv) return res.status(404).json({ error: '面談が見つかりません' });
+    const isOwnApplied = iv.intern_id === actor.id && iv.status === 'applied';
+    if (actor.role !== 'admin' && !isOwnApplied) {
+      return res.status(403).json({ error: 'この面談を取り下げる権限がありません' });
+    }
+    await removeInterviewFromGoogle(iv);
+    await client.execute({ sql: 'DELETE FROM interviews WHERE id = ?', args: [iv.id] });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('面談の取り下げに失敗しました', e);
+    res.status(500).json({ error: '取り下げできませんでした' });
   }
 });
 
