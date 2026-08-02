@@ -61,9 +61,7 @@
     <div class="sb-top">
       <span class="mark"><b>OPS</b></span>
       <span class="sb-brand">日調アプリ<small>ドットジェイピー</small></span>
-      <button class="sb-toggle" id="sbToggle" onclick="toggleSidebar()" aria-label="メニューを開閉" aria-expanded="true">
-        <i></i><i></i><i></i>
-      </button>
+      <button class="sb-toggle" id="sbToggle" data-ic="panel" onclick="toggleSidebar()" aria-label="メニューを開閉" aria-expanded="true"></button>
     </div>
 
     <nav class="sb-nav" id="sbNav"></nav>
@@ -132,6 +130,12 @@ const ICON={
       +'<path pathLength="1" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>'
       +'<path pathLength="1" d="M9 12h7"/><path pathLength="1" d="M9 16h4.5"/>',
   clock:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="M12 6.8v5.5l3.4 2"/>',
+  // 左メニューの開閉。Google Fonts の Material Symbols「left_panel_close」と同じ形を、
+  // 他のアイコンに合わせて線1.5pxで描き直したもの（外部フォントは読み込まない）。
+  // 左の帯だけ塗るので、この1画だけ fill を上書きする（.ic は fill:none のため）
+  panel:'<rect pathLength="1" x="3" y="4.5" width="18" height="15" rx="2.6"/>'
+       +'<path pathLength="1" d="M9.4 4.5v15"/>'
+       +'<path d="M5.6 6.1h2.2v11.8H5.6z" fill="currentColor" stroke="none" opacity=".45"/>',
   // 依頼（拡声器）。ラッパ・持ち手・音の弧の3画で描く
   megaphone:'<path pathLength="1" d="M4 10.2v3.6a1.6 1.6 0 0 0 1.6 1.6H8l7.4 4.4V5.8L8 10.2H5.6A1.6 1.6 0 0 0 4 11.8z"/>'
            +'<path pathLength="1" d="M8 15.4v3.2a1.4 1.4 0 0 0 1.4 1.4h1.2"/>'
@@ -2200,7 +2204,7 @@ function eventsSection(){
     ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">
       ${ic('lock')}<span>公開範囲を選べるようになる前に作った予定が <b>${unreviewed.length}件</b> あります。
       いまも支部の全員に見えているので、<b>個人的なものを「自分だけ」に変えられます</b>。タップして見直す。</span></div>`:''}
-    <button class="btn pri block" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しい予定を作成</button>
+    <button class="btn pri block quiet" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しい予定を作成</button>
     ${cal}
     <div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
     ${cards}`;

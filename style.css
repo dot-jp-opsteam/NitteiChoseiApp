@@ -743,15 +743,15 @@
     transition:border-color .2s var(--ease),box-shadow .3s var(--ease)}
   [data-sb="collapsed"] .sb-toggle{margin-left:0}
   .sb-toggle:hover{border-color:var(--line-h);box-shadow:var(--glow)}
-  .sb-toggle i{position:absolute;left:9px;width:16px;height:2px;border-radius:2px;background:var(--ink);
-    transition:transform .3s var(--ease),opacity .2s var(--ease)}
-  .sb-toggle i:nth-child(1){top:10px}
-  .sb-toggle i:nth-child(2){top:16px}
-  .sb-toggle i:nth-child(3){top:22px}
-  /* 広げているときは「閉じる」意味の×に、畳んでいるときは三本線に */
-  [data-sb="expanded"] .sb-toggle i:nth-child(1){transform:translateY(6px) rotate(45deg)}
-  [data-sb="expanded"] .sb-toggle i:nth-child(2){opacity:0}
-  [data-sb="expanded"] .sb-toggle i:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
+  /* 三本線（ハンバーガー）ではなく、サイドパネルの形にしている。
+     「メニュー」ではなく「左の欄を出し入れする」ボタンなので、そちらの形のほうが伝わる。
+     アイコンの中身は index.html の ICON.panel */
+  .sb-toggle{display:grid;place-items:center;color:var(--sub);font-size:19px;
+    transition:border-color .2s var(--ease),box-shadow .3s var(--ease),color .2s var(--ease)}
+  .sb-toggle:hover{color:var(--brand)}
+  /* 畳んでいるときは、塗ってある帯を反対側に返して状態が分かるようにする */
+  .sb-toggle .ic{transition:transform .3s var(--ease)}
+  [data-sb="collapsed"] .sb-toggle .ic{transform:scaleX(-1)}
 
   /* 中：画面ナビと設定 */
   .sb-nav,.sb-act{display:flex;flex-direction:column;gap:2px;padding:0 8px}
@@ -883,4 +883,266 @@
     #drawer .stag{opacity:1;transform:none}
     #drawer.open .stag{transition-delay:0s}
     .view{animation:none}
+  }
+
+  /* ============================================================
+     読みやすさと動き（2026年8月）
+     ここから下は、上の指定をあとから上書きする層。順番を入れ替えないこと。
+
+     方針
+     1. 世界観（六角形・シアン・ダーク・角を立てる）は変えない
+     2. 文字の大きさに段差をつけて、読む順番を作る
+     3. 動きの語彙を1つに統一する。ばらばらの効果を足すのではなく、
+        「浮上」「線が伸びる」「順に湧く」の3つだけを使い回す
+     ============================================================ */
+
+  :root{
+    /* 動きの共通設定。既存の --ease はそのまま使い、
+       跳ねる用（バッジやリング）だけ別に持つ */
+    --pop:cubic-bezier(.34,1.56,.64,1);
+    --t-fast:.18s; --t-mid:.32s;
+  }
+
+  /* ---------- 1. 文字の段差 ----------
+     いまは 12〜15px にほぼ全部が収まっていて、
+     どこから読めばいいかが見た目で分からない。見出しだけ明確に大きくする */
+  h1.page{font-size:27px;letter-spacing:-.04em;line-height:1.12}
+  .page-sub{font-size:13.5px;margin-bottom:20px;max-width:62ch}
+  .card .ch h3{font-size:16px;letter-spacing:-.025em}
+
+  @media(max-width:520px){
+    h1.page{font-size:22px}
+  }
+
+  /* ---------- 2. 画面の入れ替わり ----------
+     既存は 4px 上がるだけで、切り替わったことに気づきにくい。
+     少し大きく動かし、同時に中身を順に湧かせる */
+  .view{animation:v2-view .42s var(--ease)}
+  @keyframes v2-view{
+    from{opacity:0;transform:translateY(14px) scale(.994)}
+    to{opacity:1;transform:none}
+  }
+  /* 画面直下の要素を上から順に。子が何個でも効くように nth-child で刻む */
+  .view>*{animation:v2-rise .5s var(--ease) backwards}
+  .view>*:nth-child(1){animation-delay:.02s}
+  .view>*:nth-child(2){animation-delay:.07s}
+  .view>*:nth-child(3){animation-delay:.12s}
+  .view>*:nth-child(4){animation-delay:.17s}
+  .view>*:nth-child(n+5){animation-delay:.22s}
+  @keyframes v2-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+  /* ---------- 3. カード ----------
+     四隅のL字は今は「濃さが変わる」だけ。
+     長さが伸びる動きに変えると、囲まれた感じが出て押せることが伝わる */
+  .card::before{
+    --cl:10px;
+    opacity:.3;
+    transition:opacity var(--t-mid) var(--ease),
+               background-size var(--t-mid) var(--ease);
+  }
+  .card.click:hover::before{--cl:26px;opacity:1}
+  .card.click{transition:border-color var(--t-fast) var(--ease),
+                        box-shadow var(--t-mid) var(--ease),
+                        transform var(--t-fast) var(--ease)}
+  .card.click:hover{transform:translateY(-2px)}
+  .card.click:active{transform:translateY(0) scale(.997)}
+
+  /* ---------- 4. 六角形ハニカム（いちばん直したかったところ） ----------
+     問題：文字が小さすぎて「髙橋ひろし議員事務所」などが読めない。
+     六角形は上下が細いので、幅を少し広げて中央の帯を稼ぎ、文字も上げる */
+  .hexgrid{--hw:min(190px, calc((100cqw - (var(--cols) - 1 + var(--off)) * var(--hgap)) / (var(--cols) + var(--off))));}
+  .hex{gap:6px;padding:0 calc(var(--hw) * 0.13)}
+  .hex .hxt{font-size:13.5px;letter-spacing:-.02em;line-height:1.25}
+  .hex .hxd{font-size:11px;line-height:1.35;letter-spacing:-.01em;-webkit-line-clamp:2}
+  .hex .hxi{font-size:min(24px,calc(var(--hw) * 0.32))}
+  /* 狭い画面では六角形自体が小さくなるので、文字を大きくすると逆に折り返して読めなくなる
+     （「カレンダー連携」が3行になる）。広い画面でだけ大きくする */
+  @media(max-width:760px){
+    .hex{padding:0 calc(var(--hw) * 0.10)}
+    .hex .hxt{font-size:12px;line-height:1.2}
+    .hex .hxd{font-size:10px}
+  }
+
+  /* 触れたものだけ持ち上げる。
+     （他の六角形を暗く引き下げる案も試したが、
+       落ち着かない見え方になったので採用しない） */
+  @media(hover:hover){
+    .hexrow>.hex{transition:transform var(--t-mid) var(--ease),
+                            opacity var(--t-mid) var(--ease),
+                            background var(--t-mid) var(--ease),
+                            filter var(--t-mid) var(--ease)}
+    .hex:hover{transform:translateY(-7px) scale(1.03)}
+  }
+  /* キーボードで辿るときも同じ見え方にする */
+  .hex:focus-visible{outline:none;transform:translateY(-7px) scale(1.03);
+    background:var(--brand);filter:drop-shadow(0 10px 26px rgba(67,231,223,.22))}
+  .hex:focus-visible .hxi{color:var(--brand)}
+
+  /* 通知の数字は、出てきたことに気づいてほしいので跳ねさせる */
+  .hex .hxb{animation:v2-pop .5s var(--pop) backwards;animation-delay:.35s}
+  @keyframes v2-pop{from{transform:scale(0);opacity:0}to{transform:none;opacity:1}}
+
+  /* 湧き上がりを1個ずつに細かくする（既存は4個目以降が同時） */
+  .hexrow>.hex:nth-child(2){transition-delay:70ms}
+  .hexrow>.hex:nth-child(3){transition-delay:140ms}
+  .hexrow>.hex:nth-child(4){transition-delay:210ms}
+  .hexrow>.hex:nth-child(5){transition-delay:280ms}
+  .hexrow>.hex:nth-child(n+6){transition-delay:350ms}
+
+  /* ---------- 5. ボタン ----------
+     「＋新しい予定を作成」が画面幅いっぱいのシアン塗りで、
+     六角形の緻密さと釣り合っていない。塗りは残しつつ、
+     押した瞬間に光が走る演出で「強い操作」であることを保つ */
+  .btn{transition:border-color var(--t-fast) var(--ease),
+                 background var(--t-fast) var(--ease),
+                 transform .1s var(--ease),
+                 box-shadow var(--t-mid) var(--ease)}
+  .btn.pri{position:relative;overflow:hidden}
+  .btn.pri::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.38) 50%,transparent 70%);
+    transform:translateX(-120%);
+  }
+  .btn.pri:hover{box-shadow:0 6px 22px rgba(67,231,223,.28)}
+  .btn.pri:hover::after{animation:v2-sheen .7s var(--ease)}
+  @keyframes v2-sheen{to{transform:translateX(120%)}}
+  .btn:active{transform:scale(.975)}
+
+  /* 画面幅いっぱいの主ボタンだけ、高さを少し抑えて圧を下げる */
+  .btn.block.pri{min-height:46px;font-size:14.5px;letter-spacing:-.01em}
+
+  /* カレンダーの「＋新しい予定を作成」だけは扱いを変える。
+     画面でいちばん明るいものが「入れ物」ではなく「操作」になっていて、
+     六角形とカレンダーより先に目に入ってしまうため。
+     押せることは保ったまま、塗りをやめて主役をカレンダーに戻す。
+     .quiet は「主要な操作だが、その画面の主役ではない」ボタンに付ける */
+  .btn.pri.quiet{
+    background:transparent;border-color:var(--hint-line);color:var(--brand);
+    border-style:dashed;box-shadow:none;
+  }
+  .btn.pri.quiet:hover{
+    background:var(--brand-soft);border-color:var(--brand);border-style:solid;
+    box-shadow:none;
+  }
+  .btn.pri.quiet::after{display:none}
+
+  /* ---------- 6. 左メニュー ----------
+     選択中を示す縦線は、いまは高さが伸びるだけ。
+     hover のときも薄く出しておくと、どこを指しているかが分かる */
+  .sb-item::before{transition:height var(--t-mid) var(--ease),opacity var(--t-fast) var(--ease);opacity:0}
+  .sb-item.active::before{opacity:1}
+  .sb-item:hover::before{height:14px;opacity:.5}
+  .sb-item{transition:color var(--t-fast) var(--ease),
+                     background var(--t-fast) var(--ease),
+                     padding-left var(--t-fast) var(--ease)}
+  .sb-item:hover{padding-left:14px}
+  [data-sb="collapsed"] .sb-item:hover{padding-left:0}
+
+  /* ---------- 7. 一覧の行 ----------
+     押せる行であることを、線ではなく動きで示す */
+  .rowlist .row{transition:background var(--t-fast) var(--ease),
+                          padding-left var(--t-fast) var(--ease)}
+  .rowlist .row:hover{padding-left:20px}
+  .row .av{transition:transform var(--t-mid) var(--ease)}
+  .rowlist .row:hover .av{transform:scale(1.06)}
+
+  /* ---------- 8. 入力 ----------
+     枠の色が変わるだけだと、どこに入力しているか見失いやすい */
+  input,select,textarea{transition:border-color var(--t-fast) var(--ease),
+                                  box-shadow var(--t-fast) var(--ease),
+                                  background var(--t-fast) var(--ease)}
+  input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px var(--brand-soft),0 4px 18px rgba(67,231,223,.10)}
+
+  /* 選択肢のチップは、選んだ瞬間に一度だけ跳ねる */
+  .seg input:checked + .segb,
+  .modechip.on,
+  .pickchip.on{animation:v2-tap .34s var(--pop)}
+  @keyframes v2-tap{0%{transform:scale(1)}45%{transform:scale(1.045)}100%{transform:scale(1)}}
+
+  /* ---------- 9. シート（モーダル） ----------
+     下から出るときに、背景も一緒に暗くなるようにする */
+  .scrim{transition:opacity var(--t-mid) var(--ease)}
+  .sheet{animation:v2-sheet .34s var(--ease)}
+  @keyframes v2-sheet{
+    from{transform:translateY(40px) scale(.98);opacity:0}
+    to{transform:none;opacity:1}
+  }
+
+  /* ---------- 10. 状態バッジ ----------
+     ステータスの丸は「生きている情報」なので、確定済みだけ静かに脈打たせる */
+  .st-fixed::before{animation:v2-beat 2.4s var(--ease) infinite}
+  @keyframes v2-beat{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+
+  /* ---------- 11. カレンダー ----------
+     毎日いちばん長く見る画面なので、
+     「押せる日」「今日」「選んでいる日」の3つを動きで区別する */
+
+  /* 押せる日：数字がわずかに持ち上がる。背景だけだと気づきにくい */
+  .calcell .dn{transition:transform var(--t-fast) var(--ease),color var(--t-fast) var(--ease)}
+  @media(hover:hover){
+    .calcell.add:hover .dn{transform:translateY(-2px) scale(1.12);color:var(--brand)}
+    /* 今日は既に丸で塗られているので、色を変えず大きさだけにする */
+    .calcell.today.add:hover .dn{color:var(--on-fill)}
+  }
+
+  /* 選んでいる日：一度だけリングが広がって消える。
+     どこを押したかが目で追えるようにするため */
+  .calcell.sel{position:relative}
+  .calcell.sel::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    border:1px solid var(--brand);
+    animation:v2-ring .5s var(--ease) forwards;
+  }
+  @keyframes v2-ring{
+    from{opacity:.9;transform:scale(.9)}
+    to{opacity:0;transform:scale(1)}
+  }
+
+  /* 予定の帯：押せるので、乗せたら少し前に出す */
+  .calcell .chip{transition:transform var(--t-fast) var(--ease),filter var(--t-fast) var(--ease)}
+  @media(hover:hover){
+    .calcell .chip:hover{transform:translateX(2px);filter:brightness(1.18)}
+  }
+
+  /* 月送りの矢印：進む向きに動く */
+  .cal .navbtn{transition:border-color var(--t-fast) var(--ease),
+                          color var(--t-fast) var(--ease),
+                          transform var(--t-fast) var(--ease)}
+  .cal .navbtn:first-child:hover{transform:translateX(-2px)}
+  .cal .navbtn:last-child:hover{transform:translateX(2px)}
+
+  /* 月／リストの切り替え */
+  .calview-tabs button{transition:border-color var(--t-fast) var(--ease),
+                                 background var(--t-fast) var(--ease),
+                                 color var(--t-fast) var(--ease)}
+  .calview-tabs button.on{animation:v2-tap .34s var(--pop)}
+
+  /* リスト表示の各行 */
+  .agenda .ag{transition:padding-left var(--t-fast) var(--ease),background var(--t-fast) var(--ease)}
+  .agenda .ag:hover{padding-left:10px;background:var(--panel2)}
+  .agenda .agbar{transition:transform var(--t-mid) var(--ease)}
+  .agenda .ag:hover .agbar{transform:scaleY(1.06)}
+
+  /* ---------- 12. 通知 ----------
+     未読があることに気づいてほしいので、数字だけ跳ねさせる */
+  .bell .badge{animation:v2-pop .5s var(--pop) backwards;animation-delay:.5s}
+  .bell{transition:border-color var(--t-fast) var(--ease),transform var(--t-fast) var(--ease)}
+  .bell:hover{transform:scale(1.06)}
+  .noti{transition:background var(--t-fast) var(--ease)}
+
+  /* ---------- 13. 動きを減らす設定 ----------
+     上で足したものを、ここで全部止める。
+     めまいや乗り物酔いの出る人には動かさないほうがよいため */
+  @media (prefers-reduced-motion:reduce){
+    .view,.view>*,.hex .hxb,.st-fixed::before,.sheet,.bell .badge,
+    .calcell.sel::after,.calview-tabs button.on,
+    .seg input:checked + .segb,.modechip.on,.pickchip.on{animation:none}
+    .calcell.sel::after{display:none}
+    .calcell.add:hover .dn,.calcell .chip:hover,
+    .cal .navbtn:hover,.bell:hover,.agenda .ag:hover .agbar{transform:none}
+    .agenda .ag:hover{padding-left:4px}
+    .btn.pri:hover::after{animation:none}
+    .hex:hover,.hex:focus-visible{transform:none}
+    .sb-item:hover,.rowlist .row:hover{padding-left:inherit}
+    .card.click:hover{transform:none}
   }
