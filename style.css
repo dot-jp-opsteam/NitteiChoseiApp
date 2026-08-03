@@ -389,7 +389,21 @@
   .scrim.open{display:flex}
   .sheet{background:var(--panel);width:100%;max-width:960px;border-radius:18px 18px 0 0;padding:8px 16px 22px;max-height:88vh;overflow:auto;animation:up .22s ease}
   @keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
-  .sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--line-h);margin:6px auto 12px}
+  /* 上のバー。ここを持って下へ払うと閉じられる。
+     指で下へなぞる操作なので、touch-action:none でページのスクロールに取られないようにする。
+     押せる場所だと分かるよう、掴む形のカーソルにして当たり判定も広めに取る */
+  .sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--line-h);margin:6px auto 12px;
+    touch-action:none;cursor:grab;box-sizing:content-box;padding:10px 26px;
+    background-clip:content-box}
+  .sheet .grab:active{cursor:grabbing}
+  /* アイコンだけの小さなボタン。文字が入らないぶん、幅を詰めて正方形に近づける */
+  .btn.sm.iconly{padding:0;width:32px;flex:none;justify-content:center}
+  /* 隠している状態。押せば戻せることが分かるよう、消すのではなく色を落とす */
+  .btn.sm.iconly.off{color:var(--mut);border-color:var(--line2)}
+  /* 時間の範囲。「13:00 〜 15:30」を1行に収める */
+  .timerange{display:flex;align-items:center;gap:8px}
+  .timerange select{flex:1;min-width:0}
+  .timerange .tr-sep{color:var(--sub);font-weight:700;flex:none}
   .sheet h3{margin:0 0 4px;font-size:17px}
   @media(min-width:640px){
     .scrim{align-items:center}
@@ -601,6 +615,12 @@
   .calcell.sel{background:var(--brand-soft)}
   .calcell .dn{font-weight:700;line-height:1;flex:none;color:var(--ink)}
   .calcell.holiday .dn{color:var(--sun)}
+  .calcell.sat .dn{color:var(--sat)}
+  /* 今日だけは丸で塗ってあるので、曜日の色より塗りの上の文字色を優先する */
+  .calcell.today .dn{color:var(--on-fill)}
+  /* 曜日の見出しも同じ配色にして、縦に色がそろって見えるようにする */
+  .caldow.sat{color:var(--sat)}
+  .caldow.sun{color:var(--sun)}
   .calcell .chips{display:flex;flex-direction:column;gap:2px;width:100%;overflow:hidden}
   .calcell .chip{width:100%;font-size:9px;font-weight:600;line-height:1.6;padding:1px 4px;
     border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
@@ -670,9 +690,12 @@
   @media(max-width:400px){.kv{grid-template-columns:80px 1fr}}
 
   /* notification bell */
+  /* ボタンの既定の文字色のままだと、黒地では鐘の絵が沈んで見えない。
+     メニューの他のアイコン（.sb-item .si）と同じ色にそろえる */
   .bell{position:relative;width:40px;height:40px;border-radius:999px;border:1px solid var(--line);
-    background:var(--panel);font-size:18px;cursor:pointer;display:grid;place-items:center;flex:none}
-  .bell:hover{border-color:var(--line-h)}
+    background:var(--panel);color:var(--sub);font-size:18px;cursor:pointer;
+    display:grid;place-items:center;flex:none}
+  .bell:hover{border-color:var(--line-h);color:var(--ink)}
   .bell .badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;
     background:var(--bad);color:var(--on-fill);font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid var(--panel)}
   .noti{display:flex;gap:11px;padding:12px 4px;border-bottom:1px solid var(--line2)}
@@ -861,24 +884,49 @@
   .sb-me .bell{margin-left:auto;width:34px;height:34px;font-size:16px}
   [data-sb="collapsed"] .sb-me .bell{margin-left:0}
   .sb-links{display:flex;flex-direction:column;gap:5px;padding:14px 10px 0}
-  .sb-links a{font-size:11px;color:var(--mut);transition:color .2s var(--ease)}
+  .sb-links a{font-size:12.5px;color:var(--mut);transition:color .2s var(--ease)}
   .sb-links a:hover{color:var(--brand)}
-  /* 試験運用中であることの断り。読めればよいので、リンクよりさらに弱く見せる */
-  .sb-beta{font-size:10px;color:var(--disabled);letter-spacing:.04em;margin-top:2px}
 
-  /* 狭い画面。畳んだ状態がふつうで、広げたときは中身の上に重ねる
-     （押し出すと本文がほとんど読めなくなるため） */
+  /* スマホでだけ出す、右上のメニューボタン。広い画面ではサイドバーが常にあるので出さない */
+  #sbBurger{display:none}
+
+  /* 狭い画面。細いレールは置かず、本文に画面の幅をぜんぶ渡す。
+     メニューは右上のボタンから、右端に広げた形で重ねて出す */
   @media(max-width:760px){
-    :root{--sb-w:56px}
-    /* expanded / collapsed の両方に同じ詳細度で指定する。
+    /* 本文を押し出さない。expanded / collapsed の両方に同じ詳細度で指定する。
        片方だけだと、メディアクエリの外にある :root[data-sb="collapsed"]{--sb-w:68px}
-       のほうが詳細度で勝ってしまい、レールは56pxなのに本文が68px押し出される
-       （12px ぶんが誰も使わない余白になる） */
-    :root[data-sb="expanded"]{--sb-w:56px}   /* 中身は押し出さない */
-    :root[data-sb="collapsed"]{--sb-w:56px}
-    #sidebar{width:236px}
-    [data-sb="collapsed"] #sidebar{width:56px}
-    main{padding:18px 14px 40px}
+       のほうが詳細度で勝ってしまい、使われない余白が残る */
+    :root{--sb-w:0}
+    :root[data-sb="expanded"]{--sb-w:0}
+    :root[data-sb="collapsed"]{--sb-w:0}
+    /* 右端から出す。閉じているときは画面の外へ滑らせる */
+    #sidebar{left:auto;right:0;width:min(272px,84vw);
+      border-right:0;border-left:1px solid var(--line);
+      transform:translateX(100%);transition:transform .28s var(--ease)}
+    [data-sb="expanded"] #sidebar{transform:none}
+    [data-sb="collapsed"] #sidebar{width:min(272px,84vw)}
+    /* 畳んだ状態＝画面の外にいるだけなので、中身は広げたときの形のまま保つ。
+       出入りの途中で文字が消えたり細くなったりして見えるのを防ぐ */
+    [data-sb="collapsed"] .sl,[data-sb="collapsed"] .sv,[data-sb="collapsed"] .sb-brand,
+    [data-sb="collapsed"] .sb-links,[data-sb="collapsed"] .sb-me-t{display:revert}
+    [data-sb="collapsed"] .sb-top{flex-direction:row;gap:9px;padding:14px 14px 18px}
+    [data-sb="collapsed"] .sb-toggle{margin-left:auto}
+    [data-sb="collapsed"] .sb-toggle .ic{transform:none}
+    [data-sb="collapsed"] .sb-item{justify-content:flex-start;padding:10px 10px}
+    [data-sb="collapsed"] .sb-me{flex-direction:row;gap:10px;padding:6px 2px}
+    [data-sb="collapsed"] .sb-me .bell{margin-left:auto}
+
+    /* メニューボタン。上に浮かせたままにして、下までスクロールしても押せるようにする。
+       メニューが出ている間は、そのすぐ下に隠れるので消しておく */
+    #sbBurger{position:fixed;z-index:38;display:grid;place-items:center;gap:4px;
+      top:calc(10px + env(safe-area-inset-top));right:12px;width:42px;height:42px;padding:0;
+      border:1px solid var(--line);border-radius:11px;background:var(--glass);
+      backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer;
+      transition:opacity .2s var(--ease)}
+    #sbBurger span{display:block;width:18px;height:2px;border-radius:2px;background:var(--ink)}
+    [data-sb="expanded"] #sbBurger{opacity:0;pointer-events:none}
+    /* ボタンのぶん、本文の始まりを下げる */
+    main{padding:60px 14px 40px}
 
     /* ---------- カレンダーだけは端まで使う ----------
        1日ぶんの幅がすべてなので、カードの飾り（枠・角丸・影・角のマーカー）と

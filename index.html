@@ -77,14 +77,14 @@
       <div class="sb-links">
         <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer" data-ic-end="external">ドットジェイピー公式</a>
         <a href="https://dot-jp-opsteam.github.io/ops-homepage/" target="_blank" rel="noopener noreferrer" data-ic-end="external">OPS公式</a>
-        <!-- まだ試験中であることの断り。使う邪魔にならないよう、いちばん下に小さく置く -->
-        <span class="sb-beta">β版（試験運用中）</span>
       </div>
     </div>
   </aside>
 
   <main id="main"></main>
 </div>
+<!-- スマホでだけ出るメニューボタン。押すと右からメニューが出る -->
+<button id="sbBurger" onclick="toggleSidebar()" aria-label="メニューを開く"><span></span><span></span><span></span></button>
 <!-- スマホでメニューを広げたときだけ出る覆い -->
 <div id="sbScrim" onclick="collapseSidebar()"></div>
 
@@ -213,6 +213,12 @@ const ICON={
        +'<path pathLength="1" d="M7.4 14.8h9.2"/>',
   lock:'<rect pathLength="1" x="4.2" y="10.2" width="15.6" height="10.6" rx="2.2"/>'
       +'<path pathLength="1" d="M8 10.2V7.4a4 4 0 0 1 8 0v2.8"/>',
+  /* 目。見えている状態と、斜線を引いて隠している状態の2つを持つ */
+  eye:'<path pathLength="1" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/>'
+     +'<circle pathLength="1" cx="12" cy="12" r="3.2"/>',
+  'eye-off':'<path pathLength="1" d="M2.5 12S6 5.5 12 5.5c1.6 0 3 .5 4.2 1.1"/>'
+     +'<path pathLength="1" d="M19.6 8.6c1.3 1.6 1.9 3.4 1.9 3.4S18 18.5 12 18.5c-1.7 0-3.2-.5-4.4-1.2"/>'
+     +'<path pathLength="1" d="M4 20 20 4"/>',
   briefcase:'<rect pathLength="1" x="2.5" y="7.2" width="19" height="13.3" rx="2.2"/>'
            +'<path pathLength="1" d="M15.5 20.5V5.4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v15.1"/>',
   search:'<circle pathLength="1" cx="10.8" cy="10.8" r="7.3"/><path pathLength="1" d="m21 21-5.05-5.05"/>',
@@ -660,7 +666,44 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 
 /* ---------- sheet ---------- */
 function openSheet(html){const s=document.getElementById('sheet');
-  s.innerHTML='<div class="grab"></div>'+html;document.getElementById('scrim').classList.add('open');}
+  s.innerHTML='<div class="grab"></div>'+html;document.getElementById('scrim').classList.add('open');
+  bindSheetSwipe();}
+/* 上のバーを持って下へ払うと閉じる。
+   スマホでは画面の外まで指を伸ばして背景を押すのが面倒なので、その場で閉じられるようにする。
+   途中で止めたときは、指を離した位置で閉じるか戻すかを決める */
+function bindSheetSwipe(){
+  const sheet=document.getElementById('sheet');
+  const grab=sheet.querySelector('.grab');
+  if(!grab)return;
+  let y0=null,dy=0;
+  const move=e=>{
+    if(y0==null)return;
+    dy=Math.max(0,e.clientY-y0);   // 上には動かさない
+    sheet.style.transform=`translateY(${dy}px)`;
+  };
+  const end=()=>{
+    document.removeEventListener('pointermove',move);
+    document.removeEventListener('pointerup',end);
+    document.removeEventListener('pointercancel',end);
+    document.body.classList.remove('noselect');
+    if(y0==null)return;
+    y0=null;
+    sheet.style.transition='';
+    sheet.style.transform='';
+    // 少しだけ動かしたときは閉じない。触れただけで消えると戸惑うため
+    if(dy>90)closeSheet();
+  };
+  grab.addEventListener('pointerdown',e=>{
+    if(e.button!==undefined&&e.button!==0)return;
+    e.preventDefault();
+    y0=e.clientY;dy=0;
+    sheet.style.transition='none';
+    document.body.classList.add('noselect');
+    document.addEventListener('pointermove',move);
+    document.addEventListener('pointerup',end);
+    document.addEventListener('pointercancel',end);
+  });
+}
 function closeSheet(){
   document.getElementById('scrim').classList.remove('open');
   // 確認ダイアログを背景タップで閉じた場合は「キャンセル」として扱う
@@ -1322,9 +1365,7 @@ async function openInternInviteLink(){
       <b>${esc(ME.nickname)}</b>さんになります。</p>
     <div class="invite-url" id="inviteUrl">${esc(url)}</div>
     <button class="btn pri block" style="margin-top:12px" onclick="copyInviteLink('${esc(url)}')">リンクをコピーする</button>
-    <div class="hint" style="margin-top:14px">${ic('bulb')}<span>
-      何人にでも、何度でも使えます。期限はありません。LINEやメールでそのまま送ってください。</span></div>
-    <p class="fine" style="margin-top:10px">学生がリンクを開くと、いつものログイン画面が出ます。
+    <p class="fine" style="margin-top:14px">学生がリンクを開くと、いつものログイン画面が出ます。
       そこで「メールアドレスで会員登録する」に進むと、担当スタッフが入った状態になります。</p>`);
 }
 async function copyInviteLink(url){
@@ -1403,7 +1444,7 @@ function hexgrid(items){
 }
 
 function viewHome(){
-  const hi=`<h1 class="page">こんにちは、${esc(ME.nickname)}さん</h1>
+  const hi=`<h1 class="page">日調アプリへ<br>ようこそ、${esc(ME.nickname)}さん</h1>
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
   if(ME.role==='intern'){
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
@@ -2323,6 +2364,19 @@ function eventCard(ev){
    全体予定表の予定だとひと目で分かるようにする */
 const SHARED_CAL_COLOR='#f0955b';
 let SHARED_CAL={events:{},loading:{},configured:null,name:null,calendarId:null};
+/* 全社カレンダーを自分の画面から隠す設定。
+   この端末にだけ残す。人によって見たい・見たくないが違うだけの話なので、
+   サーバーに持たせて他の端末や他の人に影響させる必要はない */
+const SHARED_HIDE_KEY='ops_hide_shared_v1';
+function sharedCalHidden(){
+  try{return localStorage.getItem(SHARED_HIDE_KEY)==='1';}catch(e){return false;}
+}
+function toggleSharedCal(){
+  const next=!sharedCalHidden();
+  try{localStorage.setItem(SHARED_HIDE_KEY,next?'1':'0');}catch(e){}
+  render();
+  toast(next?'全社カレンダーの予定を隠しました':'全社カレンダーの予定を表示しました');
+}
 function sharedCalOn(){return ME&&ME.role!=='intern';}
 function sharedKey(y,m){return y+'-'+m;}
 /* 表示中の月の予定を確保する。未取得ならサーバーに聞きに行き、
@@ -2352,7 +2406,11 @@ function ensureSharedCal(y,m){
 }
 // 全体予定表の予定を、支部イベントと同じ形に整えてカレンダーに並べる
 function sharedItemsFor(y,m){
-  return ensureSharedCal(y,m).map(e=>({
+  /* 隠しているときも取得だけは続ける。そうしておかないと、隠している間に
+     設定が分からなくなって、表示に戻すボタンまで出せなくなる */
+  const list=ensureSharedCal(y,m);
+  if(sharedCalHidden())return [];
+  return list.map(e=>({
     id:e.id,title:e.title,start:e.start,allDay:e.allDay,location:e.location,shared:true,
   }));
 }
@@ -2459,7 +2517,10 @@ function eventsSection(){
         ...dvs.map(iv=>({t:new Date(iv.confirmed_datetime),color:'var(--iv)',label:`${hm(iv.confirmed_datetime)} ${ivLabel(iv)}`})),
       ].sort((a,b)=>a.t-b.t);
       const has=items.length;const hol=holidayName(y,m,d);
-      const cls=['calcell',has?'has':'',key===todayKey?'today':'',key===calSel?'sel':'',hol?'holiday':''].join(' ');
+      // 土曜は青、日曜と祝日は赤にする（曜日の見出しと同じ配色）
+      const dow=new Date(y,m,d).getDay();
+      const cls=['calcell',has?'has':'',key===todayKey?'today':'',key===calSel?'sel':'',
+        dow===6?'sat':'',(dow===0||hol)?'holiday':''].join(' ');
       let chipsHtml='';
       if(has){
         // 全画面のほうが1日ぶんの幅も高さもあるので、1件多く見せる
@@ -2477,7 +2538,7 @@ function eventsSection(){
     }
     const trail=(7-(startDow+daysInMonth)%7)%7;
     for(let i=1;i<=trail;i++)cells+=`<div class="calcell out"></div>`;
-    const dow=WD_JP.map((w)=>`<div class="caldow">${w}</div>`).join('');
+    const dow=WD_JP.map((w,i)=>`<div class="caldow${i===0?' sun':''}${i===6?' sat':''}">${w}</div>`).join('');
     body=`<div class="calgrid">${dow}${cells}</div>`;
   }
 
@@ -2516,9 +2577,15 @@ function eventsSection(){
   /* 全社カレンダーそのものを見たいときのための出口。
      このアプリは読み取りだけなので、書き込みや細かい確認はGoogleカレンダー側で行う。
      スタッフだけに見せ、連携できているときだけ出す */
+  /* 隣に、自分の画面から全社の予定を隠すボタンを並べる。
+     この設定はこの端末にだけ残るので、ほかの人の見え方は変わらない */
+  const hidden=sharedCalHidden();
   const sharedBtn=(sharedCalOn()&&SHARED_CAL.configured&&SHARED_CAL.calendarId)
     ? `<button class="btn ghost sm" onclick="openSharedCalendarSite()"
-        title="${esc(SHARED_CAL.name||'全社カレンダー')}をGoogleカレンダーで開く">${ic('calendar')}全社カレンダー</button>`
+        title="${esc(SHARED_CAL.name||'全社カレンダー')}をGoogleカレンダーで開く">${ic('calendar')}全社カレンダー</button>
+       <button class="btn ghost sm iconly ${hidden?'off':''}" onclick="toggleSharedCal()"
+        title="${hidden?'全社カレンダーの予定を自分の画面に表示する':'全社カレンダーの予定を自分の画面から隠す'}"
+        aria-label="${hidden?'全社カレンダーの予定を表示する':'全社カレンダーの予定を隠す'}">${ic(hidden?'eye-off':'eye')}</button>`
     : '';
   const viewTabs=`${sharedBtn}<div class="calview-tabs">
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
@@ -2541,17 +2608,12 @@ function eventsSection(){
   return `<div class="divider" style="margin:22px 0 14px"></div>
     <div class="calsec-head">
       <h2>${ic('calendar')}カレンダー</h2>
-      <span class="calsec-tools">
-        ${viewTabs}
-        <button class="btn ghost sm calfull-btn" onclick="setCalFull(true)" title="カレンダーを画面いっぱいに表示">${ic('panel')}全画面</button>
-      </span></div>
-    <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定が表示されます。その画面から、その日に予定を追加することもできます。</p>
+      <span class="calsec-tools">${viewTabs}</span></div>
     ${isFullAdmin()&&SHARED_CAL.configured===false?`<div class="hint mock" style="cursor:pointer" onclick="openSharedCalendarSettings()">
       ${ic('calendar')}<span>全体予定表がまだ設定されていません。タップして、スタッフ全員に見せるカレンダーを設定できます。</span></div>`:''}
     ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">
       ${ic('lock')}<span>公開範囲を選べるようになる前に作った予定が <b>${unreviewed.length}件</b> あります。
       いまも支部の全員に見えているので、<b>個人的なものを「自分だけ」に変えられます</b>。タップして見直す。</span></div>`:''}
-    <button class="btn pri block quiet" style="margin-bottom:12px" onclick="openEventForm()">＋ 新しい予定を作成</button>
     ${cal}
     ${listBlock}`;
 }
@@ -2669,19 +2731,28 @@ function openEventForm(id,dateKey){
   const bopts=DB.branches.map(b=>`<option value="${b.id}" ${ev?.branch_id===b.id||(!ev&&b.id===ME.branch_id)?'selected':''}>${esc(b.name)}</option>`).join('');
   // 新規は「自分だけ」を既定にする。古い予定は visibility が無いので支部共有として扱う
   const vis=ev?(ev.visibility==='private'?'private':'branch'):'private';
-  const startVal=ev?toInputDT(ev.start_datetime):(dateKey?dateKey+'T09:00':'');
   const canShare=ME.role!=='intern';
+  /* 日付と時刻を分けて選ぶ。以前は開始・終了の2つを日時まるごとで指定していたが、
+     ほとんどの予定は1日で終わるので、日付は1つ、時刻を「13:00〜15:30」で選ぶ形にした */
+  const st=ev?new Date(ev.start_datetime):null;
+  const en=ev&&ev.end_datetime?new Date(ev.end_datetime):null;
+  const dateVal=st?ymd(st):(dateKey||ymd(new Date()));
+  const t1=st?`${pad(st.getHours())}:${pad(st.getMinutes())}`:'09:00';
+  const t2=en&&en>st?`${pad(en.getHours())}:${pad(en.getMinutes())}`:'10:00';
   openSheet(`<h3>${ev?'予定を編集':'予定を作成'}</h3>
     <label class="fl">予定の名前<span class="req">*</span></label>
     <input id="evTitle" value="${esc(ev?.title||'')}"><div class="field-err" id="evTitleE"></div>
     <label class="fl">説明</label>
     <textarea id="evDesc">${esc(ev?.description||'')}</textarea>
-    <label class="fl">開催日時<span class="req">*</span></label>
-    <input type="datetime-local" id="evStart" value="${startVal}"><div class="field-err" id="evStartE"></div>
-    <label class="fl">終了日時</label>
-    <input type="datetime-local" id="evEnd" value="${toInputDT(ev?.end_datetime)}">
-    <label class="fl">開催場所</label>
-    <input id="evLoc" value="${esc(ev?.location||'')}" placeholder="例：水戸市民会館／オンライン">
+    <label class="fl">日付<span class="req">*</span></label>
+    <input type="date" id="evDate" value="${dateVal}"><div class="field-err" id="evStartE"></div>
+    <label class="fl">時間<span class="req">*</span></label>
+    <div class="timerange">
+      <select id="evT1" onchange="syncEvEnd()">${timeOpts(t1)}</select>
+      <span class="tr-sep">〜</span>
+      <select id="evT2">${timeOpts(t2)}</select>
+    </div>
+    <div class="field-err" id="evTimeE"></div>
     <label class="fl">この予定を見られる人</label>
     ${canShare?`<select id="evVis" onchange="toggleEvBranch()">
       <option value="private" ${vis==='private'?'selected':''}>自分だけ</option>
@@ -2694,11 +2765,25 @@ function openEventForm(id,dateKey){
     <label class="fl">カレンダーの色</label>
     <div class="colorpick" id="evColorPick">${EVENT_COLORS.map(c=>`<span class="cdot${c.v===(ev?.color||EVENT_COLORS[0].v)?' on':''}" style="background:${c.v}" data-c="${c.v}" title="${c.n}" onclick="pickEvColor('${c.v}')"></span>`).join('')}</div>
     <input type="hidden" id="evColor" value="${esc(ev?.color||EVENT_COLORS[0].v)}">
-    <label class="fl">Meetリンク</label>
-    <input id="evMeet" value="${esc(ev?.meet_url||'')}" placeholder="https://meet.google.com/...">
-    <label class="fl">Zoomリンク</label>
-    <input id="evZoom" value="${esc(ev?.zoom_url||'')}" placeholder="https://zoom.us/j/...">
     <button class="btn pri block" style="margin-top:18px" onclick="saveEvent(${ev?`'${ev.id}'`:'null'})">${ev?'更新する':'作成する'}</button>`);
+}
+/* 30分刻みの時刻の一覧。いまの値が刻みに合わないとき
+   （前の作りで作った予定など）は、その値も選べるように混ぜてから並べ直す */
+function timeOpts(sel){
+  const list=[];
+  for(let h=0;h<24;h++)for(const m of [0,30])list.push(`${pad(h)}:${pad(m)}`);
+  if(sel&&!list.includes(sel))list.push(sel);
+  list.sort();
+  return list.map(t=>`<option value="${t}" ${t===sel?'selected':''}>${t}</option>`).join('');
+}
+/* 開始を動かしたとき、終了がそれより前になっていたら1時間後へ送る。
+   「終了が開始より前」という指定にならないようにするため */
+function syncEvEnd(){
+  const a=document.getElementById('evT1'),b=document.getElementById('evT2');
+  if(!a||!b||b.value>a.value)return;
+  const [h,m]=a.value.split(':').map(Number);
+  const next=`${pad((h+1)%24)}:${pad(m)}`;
+  b.value=[...b.options].some(o=>o.value===next)?next:a.value;
 }
 function pickEvColor(v){
   document.getElementById('evColor').value=v;
@@ -2711,23 +2796,29 @@ function toggleEvBranch(){
 }
 async function saveEvent(id){
   const title=document.getElementById('evTitle').value.trim();
-  const start=document.getElementById('evStart').value;
+  const date=document.getElementById('evDate').value;
+  const t1=document.getElementById('evT1').value,t2=document.getElementById('evT2').value;
   let valid=true;
   const te=document.getElementById('evTitleE'),se=document.getElementById('evStartE');
-  te.classList.remove('show');se.classList.remove('show');
+  const tme=document.getElementById('evTimeE');
+  te.classList.remove('show');se.classList.remove('show');tme.classList.remove('show');
   if(!title){te.textContent='イベント名は必須です';te.classList.add('show');valid=false;}
-  if(!start){se.textContent='開催日時は必須です';se.classList.add('show');valid=false;}
+  if(!date){se.textContent='日付は必須です';se.classList.add('show');valid=false;}
+  if(t2<=t1){tme.textContent='終わりの時刻は、始まりより後にしてください';tme.classList.add('show');valid=false;}
   if(!valid)return;
   const visibility=document.getElementById('evVis').value==='branch'?'branch':'private';
+  /* 場所とMeet・Zoomのリンクは入力欄をなくしたが、前に入れた内容は消さずに持ち越す。
+     編集のたびに黙って空になると、書いてあった集合場所などが失われてしまうため */
+  const old=id?DB.events.find(e=>e.id===id):null;
   const data={title,description:document.getElementById('evDesc').value.trim(),
-    start_datetime:new Date(start).toISOString(),
-    end_datetime:document.getElementById('evEnd').value?new Date(document.getElementById('evEnd').value).toISOString():new Date(start).toISOString(),
-    location:document.getElementById('evLoc').value.trim(),
+    start_datetime:new Date(`${date}T${t1}`).toISOString(),
+    end_datetime:new Date(`${date}T${t2}`).toISOString(),
+    location:old?.location||'',
     branch_id:document.getElementById('evBranch').value,
     visibility,
     color:document.getElementById('evColor').value||EVENT_COLORS[0].v,
-    meet_url:document.getElementById('evMeet').value.trim(),
-    zoom_url:document.getElementById('evZoom').value.trim()};
+    meet_url:old?.meet_url||'',
+    zoom_url:old?.zoom_url||''};
   const newId=id?null:'ev_'+uid();
   const ok=await mutate(db=>{
     if(id){
