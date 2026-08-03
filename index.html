@@ -214,6 +214,13 @@ const ICON={
   lock:'<rect pathLength="1" x="4.2" y="10.2" width="15.6" height="10.6" rx="2.2"/>'
       +'<path pathLength="1" d="M8 10.2V7.4a4 4 0 0 1 8 0v2.8"/>',
   /* 目。見えている状態と、斜線を引いて隠している状態の2つを持つ */
+  /* 自分のGoogleカレンダーの出し入れに使う。人の形にして、
+     全社カレンダーの目のボタンと押し間違えないようにしている */
+  user:'<circle pathLength="1" cx="12" cy="8" r="3.6"/>'
+     +'<path pathLength="1" d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>',
+  'user-off':'<circle pathLength="1" cx="12" cy="8" r="3.6"/>'
+     +'<path pathLength="1" d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>'
+     +'<path pathLength="1" d="M4 4l16 16"/>',
   eye:'<path pathLength="1" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/>'
      +'<circle pathLength="1" cx="12" cy="12" r="3.2"/>',
   'eye-off':'<path pathLength="1" d="M2.5 12S6 5.5 12 5.5c1.6 0 3 .5 4.2 1.1"/>'
@@ -1096,6 +1103,20 @@ function enterApp(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   renderChip();buildNav();go(defaultTab());
+  openDeepLink();
+}
+/* 出欠確認のURL（/?req=xxx）で開かれたとき、そのまま回答画面を出す。
+   自動ログインが効いていればログイン画面を挟まずにここへ来る。
+   一度開いたらURLからは消す（再読み込みのたびに開き直さないため） */
+function openDeepLink(){
+  const id=new URLSearchParams(location.search).get('req');
+  if(!id)return;
+  history.replaceState(null,'',location.pathname);
+  const r=allRequests().find(x=>x.id===id);
+  if(!r){toast('この出欠確認は見つかりませんでした');return;}
+  if(!isAttend(r))return openRequestDetail(id);
+  go('requests');
+  openAttendDetail(id);
 }
 async function logout(){
   try{await api('/api/auth/logout',{method:'POST'});}catch(e){}
@@ -1573,12 +1594,17 @@ function renderGoogleCalendarSettings(data){
   if(data.connected){
     openSheet(`<h3>Googleカレンダー連携</h3>
       <div class="hint">${ic('check')}<span>${isStaff?'連携済みです。あなたのGoogleカレンダーの予定は自動的に「面談不可」として反映され、確定した面談はGoogleカレンダーに自動登録されます。':'連携済みです。確定した面談は自動的にあなたのGoogleカレンダーに登録されます。'}</span></div>
+      <div class="hint" style="margin-top:8px">${ic('user')}<span>あなたのGoogleカレンダーの予定は、日調アプリのカレンダーにも並びます。
+        <b>これはあなたにしか見えません</b>。他の人の画面には出ないので、私的な予定が入っていても大丈夫です。
+        カレンダー右上の人のボタンで、いつでも隠せます。</span></div>
       <p class="page-sub" style="margin-top:10px">Notion Calendarをお使いの場合も、表示しているアカウントが同じGoogleアカウントであれば自動的に反映されます。iPhone標準カレンダー（iCloud）は別対応が必要です。</p>
       ${openCalendarButton()}
       <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:var(--bad-line)" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
       <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
+      <div class="hint" style="margin-top:10px">${ic('user')}<span>連携すると、あなたのGoogleカレンダーの予定が日調アプリのカレンダーにも並びます。
+        <b>これはあなたにしか見えません</b>（他の人の画面には出ません）。いつでも隠せます。</span></div>
       <button class="btn pri block" style="margin-top:16px" onclick="startGoogleConnect(this)">Googleカレンダーと連携する</button>
       ${openCalendarButton()}`);
   }
@@ -2394,6 +2420,8 @@ function eventCard(ev){
 /* 支部イベント（EVENT_COLORS）にも面談（--iv）にも使っていない色にして、
    全体予定表の予定だとひと目で分かるようにする */
 const SHARED_CAL_COLOR='#f0955b';
+/* 自分のGoogleカレンダーの予定は、全社の予定と見分けが付く色にする */
+const MY_CAL_COLOR='#7f8fa6';
 let SHARED_CAL={events:{},loading:{},configured:null,name:null,calendarId:null};
 /* 全社カレンダーを自分の画面から隠す設定。
    この端末にだけ残す。人によって見たい・見たくないが違うだけの話なので、
@@ -2445,6 +2473,52 @@ function sharedItemsFor(y,m){
     id:e.id,title:e.title,start:e.start,allDay:e.allDay,location:e.location,shared:true,
   }));
 }
+/* ---------- 自分のGoogleカレンダーの予定 ----------
+   全体予定表と同じ作りで、月ごとに取ってきて重ねるだけ。DBには保存しない。
+   サーバーは「呼んだ本人のカレンダー」しか返さないので、
+   ここに並ぶ予定が他の人の画面に出ることはない */
+let MY_CAL={events:{},loading:{},connected:null};
+const MYCAL_HIDE_KEY='ops_hide_mycal_v1';
+function myCalHidden(){
+  try{return localStorage.getItem(MYCAL_HIDE_KEY)==='1';}catch(e){return false;}
+}
+function toggleMyCal(){
+  const next=!myCalHidden();
+  try{localStorage.setItem(MYCAL_HIDE_KEY,next?'1':'0');}catch(e){}
+  render();
+  toast(next?'自分のGoogleカレンダーの予定を隠しました':'自分のGoogleカレンダーの予定を表示しました');
+}
+function ensureMyCal(y,m){
+  const key=sharedKey(y,m);
+  if(MY_CAL.events[key])return MY_CAL.events[key];
+  if(MY_CAL.loading[key])return [];
+  MY_CAL.loading[key]=true;
+  const timeMin=new Date(y,m,1).toISOString();
+  const timeMax=new Date(y,m+1,1).toISOString();
+  api(`/api/my-calendar/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`)
+    .then(r=>r.ok?r.json():null)
+    .then(d=>{
+      MY_CAL.loading[key]=false;
+      if(!d)return;
+      MY_CAL.events[key]=d.events||[];
+      MY_CAL.connected=!!d.connected;
+      if(MY_CAL.events[key].length)render();
+    })
+    .catch(()=>{MY_CAL.loading[key]=false;});
+  return [];
+}
+/* 自分のGoogleカレンダーの予定を、支部イベントと同じ形に整えて並べる。
+   自分にしか見えないものなので、印を付けて見分けられるようにする */
+function myCalItemsFor(y,m){
+  const list=ensureMyCal(y,m);
+  if(myCalHidden())return [];
+  return list.map(e=>({
+    id:'my_'+e.id,title:e.title,start:e.start,allDay:e.allDay,location:e.location,
+    shared:true,mine:true,
+  }));
+}
+function reloadMyCal(){MY_CAL.events={};MY_CAL.loading={};render();}
+
 /* 終日の予定は "2026-07-15" のような日付だけの文字列で届く。
    そのまま new Date() に渡すとUTCの0時と解釈され、時差の分だけ日がずれることがある。
    日付だけのときは地域時間の日付として組み立てて、ずれないようにする */
@@ -2490,7 +2564,8 @@ function openDaySheet(key){
   let list=DB.events.filter(e=>ymd(new Date(e.start_datetime))===key);
   if(ME.role!=='admin')list=list.filter(e=>e.branch_id===ME.branch_id||e.creator_id===ME.id);
   const ivs=myInterviewsForCal().filter(iv=>ymd(new Date(iv.confirmed_datetime))===key);
-  const shared=sharedItemsFor(Y,M-1).filter(e=>ymd(sharedDate(e))===key);
+  const shared=[...sharedItemsFor(Y,M-1),...myCalItemsFor(Y,M-1)]
+    .filter(e=>ymd(sharedDate(e))===key);
 
   /* ここは中身を確かめるための場所なので、押しても何も起きない見るだけの一覧にする。
      出欠の回答や編集は、これまでどおりカレンダーの下の一覧から行う */
@@ -2499,8 +2574,8 @@ function openDaySheet(key){
       <span class="dtx"><b>${esc(title)}</b><small>${esc(sub)}</small></span>
     </div>`;
   const items=[
-    ...shared.map(e=>({t:sharedDate(e),html:row(SHARED_CAL_COLOR,e.title,
-      `${e.allDay?'終日':hm(e.start)}${e.location?' ・ '+e.location:''} ・ 全社カレンダー`)})),
+    ...shared.map(e=>({t:sharedDate(e),html:row(e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR,e.title,
+      `${e.allDay?'終日':hm(e.start)}${e.location?' ・ '+e.location:''} ・ ${e.mine?'あなたのGoogleカレンダー（自分だけに表示）':'全社カレンダー'}`)})),
     ...ivs.map(iv=>({t:new Date(iv.confirmed_datetime),html:row('var(--iv)',ivLabel(iv),
       `${hm(iv.confirmed_datetime)} ・ 確定した面談`)})),
     ...list.map(e=>({t:new Date(e.start_datetime),html:row(e.color||EVENT_COLORS[0].v,e.title,
@@ -2522,7 +2597,7 @@ function eventsSection(){
   const ivs=myInterviewsForCal();
   const unreviewed=myUnreviewedEvents();
   const {y,m}=calYM;
-  const shared=sharedItemsFor(y,m);
+  const shared=[...sharedItemsFor(y,m),...myCalItemsFor(y,m)];
   const evByDay={},ivByDay={},shByDay={};
   list.forEach(e=>{const k=ymd(new Date(e.start_datetime));(evByDay[k]=evByDay[k]||[]).push(e);});
   ivs.forEach(iv=>{const k=ymd(new Date(iv.confirmed_datetime));(ivByDay[k]=ivByDay[k]||[]).push(iv);});
@@ -2543,7 +2618,7 @@ function eventsSection(){
       const shs=shByDay[key]||[];
       const items=[
         // 全体予定表は組織全体の予定なので、その日の先頭に出す
-        ...shs.map(e=>({t:sharedDate(e),color:SHARED_CAL_COLOR,label:sharedLabel(e)})),
+        ...shs.map(e=>({t:sharedDate(e),color:e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR,label:sharedLabel(e)})),
         ...evs.map(e=>({t:new Date(e.start_datetime),color:e.color||EVENT_COLORS[0].v,label:`${hm(e.start_datetime)} ${e.title}`})),
         ...dvs.map(iv=>({t:new Date(iv.confirmed_datetime),color:'var(--iv)',label:`${hm(iv.confirmed_datetime)} ${ivLabel(iv)}`})),
       ].sort((a,b)=>a.t-b.t);
@@ -2618,7 +2693,15 @@ function eventsSection(){
         title="${hidden?'全社カレンダーの予定を自分の画面に表示する':'全社カレンダーの予定を自分の画面から隠す'}"
         aria-label="${hidden?'全社カレンダーの予定を表示する':'全社カレンダーの予定を隠す'}">${ic(hidden?'eye-off':'eye')}</button>`
     : '';
-  const viewTabs=`${sharedBtn}<div class="calview-tabs">
+  /* 自分のGoogleカレンダーを重ねているときの、表示・非表示の切り替え。
+     連携していない人には出しても意味がないので出さない */
+  const myHidden=myCalHidden();
+  const myCalBtn=MY_CAL.connected
+    ? `<button class="btn ghost sm iconly ${myHidden?'off':''}" onclick="toggleMyCal()"
+        title="${myHidden?'自分のGoogleカレンダーの予定を表示する（自分だけに見えます）':'自分のGoogleカレンダーの予定を隠す'}"
+        aria-label="${myHidden?'自分の予定を表示する':'自分の予定を隠す'}">${ic(myHidden?'user-off':'user')}</button>`
+    : '';
+  const viewTabs=`${sharedBtn}${myCalBtn}<div class="calview-tabs">
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div>`;
@@ -2653,7 +2736,9 @@ function eventsSection(){
 function agendaView(list,ivs,shared,y,m){
   const items=[];
   (shared||[]).forEach(e=>{const dt=sharedDate(e);
-    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${e.allDay?'終日':hm(e.start)}・全体予定表`,key:ymd(dt),color:SHARED_CAL_COLOR});});
+    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,
+      sub:`${e.allDay?'終日':hm(e.start)}・${e.mine?'あなたのGoogleカレンダー':'全体予定表'}`,
+      key:ymd(dt),color:e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR});});
   list.forEach(e=>{const dt=new Date(e.start_datetime);
     if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${hm(e.start_datetime)}・${e.location||'—'}`,key:ymd(dt),color:e.color||EVENT_COLORS[0].v});});
   ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
@@ -4074,8 +4159,11 @@ function viewRequests(){
       <span class="segb">送った依頼</span></label>
   </div>`;
   return `<h1 class="page">依頼</h1>
-    <p class="page-sub">${branchName(ME.branch_id)}のスタッフ・インターン生に連絡や依頼を出せます。</p>
-    <button class="btn pri block" style="margin-bottom:16px" onclick="openRequestForm()">＋ 依頼を出す</button>
+    <p class="page-sub">${branchName(ME.branch_id)}のスタッフ・インターン生に、連絡や出欠確認を出せます。</p>
+    <div class="btn-row" style="margin-bottom:16px">
+      <button class="btn pri" style="flex:1" onclick="openRequestForm()">＋ 依頼を出す</button>
+      <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">＋ 出欠を確認する</button>
+    </div>
     ${tabs}
     ${REQTAB==='inbox'?requestList(inbox,'inbox'):requestList(sent,'sent')}`;
 }
@@ -4089,13 +4177,23 @@ function requestList(list,kind){
     const total=(r.recipient_ids||[]).length;
     const done=(r.read_by||[]).length;
     const sender=findUser(r.sender_id);
-    const sub=kind==='inbox'
-      ? `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`
-      : `${esc(r.target_label||'')} ・ ${done}/${total}人が確認 ・ ${fmtRel(r.created_at)}`;
-    const badge=kind==='inbox'&&!hasConfirmed(r,ME.id)
-      ? '<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>':'';
+    const att=isAttend(r);
+    // 出欠確認は「確認したか」ではなく「答えたか」「決まったか」で状態を出す
+    const answered=att?(r.responses||[]).some(a=>a.user_id===ME.id):false;
+    const numAns=att?attendResponders(r).length:0;
+    const sub=att
+      ? (kind==='inbox'
+        ? `${esc(sender?sender.nickname:'—')}さん ・ 候補${(r.options||[]).length}件 ・ ${fmtRel(r.created_at)}`
+        : `${esc(r.target_label||'')} ・ ${numAns}/${total}人が回答 ・ ${fmtRel(r.created_at)}`)
+      : (kind==='inbox'
+        ? `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`
+        : `${esc(r.target_label||'')} ・ ${done}/${total}人が確認 ・ ${fmtRel(r.created_at)}`);
+    let badge='';
+    if(att&&r.confirmed)badge='<span class="tag ok">確定</span>';
+    else if(att&&kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
+    else if(!att&&kind==='inbox'&&!hasConfirmed(r,ME.id))badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>';
     return `<div class="row" style="cursor:pointer" onclick="openRequestDetail('${r.id}')">
-      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('megaphone')}</span>
+      <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
       <span class="rmain"><span class="rt">${esc(r.subject)} ${badge}</span>
       <span class="rs">${sub}</span></span>
       <span class="tile-arrow">${ic('chevron')}</span></div>`;
@@ -4103,9 +4201,197 @@ function requestList(list,kind){
   return `<div class="card"><div class="rowlist">${rows}</div></div>`;
 }
 
+/* =========================================================
+   出欠確認
+   ---------------------------------------------------------
+   依頼の一種として持つ。候補ごとに ○△× を集め、送った人が1つ選んで確定する。
+   確定すると支部のカレンダーに予定が1件できる（サーバー側でまとめて行う）
+   ========================================================= */
+const ATT_MARK={ok:'○',may:'△',no:'×'};
+function isAttend(r){return r&&r.kind==='attend';}
+/* 候補ごとの集計。誰が何を答えたかも引ける形にして返す */
+function attendTally(r){
+  const byOpt=new Map();
+  (r.options||[]).forEach(o=>byOpt.set(o.id,{ok:0,may:0,no:0,who:new Map()}));
+  (r.responses||[]).forEach(a=>{
+    const t=byOpt.get(a.option_id);
+    if(!t||!ATT_MARK[a.response])return;
+    t[a.response]++;
+    t.who.set(a.user_id,a.response);
+  });
+  return byOpt;
+}
+/* 1人でも答えた人の一覧。表の列になる */
+function attendResponders(r){
+  const ids=[];
+  (r.responses||[]).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
+  return ids;
+}
+/* 出欠確認を開くURL。ログインしていればそのまま回答画面に飛ぶ */
+function attendUrl(id){
+  return `${location.origin}${location.pathname}?req=${encodeURIComponent(id)}`;
+}
+async function copyAttendUrl(id){
+  const url=attendUrl(id);
+  try{
+    await navigator.clipboard.writeText(url);
+    toast('URLをコピーしました');
+  }catch(e){
+    // 権限が下りない環境（古い端末など）では選択状態にして手でコピーしてもらう
+    const el=document.getElementById('attUrl');
+    if(el){el.focus();el.select();}
+    toast('コピーできませんでした。選択された文字をコピーしてください');
+  }
+}
+
+function openAttendDetail(id){
+  const r=allRequests().find(x=>x.id===id);
+  if(!r)return;
+  const sender=findUser(r.sender_id);
+  const mineToAnswer=(r.recipient_ids||[]).includes(ME.id);
+  const isOwner=r.sender_id===ME.id||ME.role==='admin';
+  const tally=attendTally(r);
+  const responders=attendResponders(r);
+  const opts=r.options||[];
+  const confirmedOpt=r.confirmed?opts.find(o=>o.id===r.confirmed):null;
+
+  // いちばん○が多い候補。同数なら先に並んでいるほう
+  let best=null;
+  opts.forEach(o=>{const t=tally.get(o.id);if(!best||t.ok>tally.get(best.id).ok)best=o;});
+
+  const head=`<tr><th class="atd">日程</th>
+    ${responders.map(uid=>`<th>${esc((findUser(uid)||{}).nickname||'—')}</th>`).join('')}
+    <th class="atc ok">○</th><th class="atc may">△</th><th class="atc no">×</th>
+    ${isOwner&&!r.confirmed?'<th></th>':''}</tr>`;
+
+  const body=opts.map(o=>{
+    const t=tally.get(o.id);
+    const isConf=r.confirmed===o.id;
+    return `<tr class="${isConf?'on':''}">
+      <td class="atd"><b>${fmtSlot(o)}</b>${isConf?'<span class="tag ok" style="margin-left:6px">確定</span>':''}</td>
+      ${responders.map(uid=>`<td>${ATT_MARK[t.who.get(uid)]||'・'}</td>`).join('')}
+      <td class="atc ok">${t.ok}</td><td class="atc may">${t.may}</td><td class="atc no">${t.no}</td>
+      ${isOwner&&!r.confirmed?`<td><button class="btn sm pri" onclick="confirmAttend('${r.id}','${o.id}')">この日で確定</button></td>`:''}
+    </tr>`;
+  }).join('');
+
+  /* 自分の回答。候補ごとに ○△× を1つ選ぶ。
+     押すたびに通信すると候補の数だけ往復するので、選ぶのは画面上だけにして
+     最後に「回答を送る」でまとめて送る */
+  ATTANS={};
+  (r.responses||[]).forEach(a=>{if(a.user_id===ME.id)ATTANS[a.option_id]=a.response;});
+  const answerBlock=(mineToAnswer&&!r.confirmed)?`
+    <div class="divider" style="margin:18px 0 14px"></div>
+    <label class="fl">あなたの回答<span class="fl-sub">候補ごとに選んでください</span></label>
+    <div class="attans" id="attans">${opts.map(o=>`
+      <div class="attrow">
+        <span class="atname">${fmtSlot(o)}</span>
+        <span class="att3">${['ok','may','no'].map(v=>`
+          <button type="button" class="attb v-${v} ${ATTANS[o.id]===v?'on':''}"
+            data-op="${o.id}" data-v="${v}" onclick="pickAttend('${o.id}','${v}')">${ATT_MARK[v]}</button>`).join('')}</span>
+      </div>`).join('')}</div>
+    <div class="field-err" id="attErr"></div>
+    <button class="btn pri block" style="margin-top:14px" id="attBtn" onclick="submitAttend('${r.id}')">回答を送る</button>`:'';
+
+  const urlBlock=isOwner?`
+    <label class="fl" style="margin-top:4px">出欠確認のURL<span class="fl-sub">このリンクを配ると、アプリにログインしている人がそのまま回答できます</span></label>
+    <div class="urlrow">
+      <input id="attUrl" readonly value="${esc(attendUrl(r.id))}" onclick="this.select()">
+      <button class="btn sm" onclick="copyAttendUrl('${r.id}')">コピー</button>
+    </div>`:'';
+
+  openSheet(`<h3>${esc(r.subject)} <span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">出欠</span></h3>
+    <p class="page-sub" style="margin-top:0">${esc(sender?sender.nickname:'—')}さん ・ ${esc(r.target_label||'')}（${(r.recipient_ids||[]).length}名）</p>
+    ${urlBlock}
+    ${r.body?`<div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>`:''}
+    ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
+      <b>${fmtSlot(confirmedOpt)}</b> で確定しました。カレンダーに予定を追加しています。</span></div>`:''}
+    <div class="statrow" style="margin-top:14px">
+      <div class="statbox a1"><small>回答者</small><b>${responders.length}<i>名</i></b></div>
+      <div class="statbox a3"><small>候補</small><b>${opts.length}<i>件</i></b></div>
+      <div class="statbox a2"><small>最有力（○が最多）</small><b>${best?tally.get(best.id).ok:0}<i>名○</i></b></div>
+    </div>
+    <label class="fl" style="margin-top:16px">出欠集計（${responders.length}名）</label>
+    <div class="atwrap"><table class="attable"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+    ${answerBlock}`);
+}
+/* 候補1件の見せ方。「9/12(土) 19:00〜21:00」 */
+function fmtSlot(o){
+  const s=new Date(o.start),e=o.end?new Date(o.end):null;
+  return `${s.getMonth()+1}/${s.getDate()}(${WD_JP[s.getDay()]}) ${hm(s)}${e?'〜'+hm(e):''}`;
+}
+let ATTANS={};   // 画面上で選んでいる自分の回答 {候補id:'ok'|'may'|'no'}
+function pickAttend(optId,v){
+  ATTANS[optId]=v;
+  // 押した行のボタンだけ塗り替える。画面ごと作り直すと一瞬暗く沈むため
+  document.querySelectorAll(`#attans .attb[data-op="${optId}"]`).forEach(b=>{
+    b.classList.toggle('on',b.dataset.v===v);
+  });
+}
+async function submitAttend(id){
+  const err=document.getElementById('attErr');
+  const btn=document.getElementById('attBtn');
+  err.classList.remove('show');
+  const r=allRequests().find(x=>x.id===id);
+  const opts=(r&&r.options)||[];
+  const answers=opts.filter(o=>ATTANS[o.id]).map(o=>({option_id:o.id,response:ATTANS[o.id]}));
+  if(answers.length<opts.length){
+    err.textContent='すべての候補に答えてください';err.classList.add('show');return;
+  }
+  btn.disabled=true;btn.textContent='送信中…';
+  try{
+    const res=await api(`/api/requests/${encodeURIComponent(id)}/response`,
+      {method:'PUT',body:JSON.stringify({answers})});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      err.textContent=d.error||'回答を保存できませんでした';err.classList.add('show');
+      btn.disabled=false;btn.textContent='回答を送る';return;
+    }
+    const {saved}=await res.json();
+    // 手元の一覧も同じ形に合わせる（すぐ集計に反映するため）
+    r.responses=(r.responses||[]).filter(a=>a.user_id!==ME.id).concat(saved);
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('出欠の回答に失敗しました',e);
+    err.textContent='送信できませんでした。通信状況をご確認ください';err.classList.add('show');
+    btn.disabled=false;btn.textContent='回答を送る';return;
+  }
+  closeSheet();render();
+  toast('回答を送りました');
+  openAttendDetail(id);   // 集計を見せる
+}
+async function confirmAttend(reqId,optId){
+  const r=allRequests().find(x=>x.id===reqId);
+  const o=(r.options||[]).find(x=>x.id===optId);
+  if(!o)return;
+  if(!await confirmSheet('この日で確定する',
+    `${fmtSlot(o)} で確定します。カレンダーに予定が追加され、回答した方へお知らせが届きます。`,'確定する'))return;
+  try{
+    const res=await api(`/api/requests/${encodeURIComponent(reqId)}/confirm`,
+      {method:'POST',body:JSON.stringify({option_id:optId})});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'確定できませんでした。');return;
+    }
+    const {event,notification}=await res.json();
+    r.confirmed=optId;
+    if(event){r.event_id=event.id;DB.events=[...(DB.events||[]),event];}
+    if(notification)DB.notifications=[...(DB.notifications||[]),notification];
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('日程の確定に失敗しました',e);
+    setSaveError('確定できていません。通信状況をご確認ください。');return;
+  }
+  closeSheet();updateBell();render();
+  toast('日程を確定しました');
+}
+
 function openRequestDetail(id){
   const r=allRequests().find(x=>x.id===id);
   if(!r)return;
+  if(isAttend(r))return openAttendDetail(id);
   const sender=findUser(r.sender_id);
   const mine=(r.recipient_ids||[]).includes(ME.id);
   const done=hasConfirmed(r,ME.id);
@@ -4178,9 +4464,10 @@ const REQ_MODES=[
   {id:'by_place',    label:'インターン先で選ぶ'},
 ];
 
-function openRequestForm(){
-  REQFORM={mode:'all_staff',picked:[]};
-  renderRequestForm();
+function openRequestForm(kind){
+  REQFORM={mode:'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[]};
+  if(REQFORM.kind==='attend')addReqOption();   // 中で描き直すのでここでは呼ばない
+  else renderRequestForm();
 }
 function setReqMode(mode){
   REQFORM.mode=mode;
@@ -4287,31 +4574,91 @@ function reqPickerHTML(){
   return '';
 }
 
+/* ふつうの依頼と出欠確認の切り替え。候補の日時は REQFORM.opts に貯める */
+function setReqKind(kind){
+  REQFORM.kind=kind;
+  if(kind==='attend'&&!REQFORM.opts.length)addReqOption();
+  renderRequestForm(true);
+}
+/* 候補を1件足す。前の候補があればその翌週の同じ時間を初期値にする。
+   毎週の定例を並べることが多いので、そのほうが打ち直しが少ない */
+function addReqOption(){
+  const last=REQFORM.opts[REQFORM.opts.length-1];
+  if(last){
+    const d=new Date(last.date+'T00:00');
+    d.setDate(d.getDate()+7);
+    REQFORM.opts.push({date:ymd(d),t1:last.t1,t2:last.t2});
+  }else{
+    const d=new Date();d.setDate(d.getDate()+7);
+    REQFORM.opts.push({date:ymd(d),t1:'19:00',t2:'21:00'});
+  }
+  renderRequestForm(true);
+}
+function removeReqOption(i){
+  REQFORM.opts.splice(i,1);
+  renderRequestForm(true);
+}
+/* 入力欄の値をその場で控える。描き直しても打った内容が消えないようにするため */
+function syncReqOptions(){
+  REQFORM.opts.forEach((o,i)=>{
+    const d=document.getElementById('ro_d'+i), a=document.getElementById('ro_a'+i), b=document.getElementById('ro_b'+i);
+    if(d)o.date=d.value;
+    if(a)o.t1=a.value;
+    if(b)o.t2=b.value;
+  });
+}
+function reqOptionsHTML(){
+  if(REQFORM.kind!=='attend')return '';
+  const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
+      <input type="date" id="ro_d${i}" value="${o.date}" onchange="syncReqOptions()">
+      <div class="timerange">
+        <select id="ro_a${i}" onchange="syncReqOptions()">${timeOpts(o.t1)}</select>
+        <span class="tr-sep">〜</span>
+        <select id="ro_b${i}" onchange="syncReqOptions()">${timeOpts(o.t2)}</select>
+      </div>
+      <button type="button" class="optx" onclick="syncReqOptions();removeReqOption(${i})"
+        ${REQFORM.opts.length<=1?'disabled':''} aria-label="この候補を消す">×</button>
+    </div>`).join('');
+  return `<label class="fl" style="margin-top:16px">候補の日時<span class="req">*</span>
+      <span class="fl-sub">答える人は候補ごとに ○△× を選びます</span></label>
+    <div class="optlist">${rows}</div>
+    <button type="button" class="btn ghost sm" style="margin-top:8px" onclick="syncReqOptions();addReqOption()">
+      ＋ 候補を追加</button>`;
+}
+
 function renderRequestForm(keepText){
   // 描き直しの前に、打ちかけの件名・本文を控えておく
   const prevSubj=keepText?(document.getElementById('reqSubj')||{}).value||'':'';
   const prevBody=keepText?(document.getElementById('reqBody')||{}).value||'':'';
   const {ids,label}=resolveRecipients();
+  const attend=REQFORM.kind==='attend';
 
   const modeBtns=REQ_MODES.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
     onclick="setReqMode('${o.id}')">${o.label}</button>`).join('');
 
-  openSheet(`<h3>依頼を出す</h3>
-    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、連絡や依頼を送ります。</p>
+  openSheet(`<h3>${attend?'出欠を確認する':'依頼を出す'}</h3>
+    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、${attend?'日程の候補を出して出欠を集めます。':'連絡や依頼を送ります。'}</p>
 
-    <label class="fl">あて先の選び方</label>
+    <label class="fl">送るもの</label>
+    <div class="modechips">
+      <button type="button" class="modechip ${attend?'':'on'}" onclick="setReqKind('normal')">連絡・依頼</button>
+      <button type="button" class="modechip ${attend?'on':''}" onclick="setReqKind('attend')">出欠確認</button>
+    </div>
+
+    <label class="fl" style="margin-top:16px">あて先の選び方</label>
     <div class="modechips">${modeBtns}</div>
     <div style="margin-top:12px">${reqPickerHTML()}</div>
 
     <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>（${ids.length}名）</span></div>
 
     <label class="fl" style="margin-top:16px">件名<span class="req">*</span></label>
-    <input id="reqSubj" autocomplete="off" placeholder="例）来週の定例、資料の準備をお願いします" value="${esc(prevSubj)}">
+    <input id="reqSubj" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
     <label class="fl">本文</label>
-    <textarea id="reqBody" rows="6" placeholder="お願いしたい内容を書いてください。">${esc(prevBody)}</textarea>
+    <textarea id="reqBody" rows="${attend?4:6}" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>
+    ${reqOptionsHTML()}
     <div class="field-err" id="reqErr"></div>
 
-    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">この内容で送る</button>`);
+    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'出欠確認を送る':'この内容で送る'}</button>`);
 }
 
 async function submitRequest(){
@@ -4325,16 +4672,39 @@ async function submitRequest(){
   if(!ids.length){err.textContent='あて先を選んでください';err.classList.add('show');return;}
   if(!subject){err.textContent='件名を入力してください';err.classList.add('show');return;}
 
+  const attend=REQFORM.kind==='attend';
+  let options=[];
+  if(attend){
+    syncReqOptions();
+    if(!REQFORM.opts.length){err.textContent='候補の日時を1件以上追加してください';err.classList.add('show');return;}
+    for(const o of REQFORM.opts){
+      if(!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
+      if(o.t2<=o.t1){err.textContent='終わりの時刻は始まりより後にしてください';err.classList.add('show');return;}
+    }
+    // 同じ日時が2つあると集計の見分けがつかないので弾く
+    const seen=new Set();
+    for(const o of REQFORM.opts){
+      const key=o.date+' '+o.t1;
+      if(seen.has(key)){err.textContent='同じ日時の候補が重なっています';err.classList.add('show');return;}
+      seen.add(key);
+    }
+    options=REQFORM.opts.map(o=>({
+      start:new Date(`${o.date}T${o.t1}`).toISOString(),
+      end:new Date(`${o.date}T${o.t2}`).toISOString(),
+    }));
+  }
+
   btn.disabled=true;btn.textContent='送信中…';
   /* 依頼は専用APIで作る。あて先は送った時点で固定される（上のコメント参照）。
      受け取った人への通知はサーバー側で一緒に積まれる */
   try{
     const res=await api('/api/requests',{method:'POST',
-      body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids})});
+      body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids,
+        kind:attend?'attend':'normal',options})});
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
       err.textContent=d.error||'送信できませんでした';err.classList.add('show');
-      btn.disabled=false;btn.textContent='この内容で送る';
+      btn.disabled=false;btn.textContent=attend?'出欠確認を送る':'この内容で送る';
       return;
     }
     const {request,notification}=await res.json();

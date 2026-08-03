@@ -14,8 +14,10 @@ const crypto = require('node:crypto');
 const { promisify } = require('node:util');
 const scrypt = promisify(crypto.scrypt);
 
-/* 「次回から自動ログイン」にチェックを入れた場合の有効期限 */
-const SESSION_TTL_REMEMBER_MS = 7 * 24 * 60 * 60 * 1000; // 7日
+/* 「次回から自動ログイン」にチェックを入れた場合の有効期限。
+   出欠確認のリンクを配ってから回答が集まるまで数週間空くことがあり、
+   7日だと配った相手が毎回ログインし直しになるため3か月にしてある */
+const SESSION_TTL_REMEMBER_MS = 90 * 24 * 60 * 60 * 1000; // 90日（約3か月）
 /* チェックなしの場合。タブを閉じればトークンごと消えるので、長く持たせる意味がない */
 const SESSION_TTL_TAB_MS = 12 * 60 * 60 * 1000; // 12時間
 

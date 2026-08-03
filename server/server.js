@@ -153,6 +153,17 @@ async function initDB() {
       created_at TEXT NOT NULL
     )
   `);
+  /* 出欠確認の依頼で使う3列を、あとから足す。
+     すでにある本番のテーブルにも同じ形で足したいので ALTER TABLE で追加し、
+     2回目以降は「列が既にある」エラーになるだけなので黙って進む。
+       kind       … 'normal'（ふつうの依頼）か 'attend'（出欠確認）
+       options    … 候補の日時。JSON配列 [{id,start,end}]
+       confirmed  … 確定した候補のid。未確定なら null */
+  for (const [col, type] of [['kind', 'TEXT'], ['options', 'TEXT'], ['confirmed', 'TEXT'],
+    ['event_id', 'TEXT']]) {
+    try { await client.execute(`ALTER TABLE requests ADD COLUMN ${col} ${type}`); }
+    catch (e) { /* 既にある。SQLiteには IF NOT EXISTS が無いのでこれで判定する */ }
+  }
   /* 「確認しました」を依頼の行に配列で持つと、300人が同じ1行を奪い合うことになる。
      1人1行にすることで、何人が同時に押しても衝突しない */
   await client.execute(`
@@ -161,6 +172,17 @@ async function initDB() {
       user_id TEXT NOT NULL,
       read_at TEXT NOT NULL,
       PRIMARY KEY (request_id, user_id)
+    )
+  `);
+  /* 出欠の回答。読んだ印と同じ考えで、1人1候補につき1行にして衝突を避ける */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS request_responses (
+      request_id TEXT NOT NULL,
+      option_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      response TEXT NOT NULL,        -- 'ok' | 'may' | 'no'
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (request_id, option_id, user_id)
     )
   `);
   await client.execute(`
@@ -428,12 +450,32 @@ async function listRequestsFor(user) {
     if (!byRequest.has(r.request_id)) byRequest.set(r.request_id, []);
     byRequest.get(r.request_id).push({ user_id: r.user_id, at: r.read_at });
   }
+  /* 出欠の回答も一緒に返す。見える依頼のぶんだけに絞るので、
+     他の支部の出欠が混ざることはない */
+  const mine = new Set(rows.map((r) => r.id));
+  const answers = await client.execute('SELECT * FROM request_responses');
+  const respOf = new Map();
+  for (const a of answers.rows) {
+    if (!mine.has(a.request_id)) continue;
+    if (!respOf.has(a.request_id)) respOf.set(a.request_id, []);
+    respOf.get(a.request_id).push({ option_id: a.option_id, user_id: a.user_id, response: a.response });
+  }
   return rows.map((r) => ({
     id: r.id, sender_id: r.sender_id, branch_id: r.branch_id,
     subject: r.subject, body: r.body, target_label: r.target_label,
     recipient_ids: parseIds(r.recipient_ids), created_at: r.created_at,
     read_by: byRequest.get(r.id) || [],
+    kind: r.kind || 'normal',
+    options: safeJson(r.options, []),
+    confirmed: r.confirmed || null,
+    event_id: r.event_id || null,
+    responses: respOf.get(r.id) || [],
   }));
+}
+/* 壊れたJSONが入っていても画面ごと落とさない */
+function safeJson(text, fallback) {
+  try { const v = JSON.parse(text || ''); return v == null ? fallback : v; }
+  catch (e) { return fallback; }
 }
 
 async function listEventResponses() {
@@ -1956,10 +1998,32 @@ app.post('/api/requests', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '依頼を送れるのはスタッフだけです' });
   }
-  const { subject, body, target_label, recipient_ids } = req.body || {};
+  const { subject, body, target_label, recipient_ids, kind, options } = req.body || {};
   if (!subject || !String(subject).trim()) return res.status(400).json({ error: '件名を入力してください' });
   const ids = Array.isArray(recipient_ids) ? recipient_ids.filter(Boolean) : [];
   if (!ids.length) return res.status(400).json({ error: 'あて先を選んでください' });
+  /* 出欠確認のときは候補の日時が要る。候補は画面から来た値をそのまま信じず、
+     日時として読める形かどうかをここで確かめる */
+  const isAttend = kind === 'attend';
+  let opts = [];
+  if (isAttend) {
+    opts = (Array.isArray(options) ? options : []).map((o, i) => ({
+      id: 'op' + i,
+      start: o && o.start ? new Date(o.start) : null,
+      end: o && o.end ? new Date(o.end) : null,
+    }));
+    if (!opts.length) return res.status(400).json({ error: '候補の日時を1件以上追加してください' });
+    if (opts.length > 30) return res.status(400).json({ error: '候補は30件までです' });
+    if (opts.some((o) => !o.start || Number.isNaN(o.start.getTime()))) {
+      return res.status(400).json({ error: '候補の日時が正しくありません' });
+    }
+    opts = opts.map((o) => ({
+      id: o.id,
+      start: o.start.toISOString(),
+      end: o.end && !Number.isNaN(o.end.getTime()) && o.end > o.start
+        ? o.end.toISOString() : new Date(o.start.getTime() + 60 * 60 * 1000).toISOString(),
+    }));
+  }
   try {
     // あて先は自分の支部の人だけ（全体管理者は制限なし）
     if (actor.role !== 'admin') {
@@ -1975,16 +2039,21 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       subject: String(subject).trim(), body: String(body || ''),
       target_label: target_label || null, recipient_ids: ids,
       created_at: new Date().toISOString(), read_by: [],
+      kind: isAttend ? 'attend' : 'normal', options: opts, confirmed: null, event_id: null,
+      responses: [],
     };
     await client.execute({
-      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at)
-            VALUES (?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, kind, options)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`,
       args: [request.id, request.sender_id, request.branch_id, request.subject,
-        request.body, request.target_label, JSON.stringify(ids), request.created_at],
+        request.body, request.target_label, JSON.stringify(ids), request.created_at,
+        request.kind, JSON.stringify(opts)],
     });
     const notification = await insertNotification({
-      type: '依頼', branch_id: actor.branch_id || null,
-      msg: `${actor.nickname}さんから「${request.subject}」が届きました`,
+      type: isAttend ? '出欠確認' : '依頼', branch_id: actor.branch_id || null,
+      msg: isAttend
+        ? `${actor.nickname}さんから出欠確認「${request.subject}」が届きました`
+        : `${actor.nickname}さんから「${request.subject}」が届きました`,
     });
     res.json({ ok: true, request, notification });
   } catch (e) {
@@ -2014,6 +2083,97 @@ app.post('/api/requests/:id/read', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('依頼の確認に失敗しました', e);
     res.status(500).json({ error: '確認できませんでした' });
+  }
+});
+
+/* 出欠確認に答える。候補ごとに1行なので、何人が同時に押しても衝突しない。
+   まとめて送れるようにしてあるのは、○△×を1つずつ通信すると
+   候補が10件あれば10往復になり、電波の悪い場所で取りこぼすため */
+app.put('/api/requests/:id/response', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+  try {
+    const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '出欠確認が見つかりません' });
+    if (row.kind !== 'attend') return res.status(400).json({ error: 'これは出欠確認ではありません' });
+    // 送った本人も含めて、あて先の人だけが答えられる
+    const ids = parseIds(row.recipient_ids);
+    if (!ids.includes(actor.id) && row.sender_id !== actor.id) {
+      return res.status(403).json({ error: 'この出欠確認のあて先ではありません' });
+    }
+    if (row.confirmed) return res.status(409).json({ error: 'すでに日程が確定しています' });
+    // 候補にない id や、決められた3つ以外の答えは受け取らない
+    let opts = [];
+    try { opts = JSON.parse(row.options || '[]'); } catch (e) { opts = []; }
+    const okIds = new Set(opts.map((o) => o.id));
+    const at = new Date().toISOString();
+    const saved = [];
+    for (const a of answers) {
+      if (!a || !okIds.has(a.option_id) || !['ok', 'may', 'no'].includes(a.response)) continue;
+      await client.execute({
+        sql: `INSERT INTO request_responses (request_id, option_id, user_id, response, updated_at)
+              VALUES (?,?,?,?,?)
+              ON CONFLICT(request_id, option_id, user_id)
+              DO UPDATE SET response = excluded.response, updated_at = excluded.updated_at`,
+        args: [req.params.id, a.option_id, actor.id, a.response, at],
+      });
+      saved.push({ request_id: req.params.id, option_id: a.option_id, user_id: actor.id, response: a.response, updated_at: at });
+    }
+    res.json({ ok: true, saved });
+  } catch (e) {
+    console.error('出欠の保存に失敗しました', e);
+    res.status(500).json({ error: '回答を保存できませんでした' });
+  }
+});
+
+/* 日程を確定する。送った本人だけ。確定した日時で予定を1件作り、
+   答えてくれた人へ通知を出す */
+app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  const optionId = req.body?.option_id;
+  try {
+    const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '出欠確認が見つかりません' });
+    if (row.kind !== 'attend') return res.status(400).json({ error: 'これは出欠確認ではありません' });
+    if (row.sender_id !== actor.id && actor.role !== 'admin') {
+      return res.status(403).json({ error: '確定できるのは送った本人だけです' });
+    }
+    let opts = [];
+    try { opts = JSON.parse(row.options || '[]'); } catch (e) { opts = []; }
+    const picked = opts.find((o) => o.id === optionId);
+    if (!picked) return res.status(400).json({ error: '候補が見つかりません' });
+
+    /* 予定はstore側（1行JSON）に持っているので、読む→足す→書くを鍵で囲む。
+       囲まないと、同時に別の予定が作られたときにどちらかが消える */
+    const event = {
+      id: 'ev_' + crypto.randomBytes(6).toString('hex'),
+      title: row.subject,
+      description: row.body || '',
+      start_datetime: picked.start,
+      end_datetime: picked.end,
+      location: '', branch_id: row.branch_id, visibility: 'branch',
+      color: '#56b8ac', creator_id: actor.id, meet_url: '', zoom_url: '',
+      created_at: new Date().toISOString(),
+    };
+    await withDBLock(async () => {
+      const db = await readDBForWrite();
+      db.events = [...(db.events || []), event];
+      await writeDB(db);
+    });
+    await client.execute({
+      sql: 'UPDATE requests SET confirmed = ?, event_id = ? WHERE id = ?',
+      args: [optionId, event.id, req.params.id],
+    });
+    const notification = await insertNotification({
+      type: '出欠確認', branch_id: row.branch_id || null,
+      msg: `「${row.subject}」の日程が確定しました`,
+    });
+    res.json({ ok: true, confirmed: optionId, event, notification });
+  } catch (e) {
+    console.error('日程の確定に失敗しました', e);
+    res.status(500).json({ error: '確定できませんでした' });
   }
 });
 
@@ -2429,6 +2589,44 @@ app.get('/api/shared-calendar/events', requireAuth, async (req, res) => {
     }
     console.error('全体予定表の取得に失敗しました', e);
     res.json({ events: [], configured: true, error: 'failed' });
+  }
+});
+
+/* 自分のGoogleカレンダーの予定を、日調のカレンダーに重ねて出すために返す。
+   ---------------------------------------------------------
+   ここが返すのは「呼んだ本人のカレンダー」だけ。他人のぶんは渡しようがないので、
+   その人にしか見えないことが仕組みとして保証される。
+   DBには保存しない。保存すると、Google側で消した予定が日調に残り続けるうえ、
+   本人しか見てはいけない予定の写しがDBに溜まっていくため */
+const myCalCache = new Map();          // key: staffId|timeMin|timeMax
+const MY_CAL_TTL_MS = 60 * 1000;
+app.get('/api/my-calendar/events', requireAuth, async (req, res) => {
+  if (!GOOGLE_ENABLED) return res.json({ events: [], connected: false });
+  const timeMin = String(req.query.timeMin || '');
+  const timeMax = String(req.query.timeMax || '');
+  if (!timeMin || !timeMax) return res.status(400).json({ error: '期間の指定が必要です' });
+  const me = req.authUser.id;
+  try {
+    const row = await getTokenRow(me);
+    if (!row) return res.json({ events: [], connected: false });
+    const key = `${me}|${timeMin}|${timeMax}`;
+    const hit = myCalCache.get(key);
+    if (hit && Date.now() - hit.at < MY_CAL_TTL_MS) {
+      return res.json({ events: hit.events, connected: true, cached: true });
+    }
+    const accessToken = await accessTokenFor(row);
+    /* 連携しているカレンダーが全体予定表用に差し替えられている場合でも、
+       ここで見たいのは本人の予定なので primary を固定で読む */
+    const events = await google.listEventsInRange(accessToken, 'primary', timeMin, timeMax);
+    myCalCache.set(key, { at: Date.now(), events });
+    res.json({ events, connected: true });
+  } catch (e) {
+    /* 取れなくてもカレンダー画面は出したいので、空で返してログに残す */
+    if (e.code === 'REFRESH_REVOKED' || e.code === 'CALENDAR_UNAVAILABLE') {
+      return res.json({ events: [], connected: true, error: 'unavailable' });
+    }
+    console.error('自分のGoogleカレンダーの取得に失敗しました', e);
+    res.json({ events: [], connected: true, error: 'failed' });
   }
 });
 

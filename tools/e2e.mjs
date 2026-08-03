@@ -238,6 +238,130 @@ async function putDB(token, mutateFn) {
 /* 全体予定表の絞り込み。
    Googleカレンダーとの連携が要るためHTTP経由では試せないので、
    判定の部分だけを直接呼んで確かめる */
+/* 出欠確認（依頼の一種）。候補を出す→答える→確定する、の一通りと、
+   答えてはいけない人・確定してはいけない人がはじかれることを確かめる */
+async function testAttendance() {
+  console.log('\n─────── 出欠確認 ───────');
+  const t1 = new Date(Date.now() + 7 * 86400000);
+  const t2 = new Date(Date.now() + 14 * 86400000);
+  const mk = (d, h) => { const x = new Date(d); x.setHours(h, 0, 0, 0); return x.toISOString(); };
+
+  const made = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: 'チーム懇親会', body: '場所は未定です',
+    target_label: '支部の全インターン生', recipient_ids: ['u_e2e_intern', 'u_e2e_intern2'],
+    kind: 'attend',
+    options: [{ start: mk(t1, 19), end: mk(t1, 21) }, { start: mk(t2, 19), end: mk(t2, 21) }],
+  });
+  check('出欠確認を作れる', made.status, 200);
+  check('出欠確認として記録される', made.json.request?.kind, 'attend');
+  check('候補が2件ある', made.json.request?.options?.length, 2);
+  check('候補にidが振られる', made.json.request?.options?.[0]?.id, 'op0');
+  const attId = made.json.request?.id;
+
+  const noOpts = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '候補なし', target_label: 'x', recipient_ids: ['u_e2e_intern'], kind: 'attend', options: [],
+  });
+  check('候補が無い出欠確認は作れない', noOpts.status, 400);
+
+  const badDate = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '壊れた候補', target_label: 'x', recipient_ids: ['u_e2e_intern'],
+    kind: 'attend', options: [{ start: 'これは日付ではない' }],
+  });
+  check('日時として読めない候補ははじかれる', badDate.status, 400);
+
+  // ---- 回答 ----
+  const ans = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+    { answers: [{ option_id: 'op0', response: 'ok' }, { option_id: 'op1', response: 'no' }] });
+  check('あて先の人は答えられる', ans.status, 200);
+  check('答えた数だけ保存される', ans.json.saved?.length, 2);
+
+  const ans2 = await api(TOKENS.intern2, 'PUT', `/api/requests/${attId}/response`,
+    { answers: [{ option_id: 'op0', response: 'may' }, { option_id: 'op1', response: 'ok' }] });
+  check('もう1人も答えられる', ans2.status, 200);
+
+  const again = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+    { answers: [{ option_id: 'op0', response: 'may' }] });
+  check('答え直せる', again.status, 200);
+
+  const outsider = await api(TOKENS.staff2, 'PUT', `/api/requests/${attId}/response`,
+    { answers: [{ option_id: 'op0', response: 'ok' }] });
+  check('あて先でない人は答えられない', outsider.status, 403);
+
+  const junk = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+    { answers: [{ option_id: '存在しない候補', response: 'ok' }, { option_id: 'op1', response: 'まる' }] });
+  check('候補にないidと決まった3つ以外の答えは捨てられる', junk.json.saved?.length, 0);
+
+  const seen = await getDB(TOKENS.staff);
+  const row = (seen.requests || []).find((r) => r.id === attId);
+  check('送った本人に回答が見える', row?.responses?.length, 4);
+  check('答え直した結果が上書きされている',
+    row?.responses?.find((a) => a.user_id === 'u_e2e_intern' && a.option_id === 'op0')?.response, 'may');
+
+  const hidden = await getDB(TOKENS.staff2);
+  check('他支部の人にはこの出欠確認自体が見えない',
+    (hidden.requests || []).some((r) => r.id === attId), false);
+
+  // ---- 確定 ----
+  const byOther = await api(TOKENS.intern, 'POST', `/api/requests/${attId}/confirm`, { option_id: 'op0' });
+  check('送った本人以外は確定できない', byOther.status, 403);
+
+  const badOpt = await api(TOKENS.staff, 'POST', `/api/requests/${attId}/confirm`, { option_id: 'op9' });
+  check('無い候補では確定できない', badOpt.status, 400);
+
+  const done = await api(TOKENS.staff, 'POST', `/api/requests/${attId}/confirm`, { option_id: 'op1' });
+  check('送った本人は確定できる', done.status, 200);
+  check('確定した日時で予定ができる', done.json.event?.start_datetime, mk(t2, 19));
+  check('予定の名前は件名になる', done.json.event?.title, 'チーム懇親会');
+
+  const after = await getDB(TOKENS.staff);
+  const row2 = (after.requests || []).find((r) => r.id === attId);
+  check('確定した候補が記録される', row2?.confirmed, 'op1');
+  check('できた予定が支部のカレンダーに入っている',
+    (after.events || []).some((e) => e.id === done.json.event?.id), true);
+
+  const late = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+    { answers: [{ option_id: 'op0', response: 'no' }] });
+  check('確定後はもう答えられない', late.status, 409);
+
+  // ---- ふつうの依頼が壊れていないこと ----
+  const normal = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: 'ふつうの依頼', body: '本文', target_label: 'x', recipient_ids: ['u_e2e_intern'],
+  });
+  check('ふつうの依頼は今までどおり作れる', normal.status, 200);
+  check('ふつうの依頼には出欠の印が付かない', normal.json.request?.kind, 'normal');
+  const notAttend = await api(TOKENS.intern, 'PUT', `/api/requests/${normal.json.request?.id}/response`,
+    { answers: [{ option_id: 'op0', response: 'ok' }] });
+  check('ふつうの依頼には出欠で答えられない', notAttend.status, 400);
+}
+
+/* 自分のGoogleカレンダーの取り込み。
+   テスト環境ではGoogle連携そのものが無効なので、ここで確かめられるのは
+   「連携していない人には何も返らない」「他人のぶんは要求しようがない」の2点。
+   実際の取得はGoogle側の応答が要るため、ここでは扱わない */
+async function testMyCalendar() {
+  console.log('\n─────── 自分のGoogleカレンダーの取り込み ───────');
+  const range = `?timeMin=${encodeURIComponent(new Date().toISOString())}`
+    + `&timeMax=${encodeURIComponent(new Date(Date.now() + 30 * 86400000).toISOString())}`;
+  const r = await api(TOKENS.staff, 'GET', '/api/my-calendar/events' + range);
+  check('連携していなければ空で返る', r.json.events, []);
+  check('連携していないことが分かる形で返る', r.json.connected, false);
+  check('カレンダー画面を壊さないよう200で返す', r.status, 200);
+
+  /* Google連携そのものが無効な環境では、期間の指定を見る前に空で返る。
+     カレンダー画面を出せなくしないための作りなので、これで正しい */
+  const noRange = await api(TOKENS.staff, 'GET', '/api/my-calendar/events');
+  check('連携が無効なら期間指定が無くても空で返る', noRange.status, 200);
+  check('その場合も中身は空', noRange.json.events, []);
+
+  const noAuth = await fetch(BASE + '/api/my-calendar/events' + range);
+  check('ログインしていなければ返さない', noAuth.status, 401);
+
+  /* 誰のカレンダーを返すかは、URLではなくログインしている本人から決めている。
+     他人のIDを添えても自分のぶんしか返らない（＝他人の予定は取り出せない） */
+  const spoof = await api(TOKENS.intern, 'GET', '/api/my-calendar/events' + range + '&staffId=u_e2e_staff');
+  check('他人のIDを付けても他人の予定は取れない', spoof.json.connected, false);
+}
+
 async function testSharedCalFilter() {
   console.log('\n─────── 全体予定表から外す予定の判定 ───────');
   const f = createRequire(path.join(ROOT, 'server', 'package.json'))('./shared-cal-filter.js');
@@ -726,6 +850,8 @@ let exitCode = 0;
 try {
   if (!await waitForServer()) throw new Error('サーバーが起動しませんでした:\n' + log.join(''));
   await run();
+  await testAttendance();
+  await testMyCalendar();
   await testSharedCalFilter();
   await testLockLogic();
   console.log(`\n${'─'.repeat(56)}`);
