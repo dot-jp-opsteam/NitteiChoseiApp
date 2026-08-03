@@ -32,6 +32,7 @@ const express = require('express');
 const google = require('./google');
 const auth = require('./auth');
 const mail = require('./mail');
+const sharedCalFilter = require('./shared-cal-filter');
 
 const PORT = process.env.PORT || 8080;
 /* パスワード再設定リンクの有効時間。長すぎると危険、短すぎるとメール到着前に切れるため60分 */
@@ -2297,6 +2298,9 @@ app.get('/api/google/status', requireAuth, async (req, res) => {
    ========================================================= */
 const SHARED_CAL_TTL_MS = 5 * 60 * 1000;
 const sharedCalCache = new Map(); // `${calendarId}|${timeMin}|${timeMax}` -> { at, events }
+/* タイトルにこの語句を含む予定は全体予定表に出さない。
+   起動時に一度だけ読む。語句を変えたらサーバーの再起動が要る */
+const SHARED_CAL_EXCLUDE = sharedCalFilter.parseExcludeWords(process.env.SHARED_CALENDAR_EXCLUDE);
 
 function clearSharedCalCache() { sharedCalCache.clear(); }
 
@@ -2398,12 +2402,23 @@ app.get('/api/shared-calendar/events', requireAuth, async (req, res) => {
     const key = `${row.calendar_id}|${timeMin}|${timeMax}`;
     const hit = sharedCalCache.get(key);
     if (hit && Date.now() - hit.at < SHARED_CAL_TTL_MS) {
-      return res.json({ events: hit.events, configured: true, name: row.calendar_name, cached: true });
+      return res.json({
+        events: hit.events, configured: true, name: row.calendar_name,
+        calendarId: row.calendar_id, cached: true,
+      });
     }
     const accessToken = await accessTokenFor(row);
-    const events = await google.listEventsInRange(accessToken, row.calendar_id, timeMin, timeMax);
+    const all = await google.listEventsInRange(accessToken, row.calendar_id, timeMin, timeMax);
+    /* 外す予定はここで落としてからキャッシュに入れる。
+       配る前に落とすので、除外した予定は画面側には一切渡らない */
+    const events = sharedCalFilter.filterSharedEvents(all, SHARED_CAL_EXCLUDE);
+    if (all.length !== events.length) {
+      console.log(`全体予定表：${all.length - events.length}件を除外しました（${SHARED_CAL_EXCLUDE.join(' / ')}）`);
+    }
     sharedCalCache.set(key, { at: Date.now(), events });
-    res.json({ events, configured: true, name: row.calendar_name });
+    /* calendarId は、画面の「全社カレンダー」ボタンから
+       Googleカレンダー側を開くために渡している */
+    res.json({ events, configured: true, name: row.calendar_name, calendarId: row.calendar_id });
   } catch (e) {
     /* ここで500を返すとカレンダー画面ごと出なくなってしまう。
        全体予定表はあくまで付け足しなので、取れなければ黙って空で返し、

@@ -235,6 +235,37 @@ async function putDB(token, mutateFn) {
    HTTP経由の試験では再現できない。そこで待ちを人工的に作り、
    直列化が無いと壊れること・あると壊れないことの両方を確かめる。
    ========================================================= */
+/* 全体予定表の絞り込み。
+   Googleカレンダーとの連携が要るためHTTP経由では試せないので、
+   判定の部分だけを直接呼んで確かめる */
+async function testSharedCalFilter() {
+  console.log('\n─────── 全体予定表から外す予定の判定 ───────');
+  const f = createRequire(path.join(ROOT, 'server', 'package.json'))('./shared-cal-filter.js');
+  const words = f.parseExcludeWords(undefined);   // 未設定なら既定のOPS
+  check('環境変数が未設定なら OPS を外す', words, ['ops']);
+
+  const ev = (title) => ({ title });
+  const titles = (list) => f.filterSharedEvents(list, words).map((e) => e.title);
+
+  check('OPSチーム定例MTGは配らない', f.isExcluded('OPSチーム定例MTG', words), true);
+  check('小文字のopsも配らない', f.isExcluded('ops定例', words), true);
+  check('全角のＯＰＳも配らない', f.isExcluded('ＯＰＳ定例', words), true);
+  check('7月分エジプト報告は配る', f.isExcluded('7月分エジプト報告', words), false);
+  check('★重要★対議員請求書差止報告は配る', f.isExcluded('★重要★対議員請求書差止報告', words), false);
+  check('タイトルが空でも落ちない', f.isExcluded('', words), false);
+
+  check('一覧から除外したものだけが消える',
+    titles([ev('OPSチーム定例MTG'), ev('7月分エジプト報告'), ev('ops振り返り'), ev('★重要★対議員請求書差止報告')]),
+    ['7月分エジプト報告', '★重要★対議員請求書差止報告']);
+
+  const two = f.parseExcludeWords('OPS, 研修 ');
+  check('カンマ区切りで語句を増やせる', two, ['ops', '研修']);
+  check('増やした語句も外れる', f.isExcluded('新人研修', two), true);
+
+  const none = f.parseExcludeWords('');
+  check('空にすれば何も外さない', f.filterSharedEvents([ev('OPS定例')], none).length, 1);
+}
+
 async function testLockLogic() {
   console.log('\n─────── 書き込みの直列化（本番と同じ待ちを人工的に作る） ───────');
   const { withDBLock, _resetForTest } = createRequire(path.join(ROOT, 'server', 'package.json'))('./dblock.js');
@@ -695,6 +726,7 @@ let exitCode = 0;
 try {
   if (!await waitForServer()) throw new Error('サーバーが起動しませんでした:\n' + log.join(''));
   await run();
+  await testSharedCalFilter();
   await testLockLogic();
   console.log(`\n${'─'.repeat(56)}`);
   if (failures.length) {

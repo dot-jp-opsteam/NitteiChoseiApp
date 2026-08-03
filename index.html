@@ -76,6 +76,9 @@
       </div>
       <div class="sb-links">
         <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer" data-ic-end="external">ドットジェイピー公式</a>
+        <a href="https://dot-jp-opsteam.github.io/ops-homepage/" target="_blank" rel="noopener noreferrer" data-ic-end="external">OPS公式</a>
+        <!-- まだ試験中であることの断り。使う邪魔にならないよう、いちばん下に小さく置く -->
+        <span class="sb-beta">β版（試験運用中）</span>
       </div>
     </div>
   </aside>
@@ -1434,9 +1437,15 @@ function viewHome(){
       hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごと・不可時間も'),
       hex('openMailHistory()','mail','メール履歴','送信済みメール'),
     );
+    /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
+       毎日使うものではないので、六角形の上に控えめな帯として置く */
+    const linkBtn=`<button class="flatbtn" onclick="openInternInviteLink()">
+      <span class="fb-ic">${ic('link')}</span>
+      <span class="fb-tx"><b>インターン生に渡すリンクを作る</b><small>登録リンクを渡すと、あなたが担当になります</small></span>
+      <span class="fb-go">${ic('chevron')}</span></button>`;
     return hi+
       (pend?`<div class="hint">${ic('bell')}<span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
-      hexgrid(items)+eventsSection();
+      linkBtn+hexgrid(items)+eventsSection();
   }
   // admin
   return hi+hexgrid([
@@ -2313,7 +2322,7 @@ function eventCard(ev){
 /* 支部イベント（EVENT_COLORS）にも面談（--iv）にも使っていない色にして、
    全体予定表の予定だとひと目で分かるようにする */
 const SHARED_CAL_COLOR='#f0955b';
-let SHARED_CAL={events:{},loading:{},configured:null,name:null};
+let SHARED_CAL={events:{},loading:{},configured:null,name:null,calendarId:null};
 function sharedCalOn(){return ME&&ME.role!=='intern';}
 function sharedKey(y,m){return y+'-'+m;}
 /* 表示中の月の予定を確保する。未取得ならサーバーに聞きに行き、
@@ -2334,6 +2343,7 @@ function ensureSharedCal(y,m){
       SHARED_CAL.events[key]=d.events||[];
       SHARED_CAL.configured=!!d.configured;
       if(d.name)SHARED_CAL.name=d.name;
+      if(d.calendarId)SHARED_CAL.calendarId=d.calendarId;
       // 取れた予定が画面に出るように描き直す
       if(SHARED_CAL.events[key].length)render();
     })
@@ -2359,6 +2369,15 @@ function sharedLabel(e){return e.allDay?e.title:`${hm(e.start)} ${e.title}`;}
 /* 全体予定表を読み込み直す。Googleカレンダー側を直したあと、
    5分のキャッシュを待たずに反映させたいときに使う */
 function reloadSharedCal(){SHARED_CAL.events={};SHARED_CAL.loading={};render();}
+/* 全社カレンダーをGoogleカレンダー側で開く。
+   embed の形にすると、そのカレンダー1つだけに絞った画面が出る。
+   自分の予定と混ざらないので、全社の予定だけを追いたいときに見やすい */
+function openSharedCalendarSite(){
+  const id=SHARED_CAL.calendarId;
+  if(!id){toast('全体予定表がまだ設定されていません');return;}
+  window.open(`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(id)}&ctz=Asia%2FTokyo`,
+    '_blank','noopener');
+}
 
 // 自分に関係する確定面談を取得（カレンダー併記用）
 function myInterviewsForCal(){
@@ -2372,6 +2391,40 @@ function myInterviewsForCal(){
 }
 function ivLabel(iv){const intern=findUser(iv.intern_id),staff=findUser(iv.staff_id);
   return ME.role==='intern'?`面談：${staff?staff.nickname:'担当'}さん`:`面談：${intern?intern.nickname:'—'}さん`;}
+/* 日付を押したときに重ねて出す、その日の予定の一覧。
+   カレンダーの表示位置を動かさずに中身だけ確かめられるようにしている。
+   予定を押せば、これまでどおりそれぞれの詳細へ進める */
+function openDaySheet(key){
+  const [Y,M,D]=key.split('-').map(Number);
+  const d=new Date(Y,M-1,D);
+  const hol=holidayName(Y,M-1,D);
+  let list=DB.events.filter(e=>ymd(new Date(e.start_datetime))===key);
+  if(ME.role!=='admin')list=list.filter(e=>e.branch_id===ME.branch_id||e.creator_id===ME.id);
+  const ivs=myInterviewsForCal().filter(iv=>ymd(new Date(iv.confirmed_datetime))===key);
+  const shared=sharedItemsFor(Y,M-1).filter(e=>ymd(sharedDate(e))===key);
+
+  /* ここは中身を確かめるための場所なので、押しても何も起きない見るだけの一覧にする。
+     出欠の回答や編集は、これまでどおりカレンダーの下の一覧から行う */
+  const row=(color,title,sub)=>`<div class="dayrow">
+      <span class="dbar" style="background:${color}"></span>
+      <span class="dtx"><b>${esc(title)}</b><small>${esc(sub)}</small></span>
+    </div>`;
+  const items=[
+    ...shared.map(e=>({t:sharedDate(e),html:row(SHARED_CAL_COLOR,e.title,
+      `${e.allDay?'終日':hm(e.start)}${e.location?' ・ '+e.location:''} ・ 全社カレンダー`)})),
+    ...ivs.map(iv=>({t:new Date(iv.confirmed_datetime),html:row('var(--iv)',ivLabel(iv),
+      `${hm(iv.confirmed_datetime)} ・ 確定した面談`)})),
+    ...list.map(e=>({t:new Date(e.start_datetime),html:row(e.color||EVENT_COLORS[0].v,e.title,
+      `${hm(e.start_datetime)}${e.location?' ・ '+e.location:''}`)})),
+  ].sort((a,b)=>a.t-b.t);
+
+  const body=items.length?`<div class="daylist">${items.map(i=>i.html).join('')}</div>`
+    :`<div class="empty" style="padding:22px"><div class="ei">${ic('calendar')}</div><p>この日の予定はありません。</p></div>`;
+  openSheet(`<h3 style="margin:0">${M}月${D}日（${WD_JP[d.getDay()]}）${hol?`<span class="tag" style="margin-left:8px">${esc(hol)}</span>`:''}</h3>
+    <p class="page-sub" style="margin:4px 0 12px">${items.length?`${items.length}件の予定`:'予定なし'}</p>
+    ${body}
+    <button class="btn pri block" style="margin-top:16px" onclick="closeSheet();openEventForm(null,'${key}')">＋ この日に予定を追加</button>`);
+}
 function eventsSection(){
   if(!calYM){const t=new Date();calYM={y:t.getFullYear(),m:t.getMonth()};}
   let list=DB.events.slice();
@@ -2409,16 +2462,18 @@ function eventsSection(){
       const cls=['calcell',has?'has':'',key===todayKey?'today':'',key===calSel?'sel':'',hol?'holiday':''].join(' ');
       let chipsHtml='';
       if(has){
-        // 予定そのものを押したときは作成フォームではなく、その日の一覧を開く
-        const open=`onclick="event.stopPropagation();calSelect('${key}')"`;
         // 全画面のほうが1日ぶんの幅も高さもあるので、1件多く見せる
         const cap=calFull?4:3;
         const showN=has>cap?cap-1:has;
         const shown=items.slice(0,showN).map(it=>`<span class="chip" style="background:${chipBg(it.color)};color:${chipFg(it.color)}">${esc(it.label)}</span>`).join('');
         const more=has>showN?`<span class="chipmore">+${has-showN}</span>`:'';
-        chipsHtml=`<div class="chips" ${open}>${shown}${more}</div>`;
+        chipsHtml=`<div class="chips">${shown}${more}</div>`;
       }
-      cells+=`<div class="${cls} add"${hol?` title="${esc(hol)}"`:''} onclick="openEventForm(null,'${key}')"><span class="dn">${d}</span>${chipsHtml}</div>`;
+      /* 日付を押すとその日の予定を見る。作成は、その一覧の中のボタンから進む。
+         「見る」と「作る」を同じ場所に重ねると、見たいだけのときに
+         フォームが開いてしまうため分けている */
+      cells+=`<div class="${cls}"${hol?` title="${esc(hol)}"`:''} onclick="openDaySheet('${key}')">
+        <span class="dn">${d}</span>${chipsHtml}</div>`;
     }
     const trail=(7-(startDow+daysInMonth)%7)%7;
     for(let i=1;i<=trail;i++)cells+=`<div class="calcell out"></div>`;
@@ -2458,7 +2513,14 @@ function eventsSection(){
   const cards=(below.length||ivBelow.length||shBelow.length)?shCards+ivCards+below.map(eventCard).join('')
     :`<div class="empty"><div class="ei">${ic('calendar')}</div><p>${calSel?'この日の予定はありません。':'この月のイベントはありません。'}</p></div>`;
 
-  const viewTabs=`<div class="calview-tabs">
+  /* 全社カレンダーそのものを見たいときのための出口。
+     このアプリは読み取りだけなので、書き込みや細かい確認はGoogleカレンダー側で行う。
+     スタッフだけに見せ、連携できているときだけ出す */
+  const sharedBtn=(sharedCalOn()&&SHARED_CAL.configured&&SHARED_CAL.calendarId)
+    ? `<button class="btn ghost sm" onclick="openSharedCalendarSite()"
+        title="${esc(SHARED_CAL.name||'全社カレンダー')}をGoogleカレンダーで開く">${ic('calendar')}全社カレンダー</button>`
+    : '';
+  const viewTabs=`${sharedBtn}<div class="calview-tabs">
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div>`;
@@ -2483,7 +2545,7 @@ function eventsSection(){
         ${viewTabs}
         <button class="btn ghost sm calfull-btn" onclick="setCalFull(true)" title="カレンダーを画面いっぱいに表示">${ic('panel')}全画面</button>
       </span></div>
-    <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定を追加できます。予定の帯をクリックすると、その日の一覧が下に出ます。</p>
+    <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定が表示されます。その画面から、その日に予定を追加することもできます。</p>
     ${isFullAdmin()&&SHARED_CAL.configured===false?`<div class="hint mock" style="cursor:pointer" onclick="openSharedCalendarSettings()">
       ${ic('calendar')}<span>全体予定表がまだ設定されていません。タップして、スタッフ全員に見せるカレンダーを設定できます。</span></div>`:''}
     ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">

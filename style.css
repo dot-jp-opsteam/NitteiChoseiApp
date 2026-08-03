@@ -588,10 +588,11 @@
     display:flex;flex-direction:column;align-items:center;gap:3px;font-size:13px;background:transparent;overflow:hidden}
   .calcell.out{background:transparent}
   .calcell.has{cursor:pointer}
-  /* 日付を押すとその日に予定を追加できる。押せることが分かるように、
-     マウスを載せたときだけ薄く光らせる（タッチ端末では反応しない） */
-  .calcell.add{cursor:pointer;transition:background .18s var(--ease)}
-  @media(hover:hover){.calcell.add:hover{background:var(--brand-soft)}}
+  /* 日付を押すとその日の予定が見られる。押せることが分かるように、
+     マウスを載せたときだけ薄く光らせる（タッチ端末では反応しない）。
+     前月・翌月の空白セル（.out）は押せないので対象から外す */
+  .calcell:not(.out){cursor:pointer;transition:background .18s var(--ease)}
+  @media(hover:hover){.calcell:not(.out):hover{background:var(--brand-soft)}}
   /* 光る面の角が尖って見えないよう、セルごと丸める。
      区切り線（border-top）はグリッドの目安として残す */
   .calcell{border-radius:10px}
@@ -862,6 +863,8 @@
   .sb-links{display:flex;flex-direction:column;gap:5px;padding:14px 10px 0}
   .sb-links a{font-size:11px;color:var(--mut);transition:color .2s var(--ease)}
   .sb-links a:hover{color:var(--brand)}
+  /* 試験運用中であることの断り。読めればよいので、リンクよりさらに弱く見せる */
+  .sb-beta{font-size:10px;color:var(--disabled);letter-spacing:.04em;margin-top:2px}
 
   /* 狭い画面。畳んだ状態がふつうで、広げたときは中身の上に重ねる
      （押し出すと本文がほとんど読めなくなるため） */
@@ -931,6 +934,31 @@
     .cta .cta-tx b{font-size:17px}
     .cta .cta-tx small{font-size:12px}
   }
+
+  /* 控えめな横長ボタン。インターン生ホームの大きな入口（.cta）とは役割が違うので、
+     光らせず線だけにして、六角形の並びの邪魔をしない見た目にする */
+  .flatbtn{display:flex;align-items:center;gap:12px;width:100%;max-width:560px;margin:14px auto 2px;
+    padding:13px 16px;border:1px solid var(--line);border-radius:14px;background:var(--panel);
+    cursor:pointer;text-align:left;transition:border-color .18s var(--ease),background .18s var(--ease)}
+  .flatbtn:hover{border-color:var(--brand);background:var(--panel2)}
+  .flatbtn .fb-ic{display:grid;place-items:center;width:34px;height:34px;flex:none;
+    border-radius:10px;background:var(--brand-soft);color:var(--brand)}
+  .flatbtn .fb-ic svg{width:18px;height:18px}
+  .flatbtn .fb-tx{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .flatbtn .fb-tx b{font-size:14px;color:var(--ink)}
+  .flatbtn .fb-tx small{font-size:12px;color:var(--sub)}
+  .flatbtn .fb-go{margin-left:auto;color:var(--mut);display:grid;place-items:center;flex:none}
+  .flatbtn .fb-go svg{width:18px;height:18px}
+
+  /* 日付を押したときに出る、その日の予定の一覧 */
+  .daylist{display:flex;flex-direction:column;gap:8px}
+  .dayrow{display:flex;align-items:center;gap:10px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+  /* 左端の色帯。カレンダーの帯と同じ色にして、どの予定か見分けられるようにする */
+  .dayrow .dbar{width:4px;align-self:stretch;min-height:30px;border-radius:2px;flex:none}
+  .dayrow .dtx{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .dayrow .dtx b{font-size:14px;color:var(--ink)}
+  .dayrow .dtx small{font-size:12px;color:var(--sub)}
 
   .hexwrap{container-type:inline-size}
   .hexgrid{
@@ -1202,9 +1230,9 @@
   /* 押せる日：数字がわずかに持ち上がる。背景だけだと気づきにくい */
   .calcell .dn{transition:transform var(--t-fast) var(--ease),color var(--t-fast) var(--ease)}
   @media(hover:hover){
-    .calcell.add:hover .dn{transform:translateY(-2px) scale(1.12);color:var(--brand)}
+    .calcell:not(.out):hover .dn{transform:translateY(-2px) scale(1.12);color:var(--brand)}
     /* 今日は既に丸で塗られているので、色を変えず大きさだけにする */
-    .calcell.today.add:hover .dn{color:var(--on-fill)}
+    .calcell.today:hover .dn{color:var(--on-fill)}
   }
 
   /* 選んでいる日：一度だけリングが広がって消える。
@@ -1260,7 +1288,7 @@
     .calcell.sel::after,.calview-tabs button.on,
     .seg input:checked + .segb,.modechip.on,.pickchip.on{animation:none}
     .calcell.sel::after{display:none}
-    .calcell.add:hover .dn,.calcell .chip:hover,
+    .calcell:not(.out):hover .dn,.calcell .chip:hover,
     .cal .navbtn:hover,.bell:hover,.agenda .ag:hover .agbar{transform:none}
     .agenda .ag:hover{padding-left:4px}
     .btn.pri:hover::after{animation:none}

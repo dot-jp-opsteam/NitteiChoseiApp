@@ -514,7 +514,8 @@
       var base = minParam ? new Date(decodeURIComponent(minParam[1])) : new Date();
       var yy = base.getFullYear(), mm = base.getMonth();
       var day = function (d, h, min) { return new Date(yy, mm, d, h, min).toISOString(); };
-      return json({ configured: true, name: 'ドットジェイピー予定表', events: [
+      return json({ configured: true, name: 'ドットジェイピー予定表',
+        calendarId: 'dotjp-schedule@group.calendar.google.com', events: [
         { id: 'sc1', title: '全体会議', start: day(8, 19, 0), end: day(8, 20, 30), allDay: false, location: 'オンライン' },
         { id: 'sc2', title: '夏季研修（終日）', start: [yy, pad2(mm + 1), '15'].join('-'), end: [yy, pad2(mm + 1), '16'].join('-'), allDay: true, location: '' },
         { id: 'sc3', title: '支部長会', start: day(22, 18, 0), end: day(22, 19, 30), allDay: false, location: '本部' },
