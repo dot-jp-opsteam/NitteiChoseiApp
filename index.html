@@ -1299,7 +1299,7 @@ function buildNav(){
     ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す登録リンクを作る">
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
     ${canSendRequest()?`<button class="sb-item" onclick="openInternshipMaster()" title="支部のインターン先を登録・編集する">
-      <span class="si">${ic('workplace')}</span><span class="sl">インターン先</span></button>`:''}
+      <span class="si">${ic('workplace')}</span><span class="sl">インターン先一覧</span></button>`:''}
     ${ME.role==='intern'?`<button class="sb-item" onclick="openMyInternshipForm()" title="自分のインターン先を設定する">
       <span class="si">${ic('workplace')}</span><span class="sl">インターン先</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
@@ -2613,8 +2613,9 @@ function eventsSection(){
   }
 
   return `<div class="divider" style="margin:22px 0 14px"></div>
+    <!-- 見出しは置かない（カレンダーだと見れば分かるため）。
+         右側の操作だけを、これまでと同じ位置に残す -->
     <div class="calsec-head">
-      <h2>${ic('calendar')}カレンダー</h2>
       <span class="calsec-tools">${viewTabs}</span></div>
     ${isFullAdmin()&&SHARED_CAL.configured===false?`<div class="hint mock" style="cursor:pointer" onclick="openSharedCalendarSettings()">
       ${ic('calendar')}<span>全体予定表がまだ設定されていません。タップして、スタッフ全員に見せるカレンダーを設定できます。</span></div>`:''}
@@ -3437,7 +3438,7 @@ function openUserForm(id){
       <p class="fine" style="margin-top:6px">インターン生にだけ設定できます。</p>
       <label class="fl">インターン先</label>
       <select id="usPlace">${internshipOptionsFor(getProfile(u.id).internship_id)}</select>
-      <p class="fine" style="margin-top:6px">本人も設定できます。一覧に無いときは「インターン先」から先に追加してください。</p>
+      <p class="fine" style="margin-top:6px">本人も設定できます。一覧に無いときは「インターン先一覧」から先に追加してください。</p>
     </div>
     <div class="btn-row" style="margin-top:18px">
       ${u.id!==ME.id?`<button class="btn bad" onclick="deleteUser('${u.id}')">削除</button>`:''}
@@ -3702,7 +3703,7 @@ function profileLinks(){
   const themeVal=`<span id="profThemeVal" style="color:var(--mut);font-size:13px;font-weight:700">${currentTheme()==='light'?'ライト':'ダーク'}</span>`;
   return [
     ME.role==='intern'?['workplace','インターン先','openMyInternshipForm()']:null,
-    canSendRequest()?['workplace','インターン先の一覧','openInternshipMaster()']:null,
+    canSendRequest()?['workplace','インターン先一覧','openInternshipMaster()']:null,
     canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
     ['key','パスワードを変更','openPasswordChange()'],
     ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
@@ -3906,7 +3907,7 @@ function openInternshipMaster(){
       <button class="btn sm" onclick="openInternshipForm('${p.id}')">編集</button></div>`;
   }).join(''):`<div class="empty" style="padding:26px"><div class="ei">${ic('workplace')}</div>
       <p>インターン先がまだ登録されていません。</p></div>`;
-  openSheet(`<h3>インターン先の一覧</h3>
+  openSheet(`<h3>インターン先一覧</h3>
     <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}のインターン先です。支部のスタッフなら誰でも追加できます。</p>
     <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>
     <button class="btn pri block" style="margin-top:16px" onclick="openInternshipForm()">＋ インターン先を追加</button>`);

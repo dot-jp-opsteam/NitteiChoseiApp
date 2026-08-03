@@ -43,39 +43,55 @@
     --hex-line:#262626;
     /* 左端の縦メニューの幅。data-sb で切り替える */
     --sb-w:236px;
+    /* 左端の縦メニューの色。ダークでは本体と同じ配色をそのまま使う。
+       ライトだけメニューを濃いエメラルドにするため、変数で切り出してある */
+    --sb-bg:var(--glass); --sb-ink:var(--ink); --sb-sub:var(--sub); --sb-mut:var(--mut);
+    --sb-line:var(--line); --sb-hover:var(--panel2);
+    --sb-active-bg:var(--brand-soft); --sb-active-ink:var(--brand); --sb-accent:var(--brand);
+    --sb-blur:blur(18px);
   }
   :root[data-sb="collapsed"]{--sb-w:68px}
 
   /* ---------- ライトテーマ ----------
-     シアン #43e7df は白地では文字コントラストが足りないため、
-     ライトのときだけ暗いシアンにする（色相は保ったまま可読性を確保） */
+     参考にした画面から実際の画素を読み取って決めた色。
+       メニュー #1b4343 ／ アクセント #56b8ac ／ 地 #f0feff ／ カード #ffffff
+       濃い文字 #2b4843 ／ 淡い面 #e6fffb ／ 罫線 #c0e4e0
+     #56b8ac は塗りとしてはそのまま使えるが、白地に置く文字色としては薄すぎるので、
+     文字・リンクには同じ色相を暗くした --brand-ink を使う */
   :root[data-theme="light"]{
-    --bg:#f7fafb; --panel:#ffffff; --panel2:#f1f6f7; --line:#e2e9eb; --line2:#eef3f4;
-    --line-h:#0b8f95;
-    --ink:#0d1b1e; --sub:#5b6b6f; --mut:#8b9a9e; --disabled:#c2cad3;
-    --brand:#0b8f95; --brand-d:#087078; --brand-soft:rgba(11,143,149,.10); --brand-lite:#22b3b8;
-    --brand-ink:#075d63; --hint-line:rgba(11,143,149,.28);
+    --bg:#f0feff; --panel:#ffffff; --panel2:#e6fffb; --line:#c8e6e1; --line2:#ddf1ee;
+    --line-h:#56b8ac;
+    --ink:#2b4843; --sub:#5a736e; --mut:#89a49f; --disabled:#b9cfcb;
+    --brand:#56b8ac; --brand-d:#3f9e92; --brand-soft:rgba(86,184,172,.14); --brand-lite:#9dded6;
+    --brand-ink:#1f7a6e; --hint-line:rgba(86,184,172,.38);
     --ok:#0f9d63; --ok-soft:rgba(15,157,99,.10); --ok-ink:#0b7a4c;
     --warn:#2f6fd0; --warn-soft:rgba(47,111,208,.10); --warn-ink:#245ba8;
     --bad:#d63a39; --bad-soft:rgba(214,58,57,.09); --bad-line:rgba(214,58,57,.35);
     /* 白地では明るい赤・黄・緑が読めないので、同じ色でも濃く落としたものを使う */
     --rank1:#c42f2e; --rank2:#9a6a00; --rank2-soft:rgba(154,106,0,.11); --rank3:#0b7a4c;
-    --cta-1:#4fd0d4; --cta-2:#12a0a6; --cta-3:#066b71;
+    --cta-1:#9dded6; --cta-2:#56b8ac; --cta-3:#1b4343;
     --info:#0e7fa1;
     --iv:#6d4bd6; --iv-soft:rgba(109,75,214,.10); --iv-ink:#5638ad;
     --info-soft:rgba(14,127,161,.10); --info-ink:#0b6580;
-    --chip:#eef2f4; --chip-ink:#64748b;
-    --mock-bg:#f2f5f6; --mock-line:#dde4e6; --mock-ink:#5b6b6f;
+    --chip:#e6fffb; --chip-ink:#5a736e;
+    --mock-bg:#eef8f6; --mock-line:#d3eae6; --mock-ink:#5a736e;
     --sun:#d63a39; --sat:#2f6fd0;
-    --toast-bg:#132024;
+    --toast-bg:#1b4343;
     --gbtn-bg:#ffffff; --gbtn-ink:#3c4043; --gbtn-line:#dadce0;
-    --shadow:0 1px 2px rgba(16,40,32,.06),0 1px 3px rgba(16,40,32,.08);
-    --glow:0 0 0 1px var(--brand-soft),0 10px 28px rgba(11,143,149,.10);
-    --aurora-op:.3;
-    --glass:rgba(255,255,255,.82);
-    /* ライトでは塗りが暗い色なので、こちらは白でよい */
+    --shadow:0 1px 2px rgba(27,67,67,.05),0 1px 3px rgba(27,67,67,.08);
+    --glow:0 0 0 1px var(--brand-soft),0 10px 28px rgba(86,184,172,.16);
+    --aurora-op:.22;
+    --glass:rgba(255,255,255,.86);
+    /* ライトでも塗り（brand）の上は白文字。参考にした画面と同じ扱い */
     --on-fill:#ffffff;
-    --hex-line:#cbd8db;
+    /* 六角形の輪郭は、淡いミント地の上でも形が分かる濃さにする */
+    --hex-line:#b3ddd6;
+    /* 左端の縦メニューだけは濃いエメラルドの面にする。
+       中の文字・罫線は、その面の上で読める明るさに置き換える */
+    --sb-bg:#1b4343; --sb-ink:#ffffff; --sb-sub:#cde7e2; --sb-mut:#a9cec8;
+    --sb-line:rgba(255,255,255,.14); --sb-hover:rgba(255,255,255,.08);
+    --sb-active-bg:rgba(255,255,255,.13); --sb-active-ink:#ffffff; --sb-accent:#7fd3c6;
+    --sb-blur:none;
   }
   /* バッジの縁取りは「背景を切り抜く」役なので、地の色に合わせる */
   .bell .badge,.wkrow .sw i{border-color:var(--panel)}
@@ -801,6 +817,11 @@
     background:radial-gradient(circle,rgba(28,122,152,.36),transparent 68%);animation:drift2 64s ease-in-out infinite}
   #aurora .a3{width:44vmax;height:44vmax;top:34%;left:36%;
     background:radial-gradient(circle,rgba(118,92,220,.20),transparent 70%);animation:drift3 46s ease-in-out infinite}
+  /* ライトは参考にした画面と同じく、ほぼ平らな淡いミント地にしたい。
+     紫と濃紺のにじみは色味が合わないので、エメラルドの家族に置き換える */
+  :root[data-theme="light"] #aurora .a1{background:radial-gradient(circle,rgba(86,184,172,.34),transparent 68%)}
+  :root[data-theme="light"] #aurora .a2{background:radial-gradient(circle,rgba(27,67,67,.16),transparent 68%)}
+  :root[data-theme="light"] #aurora .a3{background:radial-gradient(circle,rgba(157,222,214,.30),transparent 70%)}
   @keyframes drift1{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(9vmax,7vmax,0) scale(1.16)}}
   @keyframes drift2{0%,100%{transform:translate3d(0,0,0) scale(1.08)}50%{transform:translate3d(-11vmax,-6vmax,0) scale(1)}}
   @keyframes drift3{0%,100%{transform:translate3d(0,0,0) scale(.92)}50%{transform:translate3d(-7vmax,9vmax,0) scale(1.12)}}
@@ -827,8 +848,8 @@
   #sbScrim.open{opacity:1;pointer-events:auto}
   #sidebar{
     position:fixed;top:0;left:0;bottom:0;z-index:40;width:var(--sb-w);
-    background:var(--glass);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
-    border-right:1px solid var(--line);
+    background:var(--sb-bg);backdrop-filter:var(--sb-blur);-webkit-backdrop-filter:var(--sb-blur);
+    border-right:1px solid var(--sb-line);color:var(--sb-ink);
     display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;
     padding:0 0 calc(10px + env(safe-area-inset-bottom));
     transition:width .28s var(--ease);
@@ -844,20 +865,21 @@
   .sb-top{display:flex;align-items:center;gap:9px;padding:14px 14px 18px;min-height:64px}
   [data-sb="collapsed"] .sb-top{flex-direction:column;gap:12px;padding:14px 8px 18px}
   /* 下地がサイドバーのパネル色なので、内側もその色にしないと輪郭が二重に見える */
-  .sb-top .mark{--mark-fill:var(--panel);width:30px;flex:none;font-size:9.5px;letter-spacing:.01em}
+  .sb-top .mark{--mark-fill:var(--sb-bg);width:30px;flex:none;font-size:9.5px;letter-spacing:.01em;
+    background:var(--sb-accent);color:var(--sb-accent)}
   .sb-brand{font-weight:800;letter-spacing:-.02em;line-height:1.15;white-space:nowrap}
-  .sb-brand small{display:block;font-weight:600;font-size:11px;color:var(--sub)}
+  .sb-brand small{display:block;font-weight:600;font-size:11px;color:var(--sb-sub)}
   .sb-toggle{position:relative;margin-left:auto;width:34px;height:34px;flex:none;padding:0;cursor:pointer;
-    border:1px solid var(--line);border-radius:9px;background:transparent;
+    border:1px solid var(--sb-line);border-radius:9px;background:transparent;
     transition:border-color .2s var(--ease),box-shadow .3s var(--ease)}
   [data-sb="collapsed"] .sb-toggle{margin-left:0}
-  .sb-toggle:hover{border-color:var(--line-h);box-shadow:var(--glow)}
+  .sb-toggle:hover{border-color:var(--sb-accent);box-shadow:none}
   /* 三本線（ハンバーガー）ではなく、サイドパネルの形にしている。
      「メニュー」ではなく「左の欄を出し入れする」ボタンなので、そちらの形のほうが伝わる。
      アイコンの中身は index.html の ICON.panel */
-  .sb-toggle{display:grid;place-items:center;color:var(--sub);font-size:19px;
+  .sb-toggle{display:grid;place-items:center;color:var(--sb-sub);font-size:19px;
     transition:border-color .2s var(--ease),box-shadow .3s var(--ease),color .2s var(--ease)}
-  .sb-toggle:hover{color:var(--brand)}
+  .sb-toggle:hover{color:var(--sb-accent)}
   /* 畳んでいるときは、塗ってある帯を反対側に返して状態が分かるようにする */
   .sb-toggle .ic{transition:transform .3s var(--ease)}
   [data-sb="collapsed"] .sb-toggle .ic{transform:scaleX(-1)}
@@ -866,36 +888,40 @@
   .sb-nav,.sb-act{display:flex;flex-direction:column;gap:2px;padding:0 8px}
   .sb-item{position:relative;display:flex;align-items:center;gap:11px;width:100%;
     background:none;border:0;border-radius:10px;cursor:pointer;font-family:inherit;text-align:left;
-    padding:10px 10px;min-height:44px;color:var(--sub);font-size:14px;font-weight:700;
+    padding:10px 10px;min-height:44px;color:var(--sb-sub);font-size:14px;font-weight:700;
     white-space:nowrap;transition:color .2s var(--ease),background .2s var(--ease)}
   [data-sb="collapsed"] .sb-item{justify-content:center;padding:10px 0}
-  .sb-item:hover{color:var(--ink);background:var(--panel2)}
+  .sb-item:hover{color:var(--sb-ink);background:var(--sb-hover)}
   .sb-item .si{width:22px;flex:none;display:grid;place-items:center;font-size:19px;line-height:1}
-  .sb-item .sv{margin-left:auto;font-size:11px;font-weight:700;color:var(--mut)}
-  .sb-item.active{color:var(--brand);background:var(--brand-soft)}
-  /* 選択中の項目の左に、参考サイトのアクセントと同じシアンの線を出す */
+  .sb-item .sv{margin-left:auto;font-size:11px;font-weight:700;color:var(--sb-mut)}
+  .sb-item.active{color:var(--sb-active-ink);background:var(--sb-active-bg)}
+  /* 選択中の項目の左に、アクセント色の線を出す */
   .sb-item::before{content:"";position:absolute;left:0;top:50%;width:2px;height:0;
-    background:var(--brand);border-radius:2px;transform:translateY(-50%);
+    background:var(--sb-accent);border-radius:2px;transform:translateY(-50%);
     transition:height .3s var(--ease)}
   .sb-item.active::before{height:22px}
-  .sb-sep{height:1px;background:var(--line);margin:14px 12px}
+  .sb-sep{height:1px;background:var(--sb-line);margin:14px 12px}
 
   /* 下：本人と通知、規約リンク */
   .sb-foot{margin-top:auto;padding:16px 8px 0}
   .sb-me{display:flex;align-items:center;gap:10px;padding:6px 8px}
   [data-sb="collapsed"] .sb-me{flex-direction:column;gap:8px;padding:6px 0}
-  .sb-me .av{flex:none;background:var(--brand-soft);color:var(--brand-d);
+  .sb-me .av{flex:none;background:var(--sb-active-bg);color:var(--sb-ink);
     display:grid;place-items:center;font-weight:800;font-size:13px}
   .sb-me-t{min-width:0;line-height:1.3}
-  .sb-me-t b{display:block;font-size:14px;font-weight:800;
+  .sb-me-t b{display:block;font-size:14px;font-weight:800;color:var(--sb-ink);
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sb-me-t small{display:block;font-size:11px;color:var(--mut);
+  .sb-me-t small{display:block;font-size:11px;color:var(--sb-mut);
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* メニューの中の通知ベルは、メニューの面の上で読める色にそろえる */
+  #sidebar .bell{background:transparent;border-color:var(--sb-line);color:var(--sb-sub)}
+  #sidebar .bell:hover{border-color:var(--sb-accent);color:var(--sb-ink)}
+  #sidebar .bell .badge{border-color:var(--sb-bg)}
   .sb-me .bell{margin-left:auto;width:34px;height:34px;font-size:16px}
   [data-sb="collapsed"] .sb-me .bell{margin-left:0}
   .sb-links{display:flex;flex-direction:column;gap:5px;padding:14px 10px 0}
-  .sb-links a{font-size:12.5px;color:var(--mut);transition:color .2s var(--ease)}
-  .sb-links a:hover{color:var(--brand)}
+  .sb-links a{font-size:12.5px;color:var(--sb-mut);transition:color .2s var(--ease)}
+  .sb-links a:hover{color:var(--sb-accent)}
 
   /* スマホでだけ出す、右上のメニューボタン。広い画面ではサイドバーが常にあるので出さない */
   #sbBurger{display:none}
