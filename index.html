@@ -775,6 +775,9 @@ function socialLoginBlock(){
           <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
           <span class="social-label">Googleでログイン</span>
         </button>
+        <!-- スマホでは左右のカラムが縦に離れるため、メール側のチェックだけでは
+             Googleを押す人の目に入らない。この列にも同じ選択を置く -->
+        <label class="pw-toggle"><input type="checkbox" id="googleRemember"><span>次回から自動ログイン</span></label>
         <p class="fine social-note">パスワードの入力は不要です。<br>普段お使いのGoogleアカウントで<br>そのまま始められます。</p>
       </div>
     </div>`;
@@ -782,7 +785,9 @@ function socialLoginBlock(){
 /* 「次回から自動ログイン」の選択をサーバーに伝えてからGoogleへ送り出す。
    戻ってきたときはstateに預けた選択が復元され、トークンの有効期限に反映される */
 function goGoogleLogin(){
-  const remember=document.getElementById('loginRemember')?.checked;
+  // Google側の欄と、メール側の欄。どちらにチェックが入っていても自動ログインにする
+  const remember=document.getElementById('googleRemember')?.checked
+              || document.getElementById('loginRemember')?.checked;
   location.href='/api/auth/google/login'+(remember?'?remember=1':'');
 }
 function toggleLoginPw(cb){
@@ -797,7 +802,6 @@ function branchOptions(selected){
 /* 招待URL（/?staff=xxx）で開かれたときの、招いたスタッフ。
    ログイン画面の見た目は変えず、会員登録に進んだときだけ担当スタッフ欄に反映する */
 let INVITE_STAFF=null;
-let REG_STAFF_OPTIONS=[];   // いま選べる担当スタッフ（選んだ支部のスタッフ）
 async function loadInviteStaff(){
   const id=new URLSearchParams(location.search).get('staff');
   if(!id)return;
@@ -807,27 +811,6 @@ async function loadInviteStaff(){
     const r=await res.json();
     if(r&&r.staff)INVITE_STAFF=r.staff;
   }catch(e){/* 招待の確認に失敗しても、ふつうに登録はできるので黙って続ける */}
-}
-/* 選んだ支部のスタッフを取り直して、担当スタッフの選択欄を作り直す */
-async function loadRegStaffOptions(branchId){
-  REG_STAFF_OPTIONS=[];
-  if(branchId){
-    try{
-      const res=await api('/api/auth/staff-options?branch='+encodeURIComponent(branchId));
-      if(res.ok){const r=await res.json();REG_STAFF_OPTIONS=(r&&r.staff)||[];}
-    }catch(e){}
-  }
-  const sel=document.getElementById('regStaff');
-  if(!sel)return;
-  const keep=sel.value;
-  sel.innerHTML=regStaffOptions(keep||(INVITE_STAFF?INVITE_STAFF.id:''));
-}
-function regStaffOptions(selected){
-  return `<option value="">選択しない（あとで設定できます）</option>`
-    +REG_STAFF_OPTIONS.map(s=>`<option value="${s.id}" ${s.id===selected?'selected':''}>${esc(s.nickname)}</option>`).join('');
-}
-function onRegBranchChange(){
-  loadRegStaffOptions(document.getElementById('regBranch').value);
 }
 function switchLoginView(view){LOGIN_VIEW=view;renderLogin();}
 function renderLogin(){
@@ -843,21 +826,17 @@ function renderLogin(){
       ${INVITE_STAFF?`<div class="hint" style="margin-bottom:12px">${ic('staff')}<span>
         <b>${esc(INVITE_STAFF.nickname)}</b>さんからの登録リンクです。担当スタッフに設定されます。</span></div>`:''}
       <label class="fl">メールアドレス<span class="req">*</span></label>
-      <input id="regEmail" type="email" autocomplete="username" placeholder="example@dot-jp.com">
+      <input id="regEmail" type="email" autocomplete="username" placeholder="example@gmail.com">
       <label class="fl">パスワード<span class="req">*</span></label>
       <input id="regPassword" type="password" autocomplete="new-password" placeholder="8文字以上">
       <label class="fl">ニックネーム<span class="req">*</span></label>
       <input id="regNick" autocomplete="off" placeholder="例：たろう">
       <label class="fl">所属支部</label>
-      <select id="regBranch" onchange="onRegBranchChange()">${branchOptions(branchSel)}</select>
-      <label class="fl">担当スタッフ</label>
-      <select id="regStaff">${regStaffOptions(INVITE_STAFF?INVITE_STAFF.id:'')}</select>
-      <p class="fine" style="margin-top:6px">あとから変更できます。決まっていなければ「選択しない」のままで大丈夫です。</p>
+      <select id="regBranch">${branchOptions(branchSel)}</select>
+      <p class="fine" style="margin-top:6px">担当スタッフはスタッフ側で登録します。招待リンクから登録した場合は自動で設定されます。</p>
       <div class="field-err" id="regErr"></div>
       <button class="btn pri block" style="margin-top:20px" onclick="doRegisterIntern()">登録してはじめる</button>
       <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">${ic('back')}ログイン画面に戻る</button>`;
-    // 選択肢はサーバーから取り直す（招待の有無にかかわらず、選んだ支部のスタッフを出す）
-    loadRegStaffOptions(document.getElementById('regBranch').value);
   }else if(LOGIN_VIEW==='staff-start'){
     // スタッフ登録の1画面目。ドット配布のGoogleアカウントで本人確認してもらう
     body.innerHTML=`
@@ -889,7 +868,7 @@ function renderLogin(){
     body.innerHTML=`
       <p class="page-sub" style="margin-top:0">ご登録のメールアドレスに、パスワード再設定用のリンクをお送りします。</p>
       <label class="fl">メールアドレス<span class="req">*</span></label>
-      <input id="forgotEmail" type="email" autocomplete="username" placeholder="example@dot-jp.com">
+      <input id="forgotEmail" type="email" autocomplete="username" placeholder="example@gmail.com">
       <div class="field-err" id="forgotErr"></div>
       <div class="hint hidden" id="forgotDone" style="margin-top:14px">${ic('send')}<span></span></div>
       <button class="btn pri block" style="margin-top:18px" id="forgotBtn" onclick="doForgotPassword()">再設定メールを送る</button>
@@ -901,14 +880,13 @@ function renderLogin(){
           <div class="login-panel">
             <h3 class="col-title">メールアドレスでログイン</h3>
             <label class="fl" for="loginEmail">メールアドレス<span class="req">*</span></label>
-            <input id="loginEmail" type="email" autocomplete="username" placeholder="example@dot-jp.com">
+            <input id="loginEmail" type="email" autocomplete="username" placeholder="example@gmail.com">
             <label class="fl" for="loginPassword">パスワード<span class="req">*</span></label>
             <input id="loginPassword" type="password" autocomplete="current-password">
             <label class="pw-toggle"><input type="checkbox" onchange="toggleLoginPw(this)"><span>パスワードを表示する</span></label>
             <label class="pw-toggle"><input type="checkbox" id="loginRemember"><span>次回から自動ログイン</span></label>
             <div class="field-err" id="loginErr"></div>
             <button class="btn pri block" style="margin-top:14px" onclick="doLoginAuth()">ログインする</button>
-            ${PASSWORD_RESET_AVAILABLE?`<p class="forgot-link"><a href="javascript:void(0)" onclick="switchLoginView('forgot')">パスワードをお忘れの方</a></p>`:''}
           </div>
           <div class="signup-box">
             <p class="signup-title">アカウントをお持ちでない方</p>
@@ -1049,7 +1027,9 @@ async function doRegisterIntern(){
   const password=document.getElementById('regPassword').value;
   const nickname=document.getElementById('regNick').value.trim();
   const branch_id=document.getElementById('regBranch').value;
-  const staff_id=document.getElementById('regStaff').value||null;
+  /* 担当スタッフはインターン生には選ばせない。招待リンク（/?staff=xxx）から来たときだけ、
+     リンクを配ったスタッフが自動で担当になる。それ以外は担当なしで登録し、スタッフ側で設定する */
+  const staff_id=INVITE_STAFF?INVITE_STAFF.id:null;
   const err=document.getElementById('regErr');
   err.classList.remove('show');
   if(!email||!password||!nickname){err.textContent='メールアドレス・パスワード・ニックネームは必須です';err.classList.add('show');return;}
@@ -1448,8 +1428,7 @@ function viewHome(){
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
   if(ME.role==='intern'){
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
-    /* 面談の申請だけは横長の大きな入口にして、挨拶のすぐ下に置く。
-       いちばんやってほしいことなので、開いた瞬間にここへ目が行くようにしている。
+    /* 面談の申請だけは横長の大きな入口にする。置き場所は六角形の下。
        同じ入口が2つあると迷うので、六角形の側からは外してある */
     const cta=`<button class="cta" onclick="go('apply')">
       <span class="inner">
@@ -1459,10 +1438,10 @@ function viewHome(){
       </span></button>`;
     /* ここは「これからやること」だけに絞る。
        インターン先・受信メール・カレンダー連携は左メニューへ移した */
-    return hi+cta+hexgrid([
+    return hi+hexgrid([
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
       hex("go('requests')",'megaphone','受けた依頼','スタッフからの連絡',unread),
-    ])+eventsSection();
+    ])+cta+eventsSection();
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
   if(ME.role==='staff'||ME.role==='branch_admin'){
@@ -1808,7 +1787,18 @@ function viewApply(){
   if(!staffs.length)return `<h1 class="page">面談を申請</h1>
     <div class="empty"><div class="ei">${ic('briefcase')}</div><p>あなたの支部に担当できるスタッフがいません。</p></div>`;
 
-  const staffOpts=staffs.map(s=>`<option value="${s.id}" ${s.id===APPLY.staff?'selected':''}>${esc(s.nickname)}</option>`).join('');
+  /* 担当スタッフが決まっている人には選ばせない。決まっていない人だけ、
+     申請そのものができなくならないように支部のスタッフから選べるようにする */
+  const fixedStaff=staffs.find(s=>s.id===ME.staff_id)||null;
+  // 途中で担当が設定された場合に、前に選んだ相手が残らないようにする
+  if(fixedStaff&&APPLY.staff!==fixedStaff.id){APPLY.staff=fixedStaff.id;APPLY.sel=[];}
+  const staffField=fixedStaff
+    ? `<div class="fixedfield">${ic('staff')}<b>${esc(fixedStaff.nickname)}</b></div>
+       <p class="fine" style="margin-top:6px">担当スタッフの変更はスタッフ側で行います。</p>`
+    : `<select onchange="setApplyStaff(this.value)">${
+        staffs.map(s=>`<option value="${s.id}" ${s.id===APPLY.staff?'selected':''}>${esc(s.nickname)}</option>`).join('')
+      }</select>
+       <p class="fine" style="margin-top:6px">まだ担当スタッフが決まっていません。相談したいスタッフを選んでください。</p>`;
   const{days,times,grid}=genApplyGrid(APPLY.staff,APPLY.weekOffset);
   const todayKey=ymd(new Date());
   const monthLabel=`${days[0].getFullYear()}年${days[0].getMonth()+1}月`;
@@ -1829,7 +1819,7 @@ function viewApply(){
       const c=dayCol[ti];
       if(c.state==='off')return `<td class="bt-c off">×</td>`;
       const n=rank.get(c.iso);
-      return `<td class="bt-c ok ${n?'sel':''}" data-iso="${c.iso}" onpointerdown="applyPointerDown(event,'${c.iso}')" title="タップまたはドラッグで選択">${n?`<span class="bt-num">${n}</span>`:'○'}</td>`;
+      return `<td class="bt-c ok ${n?'sel':''}" data-iso="${c.iso}" onpointerdown="applyPointerDown(event,'${c.iso}')" title="タップ、または同じ日の中で上下になぞって選択">${n?`<span class="bt-num">${n}</span>`:'○'}</td>`;
     }).join('');
     return `<tr><th class="bt-t">${label}</th>${cells}</tr>`;
   }).join('');
@@ -1846,10 +1836,10 @@ function viewApply(){
     <div class="selsummary" id="selsummary">${selSummaryRows()}</div></div>`;
 
   return `<h1 class="page">面談を申請</h1>
-    <p class="page-sub">空いている枠をなぞって選び、下の一覧で希望順に並べ替えてください。続けて選んだ時間はひとつの希望にまとまります。担当スタッフが日程を確定します。</p>
+    <p class="page-sub">空いている枠を上下になぞって選び、下の一覧で希望順に並べ替えてください（なぞれるのは同じ日の中だけです）。続けて選んだ時間はひとつの希望にまとまります。担当スタッフが日程を確定します。</p>
     <div class="card"><div class="cb">
       <label class="fl">担当スタッフ</label>
-      <select onchange="setApplyStaff(this.value)">${staffOpts}</select>
+      ${staffField}
       <div class="weekpager">
         <button class="pg" onclick="setApplyWeek(-1)" ${APPLY.weekOffset<=0?'disabled':''}>${ic('chevron-l')}前の1週間</button>
         <span class="wm">${monthLabel}</span>
@@ -1863,6 +1853,8 @@ function viewApply(){
       <textarea placeholder="担当スタッフへのメッセージがあれば記入してください（例：この日程は難しくなったら相談したいです）" style="min-height:90px" oninput="APPLY.note=this.value">${esc(APPLY.note||'')}</textarea>
       <button class="btn pri block" style="margin-top:20px" id="applybtn" ${groups.length?'':'disabled'} onclick="submitApply()">
         ${groups.length?`この${groups.length}件で申請する`:'枠を選んでください'}</button>
+      <!-- スマホでは左メニューが隠れているため、ここから戻れないと行き止まりになる -->
+      <div class="backhome"><button class="btn ghost sm" onclick="go('home')">${ic('home')}ホームへ戻る</button></div>
     </div></div>`;
 }
 function setApplyStaff(id){APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];render();}
@@ -1881,12 +1873,14 @@ function removeSlots(csv){
    スタッフの「面談できない時間を登録」（avPointerDown 以下）と同じ方式。
    押し始めた枠が未選択なら追加、選択済みなら解除で固定し、
    往復してもモードが入れ替わらないようにしている。
-   追加は配列の末尾に積むので、なぞった順がそのまま希望順になる */
+   追加は配列の末尾に積むので、なぞった順がそのまま希望順になる。
+   なぞれるのは縦（押し始めた日の列）だけ。列は td の並び順で見分ける。
+   iso の日付部分はUTC基準で列の途中で変わりうるため、判定には使えない */
 let APDRAG=null;
 function applyPointerDown(e,iso){
   if(e.button!==undefined&&e.button!==0)return;
   e.preventDefault();
-  APDRAG={mode:APPLY.sel.includes(iso)?'remove':'add',touched:new Set()};
+  APDRAG={mode:APPLY.sel.includes(iso)?'remove':'add',touched:new Set(),col:dragColOf(e.currentTarget)};
   document.body.classList.add('noselect');
   applyDragApply(e.currentTarget,iso);
   document.addEventListener('pointermove',applyDragMove);
@@ -1895,8 +1889,21 @@ function applyPointerDown(e,iso){
 }
 function applyDragMove(e){
   if(!APDRAG)return;
+  const el=dragCellAt(e,APDRAG.col);
+  if(el)applyDragApply(el,el.dataset.iso);
+}
+/* なぞり選択の列を見分ける道具。面談申請とスタッフの不可時間登録で共用する。
+   col は「表の中で何番目の列か」。表そのものが違えば別物として扱う */
+function dragColOf(cell){
+  return cell&&cell.cellIndex!==undefined
+    ? {table:cell.closest('table'),index:cell.cellIndex} : null;
+}
+/* 指の位置にある枠を返す。押し始めた列から外れていたら null（＝その行は選ばれない） */
+function dragCellAt(e,col){
   const el=document.elementFromPoint(e.clientX,e.clientY);
-  if(el&&el.classList&&el.classList.contains('bt-c')&&el.dataset.iso)applyDragApply(el,el.dataset.iso);
+  if(!el||!el.classList||!el.classList.contains('bt-c')||!el.dataset.iso)return null;
+  if(col&&(el.cellIndex!==col.index||el.closest('table')!==col.table))return null;
+  return el;
 }
 function applyDragApply(cell,iso){
   if(!APDRAG||APDRAG.touched.has(iso))return;
@@ -2919,7 +2926,7 @@ function viewAvailSet(){
       if(c.state==='off')return `<td class="bt-c off">×</td>`;
       if(c.state==='locked')return `<td class="bt-c locked" title="${c.label}あり">－</td>`;
       if(c.state==='block')return `<td class="bt-c block" data-iso="${c.iso}" data-block-id="${c.blockId}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップまたはドラッグで解除">×</td>`;
-      return `<td class="bt-c ok" data-iso="${c.iso}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップまたはドラッグで不可にする">○</td>`;
+      return `<td class="bt-c ok" data-iso="${c.iso}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップ、または同じ日の中で上下になぞって不可にする">○</td>`;
     }).join('');
     return `<tr><th class="bt-t">${label}</th>${cells}</tr>`;
   }).join('');
@@ -2978,7 +2985,7 @@ function viewAvailSet(){
         <span class="wm">${monthLabel}</span>
         <button class="pg" onclick="avSetWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
-      <label class="fl">時間をタップ（不可 ${blockedCnt}枠）</label>
+      <label class="fl"><span>時間をタップ（不可 ${blockedCnt}枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）</span></label>
       ${table}
       <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
         <span><span class="legend-dot" style="background:var(--panel);border:1px solid var(--line)"></span>受付中（タップで不可）</span>
@@ -3029,17 +3036,18 @@ function avPointerDown(e,iso){
   e.preventDefault();
   const cell=e.currentTarget;
   const mode=cell.classList.contains('block')?'unblock':'block';
-  AVDRAG={mode,touched:new Set(),added:[],removedIds:[]};
+  AVDRAG={mode,touched:new Set(),added:[],removedIds:[],col:dragColOf(cell)};
   document.body.classList.add('noselect');
   avDragApply(cell,iso);
   document.addEventListener('pointermove',avDragMove);
   document.addEventListener('pointerup',avDragEnd);
   document.addEventListener('pointercancel',avDragEnd);
 }
+/* 申請画面と同じく、なぞれるのは押し始めた日の列（縦）だけ */
 function avDragMove(e){
   if(!AVDRAG)return;
-  const el=document.elementFromPoint(e.clientX,e.clientY);
-  if(el&&el.classList&&el.classList.contains('bt-c')&&el.dataset.iso)avDragApply(el,el.dataset.iso);
+  const el=dragCellAt(e,AVDRAG.col);
+  if(el)avDragApply(el,el.dataset.iso);
 }
 function avDragApply(cell,iso){
   if(!AVDRAG||AVDRAG.touched.has(iso))return;

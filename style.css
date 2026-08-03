@@ -401,6 +401,14 @@
   /* 隠している状態。押せば戻せることが分かるよう、消すのではなく色を落とす */
   .btn.sm.iconly.off{color:var(--mut);border-color:var(--line2)}
   /* 時間の範囲。「13:00 〜 15:30」を1行に収める */
+  /* 選べない項目を、入力欄と同じ高さの「読むだけの帯」として見せる */
+  .fixedfield{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;
+    border:1px solid var(--line);border-radius:11px;background:var(--bg);color:var(--ink)}
+  .fixedfield .ic{color:var(--sub);flex:none}
+  .fixedfield b{font-weight:800}
+  /* 申請ボタンの下に置く「ホームへ戻る」。主役の申請ボタンより弱く見せたいので
+     幅いっぱいにはせず、右下に小さく寄せる */
+  .backhome{display:flex;justify-content:flex-end;margin-top:10px}
   .timerange{display:flex;align-items:center;gap:8px}
   .timerange select{flex:1;min-width:0}
   .timerange .tr-sep{color:var(--sub);font-weight:700;flex:none}
@@ -499,6 +507,8 @@
   .social-box{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:14px;
     padding:18px 16px;display:flex;flex-direction:column;justify-content:center}
   .social-note{text-align:center;margin-top:14px}
+  /* Googleボタンと説明文の間に置く「次回から自動ログイン」。左右の中央に揃える */
+  .social-box .pw-toggle{justify-content:center;margin-top:12px}
   /* Googleブランドガイドラインに沿って白地＋公式ロゴ。左のロゴ枠は見本デザインに合わせたもの */
   .btn.social{display:flex;align-items:center;gap:0;padding:0;height:48px;
     background:var(--gbtn-bg);border:1px solid var(--gbtn-line);color:var(--gbtn-ink);font-weight:700;overflow:hidden}
@@ -918,13 +928,17 @@
 
     /* メニューボタン。上に浮かせたままにして、下までスクロールしても押せるようにする。
        メニューが出ている間は、そのすぐ下に隠れるので消しておく */
-    #sbBurger{position:fixed;z-index:38;display:grid;place-items:center;gap:4px;
+    /* place-content を指定しないと、3本の行がボタンの高さいっぱいに引き伸ばされ、
+       gap の値に関わらず線と線が離れて見える（gap を縮めても効かない） */
+    #sbBurger{position:fixed;z-index:38;display:grid;place-items:center;place-content:center;gap:4px;
       top:calc(10px + env(safe-area-inset-top));right:12px;width:42px;height:42px;padding:0;
       border:1px solid var(--line);border-radius:11px;background:var(--glass);
       backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer;
       transition:opacity .2s var(--ease)}
     #sbBurger span{display:block;width:18px;height:2px;border-radius:2px;background:var(--ink)}
     [data-sb="expanded"] #sbBurger{opacity:0;pointer-events:none}
+    /* ログイン前はメニューの中身が無いので、ボタンごと出さない */
+    #login:not(.hidden) ~ #sbBurger{display:none}
     /* ボタンのぶん、本文の始まりを下げる */
     main{padding:60px 14px 40px}
 
@@ -1159,6 +1173,10 @@
     .hex{padding:0 calc(var(--hw) * 0.10)}
     .hex .hxt{font-size:12px;line-height:1.2}
     .hex .hxd{font-size:10px}
+    /* 2枚しかないインターン生のホームでは、上限いっぱいまで広がって大きすぎる。
+       上限を下げると、.hexgrid は width:fit-content なので自然に中央へ寄る。
+       枚数が多くて元から小さい画面（スタッフ）では、この上限には届かないので影響しない */
+    .hexgrid{--hw:min(126px, calc((100cqw - (var(--cols) - 1 + var(--off)) * var(--hgap)) / (var(--cols) + var(--off))))}
   }
 
   /* 触れたものだけ持ち上げる。
