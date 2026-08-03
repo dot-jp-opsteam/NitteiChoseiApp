@@ -95,30 +95,33 @@
   var ME_BY_ROLE = { intern: 'u_int1', staff: 'u_staff1', branch_admin: 'u_badmin', admin: 'u_admin' };
   var ME = users.filter(function (u) { return u.id === ME_BY_ROLE[ROLE]; })[0];
 
-  /* ---------- 面談（申請中・確定済み・不成立をひと通り） ---------- */
+  /* ---------- 面談（申請中・確定済み・不成立をひと通り） ----------
+     iv_2 は枠を6つ選んだケース。続いた枠はまとめて数えるので第1〜第3希望になり、
+     幅のある希望（18:30〜19:30／13:00〜14:30）の見え方をここで確かめられる。
+     iv_4 は choices を持たない古い申請で、こちらは互換表示の確認用 */
   var interviews = [
     {
       id: 'iv_1', intern_id: 'u_int1', staff_id: 'u_staff1', status: 'fixed',
-      choice1: at(3, 15, 0), choice2: at(4, 17, 0), choice3: at(5, 11, 0),
-      meeting_type: 'meet', confirmed_datetime: at(3, 15, 0),
+      choices: [at(3, 15, 0), at(4, 17, 0), at(5, 11, 0)],
+      confirmed_datetime: at(3, 15, 0),
       note: '就職活動の進め方について相談したいです。', created_at: at(-2, 21, 12),
     },
     {
       id: 'iv_2', intern_id: 'u_int2', staff_id: 'u_staff1', status: 'applied',
-      choice1: at(2, 18, 30), choice2: at(6, 13, 0), choice3: null,
-      meeting_type: 'zoom', confirmed_datetime: null,
+      choices: [at(2, 18, 30), at(2, 19, 0), at(6, 13, 0), at(6, 13, 30), at(6, 14, 0), at(7, 10, 0)],
+      confirmed_datetime: null,
       note: '', created_at: at(-1, 9, 40),
     },
     {
       id: 'iv_3', intern_id: 'u_int3', staff_id: 'u_staff2', status: 'applied',
-      choice1: at(4, 10, 0), choice2: null, choice3: null,
-      meeting_type: 'meet', confirmed_datetime: null,
+      choices: [at(4, 10, 0)],
+      confirmed_datetime: null,
       note: 'イベントの運営について伺いたいです。', created_at: at(0, 8, 5),
     },
     {
       id: 'iv_4', intern_id: 'u_int4', staff_id: 'u_staff2', status: 'failed',
       choice1: at(-6, 16, 0), choice2: at(-5, 16, 0), choice3: null,
-      meeting_type: 'meet', confirmed_datetime: null,
+      confirmed_datetime: null,
       note: '', created_at: at(-9, 22, 30),
     },
   ];
@@ -404,12 +407,15 @@
 
     /* --- 面談（本番では専用テーブルを持つ専用API） --- */
     if (path === '/api/interviews' && method === 'POST') {
+      // 本番と同じく choices 配列で受け取り、先頭3件は旧項目にも入れておく
+      var list = (body && Array.isArray(body.choices) && body.choices.length
+        ? body.choices
+        : [body && body.choice1, body && body.choice2, body && body.choice3]).filter(Boolean);
       var iv = {
         id: 'iv_' + uid(), intern_id: ME.id, staff_id: (body && body.staff_id) || null,
         branch_id: ME.branch_id, status: 'applied',
-        choice1: body && body.choice1, choice2: (body && body.choice2) || null,
-        choice3: (body && body.choice3) || null,
-        meeting_type: (body && body.meeting_type) || 'meet',
+        choices: list,
+        choice1: list[0], choice2: list[1] || null, choice3: list[2] || null,
         confirmed_datetime: null, note: (body && body.note) || '',
         created_at: new Date().toISOString(),
       };

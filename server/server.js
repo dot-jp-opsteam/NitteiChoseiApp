@@ -872,7 +872,7 @@ async function syncInterviewToGoogle(old, iv, users) {
         const end = new Date(start.getTime() + 30 * 60000);
         const created = await google.createEvent(accessToken, tokenRow.calendar_id, {
           summary: t.summary(intern, staff),
-          description: `OPS日調アプリで確定した面談です。\n面談方法: ${iv.meeting_type === 'zoom' ? 'Zoom' : 'Google Meet'}`,
+          description: 'OPS日調アプリで確定した面談です。',
           start: { dateTime: start.toISOString(), timeZone: 'Asia/Tokyo' },
           end: { dateTime: end.toISOString(), timeZone: 'Asia/Tokyo' },
         });
@@ -2077,8 +2077,12 @@ app.put('/api/events/:id/response', requireAuth, async (req, res) => {
 app.post('/api/interviews', requireAuth, async (req, res) => {
   const actor = req.authUser;
   if (actor.role !== 'intern') return res.status(403).json({ error: '面談を申請できるのはインターン生だけです' });
-  const { staff_id, choice1, choice2, choice3, meeting_type, note } = req.body || {};
-  if (!choice1) return res.status(400).json({ error: '希望する枠を選んでください' });
+  const { staff_id, choices, choice1, choice2, choice3, note } = req.body || {};
+  /* 希望日時は choices 配列で受け取る。並びがそのまま第1希望・第2希望…になる。
+     choice1〜choice3 は配列に移す前の形式で、古い画面から届いたときの受け口 */
+  const list = (Array.isArray(choices) && choices.length ? choices : [choice1, choice2, choice3])
+    .filter(Boolean).map(String);
+  if (!list.length) return res.status(400).json({ error: '希望する枠を選んでください' });
   try {
     // 担当スタッフは自分の支部の人だけ
     if (staff_id) {
@@ -2090,8 +2094,11 @@ app.post('/api/interviews', requireAuth, async (req, res) => {
     const iv = {
       id: 'iv_' + crypto.randomBytes(6).toString('hex'),
       intern_id: actor.id, staff_id: staff_id || null, branch_id: actor.branch_id || null,
-      status: 'applied', choice1, choice2: choice2 || null, choice3: choice3 || null,
-      meeting_type: meeting_type || 'meet', confirmed_datetime: null,
+      status: 'applied', choices: list,
+      /* 先頭3件は旧項目にも入れておく。この変更を巻き戻したときに
+         申請が読めなくなるのを防ぐための保険 */
+      choice1: list[0], choice2: list[1] || null, choice3: list[2] || null,
+      confirmed_datetime: null,
       note: String(note || '').trim(), created_at: new Date().toISOString(),
     };
     await saveInterview(iv);

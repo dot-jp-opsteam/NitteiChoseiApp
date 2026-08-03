@@ -507,18 +507,38 @@ async function run() {
 
   console.log('\n─────── 面談（専用API） ───────');
   {
+    // 希望日時は choices 配列。並びがそのまま第1希望・第2希望…になる
     const applied = await api(TOKENS.intern, 'POST', '/api/interviews', {
-      staff_id: 'u_e2e_staff', choice1: '2026-09-01T10:00:00.000Z',
-      choice2: '2026-09-02T10:00:00.000Z', meeting_type: 'meet', note: 'よろしくお願いします',
+      staff_id: 'u_e2e_staff',
+      choices: ['2026-09-01T10:00:00.000Z', '2026-09-02T10:00:00.000Z', '2026-09-05T10:00:00.000Z',
+        '2026-09-06T10:00:00.000Z'],
+      meeting_type: 'meet', note: 'よろしくお願いします',
     });
     check('インターン生が面談を申請できる', applied.status, 200);
     IV_ID = applied.json.interview?.id;
     check('状態が「申請中」で作られる', applied.json.interview?.status, 'applied');
     check('申請の通知が積まれる', !!applied.json.notification, true);
+    // 3つを超える希望も、選んだ順のまま保存される
+    check('希望日時が選んだ順に4件保存される',
+      (applied.json.interview?.choices || []).join(','),
+      '2026-09-01T10:00:00.000Z,2026-09-02T10:00:00.000Z,2026-09-05T10:00:00.000Z,2026-09-06T10:00:00.000Z');
+    check('先頭3件は旧項目にも入る', applied.json.interview?.choice3, '2026-09-05T10:00:00.000Z');
+    check('面談方法は保存されない', applied.json.interview?.meeting_type, undefined);
+
+    // choices に移す前の形式。古い画面から届いても申請できることを確かめる
+    const oldStyle = await api(TOKENS.intern, 'POST', '/api/interviews',
+      { staff_id: 'u_e2e_staff', choice1: '2026-09-08T10:00:00.000Z', choice2: '2026-09-09T10:00:00.000Z' });
+    check('旧形式（choice1〜3）でも申請できる', oldStyle.status, 200);
+    check('旧形式は choices に移されて返る', (oldStyle.json.interview?.choices || []).join(','),
+      '2026-09-08T10:00:00.000Z,2026-09-09T10:00:00.000Z');
+
+    const noChoice = await api(TOKENS.intern, 'POST', '/api/interviews',
+      { staff_id: 'u_e2e_staff', choices: [] });
+    check('希望を1つも選ばないと申請できない', noChoice.status, 400);
 
     // 同じ支部の別のインターン生の面談。上の絞り込みが効いているか確かめるために作る
     await api(TOKENS.intern2, 'POST', '/api/interviews',
-      { staff_id: 'u_e2e_staff', choice1: '2026-09-03T10:00:00.000Z', meeting_type: 'meet' });
+      { staff_id: 'u_e2e_staff', choices: ['2026-09-03T10:00:00.000Z'] });
 
     const byStaff = await api(TOKENS.staff, 'POST', '/api/interviews', { choice1: '2026-09-01T10:00:00.000Z' });
     check('スタッフは面談を申請できない', byStaff.status, 403);

@@ -50,7 +50,7 @@
   </div>
   <div class="login-card reveal">
     <div id="loginBody" style="text-align:left"></div>
-    <p class="fine">データはこのアプリのサーバーに保存されます（同じサーバーを見る端末間で共有されます）。</p>
+    <p class="fine">データはこのアプリのサーバーに保存されます。</p>
   </div>
 </div>
 
@@ -75,8 +75,6 @@
         <button class="bell" id="bell" onclick="openNotifications()" aria-label="通知" data-ic="bell"><span class="badge hidden" id="bellBadge">0</span></button>
       </div>
       <div class="sb-links">
-        <a href="/terms.html">利用規約</a>
-        <a href="/privacy.html">プライバシーポリシー</a>
         <a href="https://www.dot-jp.or.jp/" target="_blank" rel="noopener noreferrer" data-ic-end="external">ドットジェイピー公式</a>
       </div>
     </div>
@@ -510,7 +508,40 @@ const ROLE_CLS={intern:'role-intern',staff:'role-staff',branch_admin:'role-branc
 function isAdminLike(u){u=u||ME;return !!u&&(u.role==='admin'||u.role==='branch_admin');}
 function isFullAdmin(u){u=u||ME;return !!u&&u.role==='admin';}
 const STATUS={none:{t:'未申請',c:'st-none'},applied:{t:'申請中',c:'st-applied'},fixed:{t:'確定済み',c:'st-fixed'},failed:{t:'不成立',c:'st-failed'}};
-const MTYPE={meet:'Google Meet',zoom:'Zoom'};
+/* 面談の希望日時を取り出す。以前は choice1〜choice3 の3項目だったが
+   希望を何件でも出せるようにしたため choices 配列へ移した。
+   古い申請には choices が無いので、その場合だけ旧項目から組み立てる */
+function ivChoices(iv){
+  if(!iv)return [];
+  if(Array.isArray(iv.choices)&&iv.choices.length)return iv.choices;
+  return [iv.choice1,iv.choice2,iv.choice3].filter(Boolean);
+}
+const SLOT_MS=30*60*1000;
+/* 続いている30分枠をひとつの希望としてまとめる。
+   12:00・12:30・13:00 を選んだら「12:00〜13:30」で1件という数え方になる。
+   固まりの並び順は「その固まりの枠に最初に触れた位置」で決まるので、
+   なぞった順＝希望順がそのまま残る。日をまたぐ枠は続いていても分ける */
+function groupSlots(list){
+  const first=new Map();
+  (list||[]).forEach((iso,i)=>{if(iso&&!first.has(iso))first.set(iso,i);});
+  const sorted=[...first.keys()].sort((a,b)=>new Date(a)-new Date(b));
+  const runs=[];
+  for(const iso of sorted){
+    const run=runs[runs.length-1];
+    const prev=run&&run[run.length-1];
+    const d=new Date(iso),p=prev&&new Date(prev);
+    if(p&&d-p===SLOT_MS&&d.getDate()===p.getDate())run.push(iso);
+    else runs.push([iso]);
+  }
+  const at=r=>Math.min(...r.map(x=>first.get(x)));
+  return runs.sort((a,b)=>at(a)-at(b));
+}
+/* 「8/5(火) 12:00〜13:30」。終わりは最後の枠の30分後 */
+function fmtSlotRange(g){
+  if(!g||!g.length)return '—';
+  if(g.length===1)return fmtDT(g[0]);
+  return `${fmtDT(g[0])}〜${hm(new Date(new Date(g[g.length-1]).getTime()+SLOT_MS))}`;
+}
 /* 黒地でも沈まない色に統一。黄色系は使わない方針のため外してある */
 const EVENT_COLORS=[
   {v:'#43e7df',n:'シアン'},{v:'#3ddc97',n:'グリーン'},{v:'#6aa9f0',n:'ブルー'},{v:'#a98bf5',n:'パープル'},
@@ -829,7 +860,6 @@ function renderLogin(){
             <input id="loginPassword" type="password" autocomplete="current-password">
             <label class="pw-toggle"><input type="checkbox" onchange="toggleLoginPw(this)"><span>パスワードを表示する</span></label>
             <label class="pw-toggle"><input type="checkbox" id="loginRemember"><span>次回から自動ログイン</span></label>
-            <p class="fine" style="margin:2px 0 0">チェックを入れないと、タブを閉じるたびに入力が必要になります。共用のパソコンではチェックを外したままにしてください。</p>
             <div class="field-err" id="loginErr"></div>
             <button class="btn pri block" style="margin-top:14px" onclick="doLoginAuth()">ログインする</button>
             ${PASSWORD_RESET_AVAILABLE?`<p class="forgot-link"><a href="javascript:void(0)" onclick="switchLoginView('forgot')">パスワードをお忘れの方</a></p>`:''}
@@ -1175,7 +1205,8 @@ const NAV={
     {id:'home',label:'ホーム',ic:'home'},
     {id:'apply',label:'面談申請',ic:'edit'},
     {id:'my',label:'面談状況',ic:'list'},
-    {id:'requests',label:'依頼',ic:'megaphone'},
+    // インターン生は受け取るだけなので、スタッフ側の「依頼」と呼び分ける
+    {id:'requests',label:'受けた依頼',ic:'megaphone'},
   ],
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
@@ -1202,24 +1233,10 @@ let APPLY=null;              // 面談申請の一時状態
 let calYM=null, calSel=null; // イベントカレンダーの表示月・選択日
 let calMode='month';         // 'month' | 'list'（表示切替）
 let calFull=false;           // カレンダーだけを画面いっぱいに出しているか
-let calChips=null;           // 'dot' | 'text'（null のあいだは未決定）
-
-/* 予定の見せ方。狭い画面では1日ぶんが50px程度しかなく、
-   文字を入れても数文字で切れて読めないので、既定は色の丸にする。
-   一度選んだら端末に覚えさせる（画面幅が変わっても勝手に戻さない） */
-const CHIPS_KEY='ops_cal_chips_v1';
-function chipsMode(){
-  if(calChips)return calChips;
-  let saved=null;
-  try{saved=localStorage.getItem(CHIPS_KEY);}catch(e){}
-  calChips=(saved==='dot'||saved==='text')?saved:(isNarrow()?'dot':'text');
-  return calChips;
-}
-function setChipsMode(m){
-  calChips=m;
-  try{localStorage.setItem(CHIPS_KEY,m);}catch(e){}
-  render();
-}
+/* 予定の見せ方。以前は「ドット（色の丸）」と「文字」を切り替えられたが、
+   ドットだと何の予定か分からず一覧を開き直す手間があったため、文字だけに一本化した。
+   狭い画面では文字が途中で切れるので、CSS側でセルの高さと文字サイズを詰めている */
+function chipsMode(){ return 'text'; }
 /* カレンダーの全画面表示。サイドバーと本文の余白を退かせて幅を最大まで使う */
 function setCalFull(on){
   calFull=!!on;
@@ -1386,18 +1403,21 @@ function viewHome(){
   const hi=`<h1 class="page">こんにちは、${esc(ME.nickname)}さん</h1>
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
   if(ME.role==='intern'){
-    const mine=(DB.interviews||[]).filter(i=>i.intern_id===ME.id);
-    const latest=mine.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
-    let statusCard='';
-    if(latest){const s=STATUS[latest.status];
-      statusCard=`<div class="hint">${ic('bulb')}<span>あなたの面談は現在 <b>「${s.t}」</b> です。${latest.status==='failed'?'再申請をお願いします。':''}</span></div>`;}
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
+    /* 面談の申請だけは横長の大きな入口にして、挨拶のすぐ下に置く。
+       いちばんやってほしいことなので、開いた瞬間にここへ目が行くようにしている。
+       同じ入口が2つあると迷うので、六角形の側からは外してある */
+    const cta=`<button class="cta" onclick="go('apply')">
+      <span class="inner">
+        <span class="cta-ic">${ic('edit')}</span>
+        <span class="cta-tx"><b>面談を申請</b><small>空いている枠を選んで担当スタッフに送ります</small></span>
+        <span class="cta-go">${ic('chevron')}</span>
+      </span></button>`;
     /* ここは「これからやること」だけに絞る。
        インターン先・受信メール・カレンダー連携は左メニューへ移した */
-    return hi+statusCard+hexgrid([
-      hex("go('apply')",'edit','面談を申請','希望日時を3つ提出'),
+    return hi+cta+hexgrid([
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
-      hex("go('requests')",'megaphone','依頼','スタッフからの連絡',unread),
+      hex("go('requests')",'megaphone','受けた依頼','スタッフからの連絡',unread),
     ])+eventsSection();
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
@@ -1734,7 +1754,7 @@ function viewApply(){
   const staffs=DB.users.filter(u=>(u.role==='staff'||u.role==='branch_admin')&&u.branch_id===ME.branch_id);
   // 担当スタッフが決まっていれば、その人を初めから選んでおく
   const preferred=staffs.find(s=>s.id===ME.staff_id)?.id||staffs[0]?.id||'';
-  if(!APPLY)APPLY={staff:preferred,weekOffset:0,sel:[],mtype:'meet',note:''};
+  if(!APPLY)APPLY={staff:preferred,weekOffset:0,sel:[],note:''};
   if(!staffs.length)return `<h1 class="page">面談を申請</h1>
     <div class="empty"><div class="ei">${ic('briefcase')}</div><p>あなたの支部に担当できるスタッフがいません。</p></div>`;
 
@@ -1748,14 +1768,18 @@ function viewApply(){
     const cls=['bt-h',w===0||hol?'sun':'',w===6?'sat':'',key===todayKey?'today':''].join(' ');
     return `<th class="${cls}">${d.getDate()}<small>${WD_JP[w]}</small></th>`;}).join('');
 
+  // まとまりごとの希望順。同じ固まりの枠にはすべて同じ番号が付く
+  const groups=groupSlots(APPLY.sel);
+  const rank=new Map();
+  groups.forEach((g,i)=>g.forEach(iso=>rank.set(iso,i+1)));
+
   const bodyRows=times.map((t,ti)=>{
     const label=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
     const cells=grid.map(dayCol=>{
       const c=dayCol[ti];
       if(c.state==='off')return `<td class="bt-c off">×</td>`;
-      const idx=APPLY.sel.indexOf(c.iso);
-      const sel=idx>=0;
-      return `<td class="bt-c ok ${sel?'sel':''}" onclick="toggleSlot('${c.iso}')">${sel?`<span class="bt-num">${idx+1}</span>`:'○'}</td>`;
+      const n=rank.get(c.iso);
+      return `<td class="bt-c ok ${n?'sel':''}" data-iso="${c.iso}" onpointerdown="applyPointerDown(event,'${c.iso}')" title="タップまたはドラッグで選択">${n?`<span class="bt-num">${n}</span>`:'○'}</td>`;
     }).join('');
     return `<tr><th class="bt-t">${label}</th>${cells}</tr>`;
   }).join('');
@@ -1765,15 +1789,14 @@ function viewApply(){
     <tbody>${bodyRows}</tbody></table></div>`
     :`<div class="empty" style="padding:28px"><div class="ei">${ic('slot-empty')}</div><p>この週は面談可能な空き枠がありません。</p></div>`;
 
-  // 選択サマリー
-  const summary=APPLY.sel.length?`<div class="divider"></div>
-    <label class="fl">選んだ希望日時（最大3つ）</label>
-    <div class="selsummary">`+APPLY.sel.map((iso,i)=>`
-      <div class="sr"><span class="cn">${i+1}</span><span>${fmtDT(iso)}</span>
-      <span class="x" onclick="toggleSlot('${iso}')">×</span></div>`).join('')+`</div>`:'';
+  /* 選択サマリー。並びがそのまま希望順なので、ここを入れ替えれば順位が変わる。
+     なぞっている最中もここを書き換えるため、0件のときも枠だけ置いて隠しておく */
+  const summary=`<div id="selwrap" ${groups.length?'':'hidden'}><div class="divider"></div>
+    <label class="fl"><span id="sellabel">選んだ希望日時（${groups.length}件）</span><span class="fl-sub">上から第1希望です。ドラッグで並べ替えられます</span></label>
+    <div class="selsummary" id="selsummary">${selSummaryRows()}</div></div>`;
 
   return `<h1 class="page">面談を申請</h1>
-    <p class="page-sub">空いている30分枠を最大3つまで選んでください（第1〜第3希望）。担当スタッフが日程を確定します。</p>
+    <p class="page-sub">空いている枠をなぞって選び、下の一覧で希望順に並べ替えてください。続けて選んだ時間はひとつの希望にまとまります。担当スタッフが日程を確定します。</p>
     <div class="card"><div class="cb">
       <label class="fl">担当スタッフ</label>
       <select onchange="setApplyStaff(this.value)">${staffOpts}</select>
@@ -1782,39 +1805,220 @@ function viewApply(){
         <span class="wm">${monthLabel}</span>
         <button class="pg" onclick="setApplyWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
-      <label class="fl">日時を選ぶ（${APPLY.sel.length}/3）</label>
+      <label class="fl" id="slotlabel">日時を選ぶ（${groups.length}件選択中）</label>
       ${table}
       ${summary}
       <div class="divider"></div>
-      <label class="fl">面談方法<span class="req">*</span></label>
-      <div class="seg">
-        <label><input type="radio" name="mtype" value="meet" ${APPLY.mtype==='meet'?'checked':''} onchange="APPLY.mtype='meet'"><span class="segb">Google Meet</span></label>
-        <label><input type="radio" name="mtype" value="zoom" ${APPLY.mtype==='zoom'?'checked':''} onchange="APPLY.mtype='zoom'"><span class="segb">Zoom</span></label>
-      </div>
       <label class="fl">その他（任意）</label>
       <textarea placeholder="担当スタッフへのメッセージがあれば記入してください（例：この日程は難しくなったら相談したいです）" style="min-height:90px" oninput="APPLY.note=this.value">${esc(APPLY.note||'')}</textarea>
-      <button class="btn pri block" style="margin-top:20px" ${APPLY.sel.length?'':'disabled'} onclick="submitApply()">
-        ${APPLY.sel.length?`この${APPLY.sel.length}件で申請する`:'枠を選んでください'}</button>
+      <button class="btn pri block" style="margin-top:20px" id="applybtn" ${groups.length?'':'disabled'} onclick="submitApply()">
+        ${groups.length?`この${groups.length}件で申請する`:'枠を選んでください'}</button>
     </div></div>`;
 }
 function setApplyStaff(id){APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];render();}
 function setApplyWeek(delta){APPLY.weekOffset=Math.max(0,(APPLY.weekOffset||0)+delta);render();}
-function toggleSlot(iso){
+/* 一覧の「×」。まとまりごと外すので、含まれる枠をすべて落とす。
+   ここで render() を呼ぶと画面ごと作り直しになり、カードの登場アニメが
+   もう一度再生されて一瞬暗く沈む。枠を選ぶ操作では画面の骨格は変わらないので、
+   中身だけを書き換える refreshApplyLive() で済ませる */
+function removeSlots(csv){
+  const gone=new Set(csv.split(','));
+  APPLY.sel=APPLY.sel.filter(iso=>!gone.has(iso));
+  refreshApplyLive();
+}
+
+/* ---- カレンダーをなぞって複数の枠を選ぶ ----
+   スタッフの「面談できない時間を登録」（avPointerDown 以下）と同じ方式。
+   押し始めた枠が未選択なら追加、選択済みなら解除で固定し、
+   往復してもモードが入れ替わらないようにしている。
+   追加は配列の末尾に積むので、なぞった順がそのまま希望順になる */
+let APDRAG=null;
+function applyPointerDown(e,iso){
+  if(e.button!==undefined&&e.button!==0)return;
+  e.preventDefault();
+  APDRAG={mode:APPLY.sel.includes(iso)?'remove':'add',touched:new Set()};
+  document.body.classList.add('noselect');
+  applyDragApply(e.currentTarget,iso);
+  document.addEventListener('pointermove',applyDragMove);
+  document.addEventListener('pointerup',applyDragEnd);
+  document.addEventListener('pointercancel',applyDragEnd);
+}
+function applyDragMove(e){
+  if(!APDRAG)return;
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  if(el&&el.classList&&el.classList.contains('bt-c')&&el.dataset.iso)applyDragApply(el,el.dataset.iso);
+}
+function applyDragApply(cell,iso){
+  if(!APDRAG||APDRAG.touched.has(iso))return;
   const i=APPLY.sel.indexOf(iso);
-  if(i>=0)APPLY.sel.splice(i,1);
-  else{if(APPLY.sel.length>=3){toast('希望は3つまでです');return;}APPLY.sel.push(iso);}
-  render();
+  if(APDRAG.mode==='add'){
+    if(i>=0)return;
+    APPLY.sel.push(iso);
+  }else{
+    if(i<0)return;
+    APPLY.sel.splice(i,1);
+  }
+  APDRAG.touched.add(iso);
+  refreshApplyLive();
+}
+/* なぞっている間の表示更新。枠がつながると番号が繰り上がるので、
+   画面全体を描き直さずに済む範囲（番号・一覧・見出し）だけを書き換える */
+function refreshApplyLive(){
+  const groups=groupSlots(APPLY.sel);
+  const rank=new Map();
+  groups.forEach((g,i)=>g.forEach(iso=>rank.set(iso,i+1)));
+  document.querySelectorAll('.booktable .bt-c.ok').forEach(td=>{
+    const n=rank.get(td.dataset.iso);
+    if(n){td.classList.add('sel');td.innerHTML=`<span class="bt-num">${n}</span>`;}
+    else if(td.classList.contains('sel')){td.classList.remove('sel');td.textContent='○';}
+  });
+  const wrap=document.getElementById('selwrap');
+  if(wrap)wrap.hidden=!groups.length;
+  const box=document.getElementById('selsummary');
+  if(box)box.innerHTML=selSummaryRows();
+  const lab=document.getElementById('sellabel');
+  if(lab)lab.textContent=`選んだ希望日時（${groups.length}件）`;
+  const slab=document.getElementById('slotlabel');
+  if(slab)slab.textContent=`日時を選ぶ（${groups.length}件選択中）`;
+  const btn=document.getElementById('applybtn');
+  if(btn){btn.disabled=!groups.length;
+    btn.textContent=groups.length?`この${groups.length}件で申請する`:'枠を選んでください';}
+}
+function applyDragEnd(){
+  document.removeEventListener('pointermove',applyDragMove);
+  document.removeEventListener('pointerup',applyDragEnd);
+  document.removeEventListener('pointercancel',applyDragEnd);
+  document.body.classList.remove('noselect');
+  if(!APDRAG)return;
+  APDRAG=null;
+  refreshApplyLive();   // 画面ごと作り直すと登場アニメが再生されてちらつく
+}
+
+/* ---- 選んだ日時の一覧（並びがそのまま希望順） ---- */
+/* 順位の札。第1〜第3は色を変えるので、順位そのものをクラスに持たせる。
+   第4以降はまとめて r4 にして、もとの色のままにする */
+const rankCls=n=>'cn r'+Math.min(n,4);
+function selSummaryRows(){
+  return groupSlots(APPLY.sel).map((g,i)=>{
+    const csv=g.join(',');
+    return `<div class="sr" data-slots="${csv}" onpointerdown="selDragStart(event,this)">
+      <span class="${rankCls(i+1)}">第${i+1}希望</span><span class="st">${fmtSlotRange(g)}</span>
+      <span class="x" onpointerdown="event.stopPropagation()" onclick="removeSlots('${csv}')">×</span>
+    </div>`;
+  }).join('');
+}
+/* ---- 一覧をドラッグして希望順を入れ替える ----
+   持ち上げた行は複製して指に付いてくるようにし、元の行は薄いまま列に残して
+   入れ替え先を示す。長押しを待たずに始める方式なので、行には CSS で
+   touch-action:none を当ててブラウザ既定の縦スクロールに指を取られないようにしている */
+let SELDRAG=null;
+function selDragStart(e,row){
+  if(e.button!==undefined&&e.button!==0)return;
+  const box=row.parentElement;
+  if(!box||box.querySelectorAll('.sr').length<2)return;   // 1件なら並べ替えようがない
+  e.preventDefault();
+  const r=row.getBoundingClientRect();
+  const ghost=row.cloneNode(true);
+  ghost.classList.add('ghost');
+  ghost.removeAttribute('onpointerdown');
+  ghost.style.width=r.width+'px';
+  ghost.style.left=r.left+'px';
+  box.appendChild(ghost);   // 一覧の中に入れておかないと .selsummary の見た目が当たらない
+  SELDRAG={row,ghost,box,grab:e.clientY-r.top,h:r.height,y:e.clientY};
+  selMoveGhost();
+  row.classList.add('placeholder');
+  document.body.classList.add('noselect');
+  // 指を端で止めたままでも送れるよう、スクロールは時計で回す
+  SELDRAG.timer=setInterval(selEdgeScroll,16);
+  document.addEventListener('pointermove',selDragMove);
+  document.addEventListener('pointerup',selDragEnd);
+  document.addEventListener('pointercancel',selDragEnd);
+}
+function selMoveGhost(){
+  const d=SELDRAG;
+  d.ghost.style.top=Math.max(4,Math.min(window.innerHeight-d.h-4,d.y-d.grab))+'px';
+}
+// 画面の上下の端まで持っていったら、そのままページを送る
+function selEdgeScroll(){
+  const d=SELDRAG;if(!d)return;
+  const m=70;
+  const v=d.y<m?-10:d.y>window.innerHeight-m?10:0;
+  if(!v)return;
+  window.scrollBy(0,v);
+  selReorder();
+}
+function selDragMove(e){
+  if(!SELDRAG)return;
+  SELDRAG.y=e.clientY;
+  selMoveGhost();
+  selReorder();
+}
+/* 指の高さがどの行の真ん中を越えたかで差し込み先を決める。
+   入れ替えは DOM を動かすだけにして、動く前の位置から滑らせる（FLIP） */
+function selReorder(){
+  const d=SELDRAG;if(!d)return;
+  const rows=[...d.box.querySelectorAll('.sr:not(.ghost)')];
+  let anchor=null;
+  for(const r of rows){
+    if(r===d.row)continue;
+    const b=r.getBoundingClientRect();
+    if(d.y<b.top+b.height/2){anchor=r;break;}
+  }
+  if(anchor===d.row.nextElementSibling)return;   // すでにその位置にいる
+  const before=rows.map(r=>[r,r.getBoundingClientRect().top]);
+  if(anchor)d.box.insertBefore(d.row,anchor);
+  else d.box.insertBefore(d.row,d.ghost);        // 末尾へ。複製は常に最後に置いてある
+  for(const[r,top]of before){
+    const dy=top-r.getBoundingClientRect().top;
+    if(!dy)continue;
+    r.style.transition='none';
+    r.style.transform=`translateY(${dy}px)`;
+  }
+  void d.box.offsetHeight;   // ここで一度反映させないと、続く指定がアニメにならない
+  for(const[r]of before){r.style.transition='transform .16s ease';r.style.transform='';}
+  selRenumber();
+}
+// 番号を振り直す。持ち上げている行とカレンダー側の番号も合わせる
+function selRenumber(){
+  const d=SELDRAG;if(!d)return;
+  const rows=[...d.box.querySelectorAll('.sr:not(.ghost)')];
+  const rank=new Map();
+  rows.forEach((r,i)=>{
+    const c=r.querySelector('.cn');
+    if(c){c.textContent=`第${i+1}希望`;c.className=rankCls(i+1);}
+    r.dataset.slots.split(',').forEach(iso=>rank.set(iso,i+1));
+  });
+  const gc=d.ghost.querySelector('.cn');
+  if(gc){const n=rows.indexOf(d.row)+1;gc.textContent=`第${n}希望`;gc.className=rankCls(n);}
+  document.querySelectorAll('.booktable .bt-c.sel').forEach(td=>{
+    const n=rank.get(td.dataset.iso);
+    if(n)td.innerHTML=`<span class="bt-num">${n}</span>`;
+  });
+}
+function selDragEnd(){
+  document.removeEventListener('pointermove',selDragMove);
+  document.removeEventListener('pointerup',selDragEnd);
+  document.removeEventListener('pointercancel',selDragEnd);
+  document.body.classList.remove('noselect');
+  const d=SELDRAG;if(!d)return;
+  SELDRAG=null;
+  clearInterval(d.timer);
+  d.ghost.remove();
+  d.row.classList.remove('placeholder');
+  // 画面に並んでいるとおりを希望順として取り込む
+  APPLY.sel=[...d.box.querySelectorAll('.sr')].flatMap(r=>r.dataset.slots.split(','));
+  refreshApplyLive();   // 画面ごと作り直すと登場アニメが再生されてちらつく
 }
 async function submitApply(){
   if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
-  // 選択順を第1〜第3希望に。空きスロットのみ選択できるため過去・重複は発生しない。
-  const sorted=APPLY.sel.slice(); // 選択順を尊重
+  /* 続いた枠をまとめた順がそのまま第1希望・第2希望…になる。
+     まとめ直したものを送ることで、重複や並びの乱れが残らないようにする */
+  const choices=groupSlots(APPLY.sel).flat();
   /* 申請は専用APIで送る。締切前は全員がここに集中するため、
      DB全体を保存し直す方式では大半が保存できなくなる */
   const iv=await apiCreate('/api/interviews',{
     staff_id:APPLY.staff||null,
-    choice1:sorted[0]||null,choice2:sorted[1]||null,choice3:sorted[2]||null,
-    meeting_type:APPLY.mtype,note:(APPLY.note||'').trim(),
+    choices,note:(APPLY.note||'').trim(),
   },'interview');
   if(!iv)return;   // 保存できていないので「申請しました」とは言わない
   DB.interviews=[...(DB.interviews||[]),iv];
@@ -1836,18 +2040,17 @@ function viewMyInterviews(){
     return `<div class="card"><div class="cb">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
         <span class="pill ${s.c}">${s.t}</span>
-        <span class="tag">${MTYPE[iv.meeting_type]}</span>
         <span style="margin-left:auto;color:var(--mut);font-size:12px">${fmtRel(iv.created_at)}</span>
       </div>
       <div class="meta"><span>担当：<b>${staff?esc(staff.nickname):'未定'}</b></span></div>
       ${iv.status==='fixed'
-        ? `<div class="hint" style="margin-top:8px">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>${MTYPE[iv.meeting_type]}のリンクはメールで届きます。</span></div>
+        ? `<div class="hint" style="margin-top:8px">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>面談のリンクはメールで届きます。</span></div>
            <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（ホーム画面から連携できます）'}</span></div>`
         : iv.status==='failed'
         ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
            <button class="btn pri block sm" style="margin-top:10px" onclick="go('apply')">再申請する</button>`
         : `<dl class="kv" style="margin-top:8px">
-             ${[iv.choice1,iv.choice2,iv.choice3].filter(Boolean).map((c,i)=>`<dt>第${i+1}希望</dt><dd>${fmtDT(c)}</dd>`).join('')}</dl>`}
+             ${groupSlots(ivChoices(iv)).map((g,i)=>`<dt>第${i+1}希望</dt><dd>${fmtSlotRange(g)}</dd>`).join('')}</dl>`}
       ${iv.note?`<div class="hint" style="margin-top:8px">${ic('message')}<span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
     </div></div>`;}).join('');
   return `<h1 class="page">面談状況</h1><p class="page-sub">あなたの面談申請の状況です。</p>${rows}`;
@@ -1889,7 +2092,7 @@ function viewStaffInterviews(){
       <span class="av">${esc(initials(intern?.nickname))}</span>
       <span class="rmain">
         <span class="rt">${esc(intern?.nickname||'—')} <span class="tag">${branchName(intern?.branch_id)}</span></span>
-        <span class="rs">申請 ${fmtRel(iv.created_at)}・${MTYPE[iv.meeting_type]}${iv.status==='fixed'?'・確定 '+fmtDT(iv.confirmed_datetime):''}</span>
+        <span class="rs">申請 ${fmtRel(iv.created_at)}${iv.status==='fixed'?'・確定 '+fmtDT(iv.confirmed_datetime):''}</span>
       </span>
       <span class="pill ${s.c}">${s.t}</span>
     </div>`;}).join('');
@@ -1907,10 +2110,19 @@ function openInterview(id){
       ${iv.status==='applied'?`<button class="btn pri sm pick" onclick="confirmInterview('${id}','${val}')">これで確定</button>`:
         (iv.confirmed_datetime===val?'<span class="pick pill st-fixed">確定</span>':'')}
     </div>`;
+  /* 幅のある希望は、中の30分枠を並べて選んでもらう。
+     面談そのものは30分なので、範囲まるごとではなく開始時刻を決める */
+  const choiceGroup=(n,g)=>g.length===1?choiceRow(n,g[0]):`<div class="cgroup ${g.includes(iv.confirmed_datetime)?'sel':''}">
+      <div class="chead"><span class="cn">${n}</span><span>${fmtSlotRange(g)}</span></div>
+      <div class="cslots">${g.map(val=>iv.status==='applied'
+        ? `<button class="btn sm" onclick="confirmInterview('${id}','${val}')">${hm(val)}〜</button>`
+        : `<span class="cslot ${iv.confirmed_datetime===val?'on':''}">${hm(val)}〜</span>`).join('')}</div>
+      ${iv.status==='applied'?'<div class="cnote">この中から開始時刻を選んで確定します</div>':''}
+    </div>`;
   let actions='';
   if(iv.status==='applied'){
     actions=`<div class="choice-list">
-        ${[iv.choice1,iv.choice2,iv.choice3].filter(Boolean).map((c,i)=>choiceRow(i+1,c)).join('')}</div>
+        ${groupSlots(ivChoices(iv)).map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
       <div class="btn-row" style="margin-top:14px">
         <button class="btn" style="flex:1" onclick="openCustomConfirm('${id}')">別日時で確定</button>
         <button class="btn bad" style="flex:1" onclick="failInterview('${id}')">不成立にする</button>
@@ -1918,7 +2130,7 @@ function openInterview(id){
   }else if(iv.status==='fixed'){
     actions=`<div class="hint">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
       <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
-      <button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','${MTYPE[iv.meeting_type]}リンクの送付','お疲れ様です。面談の${MTYPE[iv.meeting_type]}リンクをお送りします。')">${MTYPE[iv.meeting_type]}リンクを送る</button>`;
+      <button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','面談リンクの送付','お疲れ様です。面談のリンクをお送りします。')">面談リンクを送る</button>`;
   }else{
     actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>この面談は不成立として処理されています。</span></div>
       <button class="btn block" style="margin-top:12px" onclick="reopenInterview('${id}')">申請中に戻す</button>`;
@@ -1930,9 +2142,7 @@ function openInterview(id){
         <div class="rs" style="color:var(--sub);font-size:13px">${branchName(intern?.branch_id)} ・ 申請 ${fmtRel(iv.created_at)}</div></div>
       <span class="pill ${s.c}" style="margin-left:auto">${s.t}</span>
     </div>
-    <dl class="kv" style="margin:12px 0">
-      <dt>面談方法</dt><dd>${MTYPE[iv.meeting_type]}</dd>
-    </dl>
+    <div style="height:12px"></div>
     ${iv.note?`<div class="hint" style="margin-bottom:12px">${ic('message')}<span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
     ${actions}`);
 }
@@ -1952,7 +2162,7 @@ async function confirmInterview(id,dt){
   closeSheet();
   toast('面談を確定しました（カレンダー登録・通知済み）');
   openSendMail(iv.intern_id,'面談確定のお知らせ',
-    `お疲れ様です。\n面談日程が下記のとおり確定しましたのでお知らせします。\n\n日時：${fmtDT(dt)}\n方法：${MTYPE[iv.meeting_type]}\n\nよろしくお願いいたします。`,'fixed');
+    `お疲れ様です。\n面談日程が下記のとおり確定しましたのでお知らせします。\n\n日時：${fmtDT(dt)}\n\nよろしくお願いいたします。`,'fixed');
 }
 function openCustomConfirm(id){
   openSheet(`<h3>別日時で確定</h3>
@@ -2201,20 +2411,12 @@ function eventsSection(){
       if(has){
         // 予定そのものを押したときは作成フォームではなく、その日の一覧を開く
         const open=`onclick="event.stopPropagation();calSelect('${key}')"`;
-        if(chipsMode()==='dot'){
-          // 色の丸だけ。中身はこの下の一覧で読ませる
-          const maxDots=4;
-          const dots=items.slice(0,maxDots).map(it=>`<span class="cdotm" style="background:${it.color}"></span>`).join('');
-          const more=has>maxDots?`<span class="dotmore">…</span>`:'';
-          chipsHtml=`<div class="dots" ${open}>${dots}${more}</div>`;
-        }else{
-          // 全画面のほうが1日ぶんの幅も高さもあるので、1件多く見せる
-          const cap=calFull?4:3;
-          const showN=has>cap?cap-1:has;
-          const shown=items.slice(0,showN).map(it=>`<span class="chip" style="background:${chipBg(it.color)};color:${chipFg(it.color)}">${esc(it.label)}</span>`).join('');
-          const more=has>showN?`<span class="chipmore">+${has-showN}</span>`:'';
-          chipsHtml=`<div class="chips" ${open}>${shown}${more}</div>`;
-        }
+        // 全画面のほうが1日ぶんの幅も高さもあるので、1件多く見せる
+        const cap=calFull?4:3;
+        const showN=has>cap?cap-1:has;
+        const shown=items.slice(0,showN).map(it=>`<span class="chip" style="background:${chipBg(it.color)};color:${chipFg(it.color)}">${esc(it.label)}</span>`).join('');
+        const more=has>showN?`<span class="chipmore">+${has-showN}</span>`:'';
+        chipsHtml=`<div class="chips" ${open}>${shown}${more}</div>`;
       }
       cells+=`<div class="${cls} add"${hol?` title="${esc(hol)}"`:''} onclick="openEventForm(null,'${key}')"><span class="dn">${d}</span>${chipsHtml}</div>`;
     }
@@ -2224,7 +2426,7 @@ function eventsSection(){
     body=`<div class="calgrid">${dow}${cells}</div>`;
   }
 
-  const cal=`<div class="card cal ${calMode==='month'&&chipsMode()==='dot'?'dots':''}"><div class="cb">
+  const cal=`<div class="card cal"><div class="cb">
       <div class="calhead">
         <span class="cm"><span class="cm-m">${m+1}月</span><span class="cm-y">${y}</span></span>
         <span class="calnav">
@@ -2243,7 +2445,7 @@ function eventsSection(){
   const ivBelow=calSel?ivs.filter(iv=>ymd(new Date(iv.confirmed_datetime))===calSel):[];
   const ivCards=ivBelow.map(iv=>`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
       <span class="tile-ic" style="width:38px;height:38px;background:var(--iv-soft);color:var(--iv);font-size:18px">${ic('calendar')}</span>
-      <span><b>${esc(ivLabel(iv))}</b><br><span class="tile-d">${fmtDT(iv.confirmed_datetime)} ・ ${MTYPE[iv.meeting_type]}</span></span>
+      <span><b>${esc(ivLabel(iv))}</b><br><span class="tile-d">${fmtDT(iv.confirmed_datetime)}</span></span>
     </div></div>`).join('');
   // 選択日の全体予定表（読み取り専用。編集はGoogleカレンダー側で行う）
   const shBelow=calSel?shared.filter(e=>ymd(sharedDate(e))===calSel):[];
@@ -2260,11 +2462,6 @@ function eventsSection(){
         <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
         <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
       </div>`;
-  // 予定の見せ方は月表示のときだけ意味がある（リストは元から全文が出る）
-  const chipTabs=calMode==='month'?`<div class="calview-tabs">
-        <button class="${chipsMode()==='dot'?'on':''}" onclick="setChipsMode('dot')" title="予定を色の丸で示す">ドット</button>
-        <button class="${chipsMode()==='text'?'on':''}" onclick="setChipsMode('text')" title="予定を文字で示す">文字</button>
-      </div>`:'';
   const listBlock=`<div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
     ${cards}`;
 
@@ -2273,7 +2470,7 @@ function eventsSection(){
   if(calFull){
     return `<div class="calfull-bar">
         <button class="btn ghost sm" onclick="setCalFull(false)">${ic('back')}戻る</button>
-        <span class="calfull-tabs">${chipTabs}${viewTabs}</span>
+        <span class="calfull-tabs">${viewTabs}</span>
       </div>
       ${cal}
       <div style="padding:0 12px">${listBlock}</div>`;
@@ -2283,13 +2480,10 @@ function eventsSection(){
     <div class="calsec-head">
       <h2>${ic('calendar')}カレンダー</h2>
       <span class="calsec-tools">
-        ${chipTabs}${viewTabs}
+        ${viewTabs}
         <button class="btn ghost sm calfull-btn" onclick="setCalFull(true)" title="カレンダーを画面いっぱいに表示">${ic('panel')}全画面</button>
       </span></div>
     <p class="page-sub" style="margin-top:-2px">日付をクリックすると、その日の予定を追加できます。予定の帯をクリックすると、その日の一覧が下に出ます。</p>
-    ${sharedCalOn()&&SHARED_CAL.configured?`<div class="hint">
-      <span style="width:14px;height:14px;border-radius:4px;background:${SHARED_CAL_COLOR};flex:none"></span>
-      <span>この色の予定は <b>${esc(SHARED_CAL.name||'全体予定表')}</b> です。ドットジェイピーのカレンダーをそのまま表示しています（このアプリからは編集できません）。</span></div>`:''}
     ${isFullAdmin()&&SHARED_CAL.configured===false?`<div class="hint mock" style="cursor:pointer" onclick="openSharedCalendarSettings()">
       ${ic('calendar')}<span>全体予定表がまだ設定されていません。タップして、スタッフ全員に見せるカレンダーを設定できます。</span></div>`:''}
     ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">
@@ -2307,7 +2501,7 @@ function agendaView(list,ivs,shared,y,m){
   list.forEach(e=>{const dt=new Date(e.start_datetime);
     if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${hm(e.start_datetime)}・${e.location||'—'}`,key:ymd(dt),color:e.color||EVENT_COLORS[0].v});});
   ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
-    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'iv',title:ivLabel(iv),sub:`${hm(iv.confirmed_datetime)}・${MTYPE[iv.meeting_type]}`,key:ymd(dt)});});
+    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'iv',title:ivLabel(iv),sub:hm(iv.confirmed_datetime),key:ymd(dt)});});
   items.sort((a,b)=>a.dt-b.dt);
   if(!items.length)return `<div class="empty" style="padding:26px"><div class="ei">${ic('calendar')}</div><p>${m+1}月の予定はありません。</p></div>`;
   return `<div class="agenda">`+items.map(it=>{
@@ -2518,17 +2712,13 @@ function openAvailabilitySettings(){
       </span></div>`;}).join('');
   openSheet(`<h3>面談可能時間帯</h3>
     <p class="page-sub">インターン生は、ここで設定した時間帯の中から30分刻みで面談を予約できます。</p>
-    <div class="hint">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に不可時間として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
-    <div style="margin-top:8px">${rows}</div>
-    <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
-
     <!-- 曜日ごとの設定と、日を指定した「この日のここは無理」は表裏一体なので
          ここから続けて開けるようにする。逆向きの導線は viewAvailSet() 側にある -->
-    <div class="divider" style="margin:20px 0 14px"></div>
-    <p class="fl">個別の予定で埋まっている時間</p>
-    <p class="page-sub" style="margin-top:2px">上で決めた時間帯のうち、特定の日だけ空けられないときはこちらで30分枠を指定します。</p>
     <button class="btn block" style="margin-top:10px" onclick="closeSheet();go('avset')">
       ${ic('ban')}面談できない時間を登録</button>
+    <div style="margin-top:8px">${rows}</div>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
+    <div class="hint" style="margin-top:12px">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に不可時間として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
     ${openCalendarButton()}`);
 }
 function toggleWk(d){
@@ -3675,7 +3865,7 @@ function viewRequests(){
 
   // インターン生は受け取り専用なので、切り替えも新規作成も出さない
   if(!canSend){
-    return `<h1 class="page">依頼</h1>
+    return `<h1 class="page">受けた依頼</h1>
       <p class="page-sub">スタッフから届いた連絡・依頼です。</p>
       ${unread?`<div class="hint">${ic('megaphone')}<span><b>${unread}件</b> がまだ未確認です。</span></div>`:''}
       ${requestList(inbox,'inbox')}`;
