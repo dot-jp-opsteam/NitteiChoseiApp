@@ -1315,7 +1315,7 @@ function openMyStaffForm(){
   const s=findUser(ME.staff_id);
   openSheet(`<h3>担当スタッフ</h3>
     ${s?`<div class="row" style="margin-top:12px">
-        <span class="av hexav">${esc(initials(s.nickname))}</span>
+        <span class="av hexav ${accOf(s.id)}">${esc(initials(s.nickname))}</span>
         <span class="rmain"><span class="rt">${esc(s.nickname)}さん</span>
         <span class="rs">${esc(branchName(s.branch_id))}</span></span></div>
       <div class="hint" style="margin-top:14px">${ic('bulb')}<span>面談を申請するときの相手として、初めから選ばれます。</span></div>`
@@ -1372,9 +1372,19 @@ function go(tab){
   window.scrollTo(0,0);
   render();
 }
+/* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
+   そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
+const TAB_ACC={home:'a1',apply:'a1',my:'a3',interviews:'a3',requests:'a4',
+  myinterns:'a2',avset:'a2',branches:'a4',users:'a3'};
+/* ホーム以外の画面の右上に置く「ホームへ戻る」。
+   スマホでは左メニューが隠れていて、行った先から戻れなくなるため */
+function homeBackBtn(){
+  if(currentTab==='home')return '';
+  return `<div class="viewback"><button class="btn ghost sm" onclick="go('home')">${ic('back')}ホームへ戻る</button></div>`;
+}
 function render(){
   const m=document.getElementById('main');
-  const r=ME.role, t=currentTab;
+  const t=currentTab;
   let html='';
   // 全画面のときは、ホームの挨拶・入口タイルを出さずカレンダーだけにする
   if(t==='home'&&calFull)html=eventsSection();
@@ -1388,7 +1398,9 @@ function render(){
   else if(t==='branches')html=viewBranches();
   else if(t==='users')html=viewUsers();
   else html='<div class="empty">画面が見つかりません</div>';
-  m.innerHTML='<div class="view">'+html+'</div>';
+  /* 画面ごとに差し色を変える。カードの上辺の帯や見出しのアイコンがこの色になるので、
+     今どこにいるかが色でも分かる。並びは TAB_ACC の順（ライトのときだけ見える） */
+  m.innerHTML=`<div class="view ${TAB_ACC[t]||'a1'}">${homeBackBtn()}${html}</div>`;
   bindReveal(m);
   updateBell();
 }
@@ -1412,13 +1424,23 @@ function hex(act,icon,t,d,badge){
    4個→4、6個→3＋3、7個→4＋3、10個→4＋4＋2。
    1個あたりの幅は --cols から計算するので、行数が変わってもCSSは触らずに済む */
 const HEX_PER_ROW=4;
+/* 差し色は4色を順に回す。文字列から決まった番号を出すので、
+   同じ人・同じ画面には毎回おなじ色が付く（開くたびに変わらない） */
+function accCls(n){return 'a'+((n%4)+1);}
+function accOf(str){
+  let h=0;
+  for(const ch of String(str||''))h=(h*31+ch.charCodeAt(0))>>>0;
+  return accCls(h);
+}
 function hexgrid(items){
   const n=items.length;
   const rows=Math.max(1,Math.ceil(n/HEX_PER_ROW));
   // 行数を決めてから均等に割るので、最後の行だけ極端に少なくならない
   const per=Math.max(1,Math.ceil(n/rows));
+  // 並び順のとおりに差し色を割り当てる（1枚目から順に4色を回す）
+  const painted=items.map((h,i)=>h.replace('class="hex"',`class="hex ${accCls(i)}"`));
   const chunks=[];
-  for(let i=0;i<n;i+=per)chunks.push(items.slice(i,i+per));
+  for(let i=0;i<n;i+=per)chunks.push(painted.slice(i,i+per));
   const html=chunks.map((c,i)=>`<div class="hexrow${i%2?' off':''}">${c.join('')}</div>`).join('');
   return `<div class="hexwrap"><div class="hexgrid" style="--cols:${per};--off:${chunks.length>1?'.5':'0'}">${html}</div></div>`;
 }
@@ -2146,7 +2168,7 @@ function viewStaffInterviews(){
     <div class="empty"><div class="ei">${ic('search')}</div><p>条件に一致する面談がありません。</p></div>`;
   const rows=list.map(iv=>{const s=STATUS[iv.status];const intern=findUser(iv.intern_id);
     return `<div class="row" onclick="openInterview('${iv.id}')">
-      <span class="av">${esc(initials(intern?.nickname))}</span>
+      <span class="av ${accOf(intern?.id)}">${esc(initials(intern?.nickname))}</span>
       <span class="rmain">
         <span class="rt">${esc(intern?.nickname||'—')} <span class="tag">${branchName(intern?.branch_id)}</span></span>
         <span class="rs">申請 ${fmtRel(iv.created_at)}${iv.status==='fixed'?'・確定 '+fmtDT(iv.confirmed_datetime):''}</span>
@@ -2194,7 +2216,7 @@ function openInterview(id){
   }
   openSheet(`
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-      <span class="av" style="width:40px;height:40px">${esc(initials(intern?.nickname))}</span>
+      <span class="av ${accOf(intern?.id)}" style="width:40px;height:40px">${esc(initials(intern?.nickname))}</span>
       <div><h3 style="margin:0">${esc(intern?.nickname)}</h3>
         <div class="rs" style="color:var(--sub);font-size:13px">${branchName(intern?.branch_id)} ・ 申請 ${fmtRel(iv.created_at)}</div></div>
       <span class="pill ${s.c}" style="margin-left:auto">${s.t}</span>
@@ -2323,7 +2345,9 @@ function eventCard(ev){
   const mine=resp.find(r=>r.user_id===ME.id);
   // 自分だけの予定は、出欠を取る相手がいないので回答欄を出さない
   const isPrivate=ev.visibility==='private';
-  return `<div class="card"><div class="cb">
+  /* id を振っておく。出欠を押したときに、この1枚だけを描き直すため
+     （画面ごと作り直すと登場アニメがもう一度再生されて一瞬暗く沈む） */
+  return `<div class="card" id="evc_${ev.id}"><div class="cb">
       <div style="display:flex;align-items:center;gap:8px">
         <span class="legend-dot" style="background:${ev.color||EVENT_COLORS[0].v};margin-right:0"></span>
         <b style="font-size:16px">${esc(ev.title)}</b>
@@ -2670,14 +2694,23 @@ async function vote(evId,resp){
     console.warn('出欠の保存に失敗しました',e);
     setSaveError('回答を保存できていません。通信状況をご確認ください。');
   }
-  render();
+  /* 押した予定の1枚だけを差し替える。render() で画面ごと作り直すと、
+     カードの登場アニメが再生し直されて一瞬黒く沈む（面談の枠選びと同じ理由）。
+     カードが画面に無いとき（別の画面から呼ばれたとき）だけ、従来どおり描き直す */
+  const card=document.getElementById('evc_'+evId);
+  const ev=(DB.events||[]).find(e=>e.id===evId);
+  if(card&&ev){
+    const box=document.createElement('div');
+    box.innerHTML=eventCard(ev);
+    card.replaceWith(box.firstElementChild);
+  }else render();
   if(ok)toast('回答を記録しました');
 }
 function openEventResponders(evId){
   const resp=DB.event_responses.filter(r=>r.event_id===evId);
   const label={ok:'○ 参加',may:'△ 未定',no:'× 不参加'};
   const rows=resp.length?resp.map(r=>{const u=findUser(r.user_id);
-    return `<div class="row"><span class="av">${esc(initials(u?.nickname))}</span>
+    return `<div class="row"><span class="av ${accOf(u?.id)}">${esc(initials(u?.nickname))}</span>
       <span class="rmain"><span class="rt">${esc(u?.nickname||'—')}</span>
       <span class="rs">${branchName(u?.branch_id)}</span></span>
       <span class="tag">${label[r.response]}</span></div>`;}).join('')
@@ -3365,7 +3398,7 @@ function directoryCard(){
       // 氏名やメールをそのままonclickに埋めると引用符で壊れるため、検索結果の添字だけを渡す
       html+=DIR_RESULTS.length?`<div class="rowlist" style="margin-top:12px">${DIR_RESULTS.map((r,i)=>`
         <div class="row" style="cursor:default">
-          <span class="av">${esc(initials(r.full_name))}</span>
+          <span class="av ${accOf(r.id)}">${esc(initials(r.full_name))}</span>
           <span class="rmain"><span class="rt">${esc(r.full_name)}</span>
           <span class="rs">${esc(r.email)}${r.branch_hint?' ・ '+esc(r.branch_hint):''}</span></span>
           ${r.registered
@@ -3410,7 +3443,7 @@ function viewUsers(){
     html+=`<div class="card"><div class="ch"><h3>${esc(b.name)}</h3><span class="tag" style="margin-left:auto">${us.length}人</span></div>
       <div class="rowlist">${us.length?us.map(u=>`
         <div class="row" onclick="openUserForm('${u.id}')">
-          <span class="av hexav">${esc(initials(u.nickname))}</span>
+          <span class="av hexav ${accOf(u.id)}">${esc(initials(u.nickname))}</span>
           <span class="rmain"><span class="rt">${esc(u.nickname)}</span>
           <span class="rs">${u.id===ME.id?'（あなた）':userRowSub(u)}</span></span>
           <span class="rolebadge ${ROLE_CLS[u.role]}">${ROLE_JP[u.role]}</span>
@@ -3586,7 +3619,7 @@ function viewMyInterns(){
     const place=findInternship(getProfile(u.id).internship_id);
     const pend=(DB.interviews||[]).filter(i=>i.intern_id===u.id&&i.status==='applied').length;
     return `<div class="row" style="cursor:pointer" onclick="openInternCard('${u.id}')">
-      <span class="av hexav">${esc(initials(u.nickname))}</span>
+      <span class="av hexav ${accOf(u.id)}">${esc(initials(u.nickname))}</span>
       <span class="rmain"><span class="rt">${esc(u.nickname)}
         ${pend?`<span class="tag" style="background:var(--warn-soft);color:var(--warn)">申請 ${pend}件</span>`:''}</span>
       <span class="rs">${place?esc(place.name):'インターン先は未設定'}</span></span>

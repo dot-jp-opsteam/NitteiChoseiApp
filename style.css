@@ -89,6 +89,13 @@
     --on-fill:#ffffff;
     /* 六角形の輪郭は、地の上でも形が分かる濃さにする */
     --hex-line:#a6c9c4;
+    /* ---- 差し色 ----
+       参考画面から拾った4色。塗り／文字用の濃い版／薄い面／輪郭の4段を持つ。
+       文字用はどれも地の上で4.5倍以上あることを確かめてある */
+    --acc1:#56b8ac; --acc1-ink:#1f7a6e; --acc1-soft:rgba(86,184,172,.16); --acc1-line:#8fc9c1;
+    --acc2:#db994b; --acc2-ink:#8a5a10; --acc2-soft:rgba(219,153,75,.20); --acc2-line:#d8b585;
+    --acc3:#4d7cce; --acc3-ink:#2f56a3; --acc3-soft:rgba(77,124,206,.16); --acc3-line:#9db2dc;
+    --acc4:#c25e90; --acc4-ink:#9c3767; --acc4-soft:rgba(194,94,144,.16); --acc4-line:#d5a0bb;
     /* 左端の縦メニューだけは濃いエメラルドの面にする。
        中の文字・罫線は、その面の上で読める明るさに置き換える */
     --sb-bg:#1b4343; --sb-ink:#ffffff; --sb-sub:#cde7e2; --sb-mut:#a9cec8;
@@ -96,6 +103,40 @@
     --sb-active-bg:rgba(255,255,255,.13); --sb-active-ink:#ffffff; --sb-accent:#7fd3c6;
     --sb-blur:none;
   }
+  /* ---------- 差し色の割り当て（ライトのときだけ） ----------
+     .a1〜.a4 が付いた要素は、その中で --a / --a-ink / --a-soft / --a-line が
+     その色に変わる。カスタムプロパティは下に伝わるので、
+     画面の入れもの（.view）に付ければ画面ぜんぶ、六角形に付ければその1枚だけに効く。
+     ダークには一切書かないので、ダークの見た目は変わらない */
+  :root[data-theme="light"] .a1{--a:var(--acc1);--a-ink:var(--acc1-ink);--a-soft:var(--acc1-soft);--a-line:var(--acc1-line)}
+  :root[data-theme="light"] .a2{--a:var(--acc2);--a-ink:var(--acc2-ink);--a-soft:var(--acc2-soft);--a-line:var(--acc2-line)}
+  :root[data-theme="light"] .a3{--a:var(--acc3);--a-ink:var(--acc3-ink);--a-soft:var(--acc3-soft);--a-line:var(--acc3-line)}
+  :root[data-theme="light"] .a4{--a:var(--acc4);--a-ink:var(--acc4-ink);--a-soft:var(--acc4-soft);--a-line:var(--acc4-line)}
+
+  /* カードの上辺に、その画面の色の帯を置く（参考画面と同じ見せ方）。
+     画面ごとに色が変わるので、今どこにいるかが色でも分かる */
+  :root[data-theme="light"] .card{border-top:3px solid var(--a,var(--brand))}
+  :root[data-theme="light"] .card::before{--cc:var(--a,var(--brand))}
+  /* 見出しまわりのアイコンも、その画面の色にそろえる */
+  :root[data-theme="light"] .card .ch .ic,
+  :root[data-theme="light"] .empty .ei{color:var(--a,var(--brand))}
+
+  /* 六角形は1枚ずつ色を変える。輪郭・アイコン・バッジ・触れたときの塗り */
+  :root[data-theme="light"] .hex{background:var(--a-line,var(--hex-line))}
+  :root[data-theme="light"] .hex .hxi{color:var(--a-ink,var(--ink))}
+  :root[data-theme="light"] .hex .hxb{background:var(--a,var(--brand))}
+  :root[data-theme="light"] .hex:hover,
+  :root[data-theme="light"] .hex:focus-visible{background:var(--a,var(--brand));
+    filter:drop-shadow(0 10px 26px var(--a-soft,var(--brand-soft)))}
+  :root[data-theme="light"] .hex:hover .hxi,
+  :root[data-theme="light"] .hex:focus-visible .hxi{color:var(--a-ink,var(--ink))}
+
+  /* 一覧の頭文字。人ごとに色を変えて、名前を見分けやすくする。
+     .av 自身に .a1〜.a4 が付くので、画面の色ではなくその人の色になる */
+  :root[data-theme="light"] .av.a1,:root[data-theme="light"] .av.a2,
+  :root[data-theme="light"] .av.a3,:root[data-theme="light"] .av.a4{
+    background:var(--a-soft);color:var(--a-ink)}
+
   /* バッジの縁取りは「背景を切り抜く」役なので、地の色に合わせる */
   .bell .badge,.wkrow .sw i{border-color:var(--panel)}
 
@@ -420,6 +461,8 @@
   /* 隠している状態。押せば戻せることが分かるよう、消すのではなく色を落とす */
   .btn.sm.iconly.off{color:var(--mut);border-color:var(--line2)}
   /* 時間の範囲。「13:00 〜 15:30」を1行に収める */
+  /* 画面の右上に置く「ホームへ戻る」。見出しの上に、右寄せで小さく */
+  .viewback{display:flex;justify-content:flex-end;margin:0 0 6px}
   /* 選べない項目を、入力欄と同じ高さの「読むだけの帯」として見せる */
   .fixedfield{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;
     border:1px solid var(--line);border-radius:11px;background:var(--bg);color:var(--ink)}
