@@ -59,9 +59,11 @@
      #56b8ac は塗りとしてはそのまま使えるが、白地に置く文字色としては薄すぎるので、
      文字・リンクには同じ色相を暗くした --brand-ink を使う */
   :root[data-theme="light"]{
-    --bg:#f0feff; --panel:#ffffff; --panel2:#e6fffb; --line:#c8e6e1; --line2:#ddf1ee;
+    /* 参考画面そのままの「地 #f0feff ＋ 白いカード」は、画面が大きいと眩しすぎた。
+       色味は保ったまま全体の明るさを落とし、カードも純白をやめて地との差だけ残す */
+    --bg:#dbe9e7; --panel:#f1f7f6; --panel2:#e4efed; --line:#bdd6d2; --line2:#d1e3e0;
     --line-h:#56b8ac;
-    --ink:#2b4843; --sub:#5a736e; --mut:#89a49f; --disabled:#b9cfcb;
+    --ink:#233b37; --sub:#4e6a65; --mut:#7c9691; --disabled:#aec4c0;
     --brand:#56b8ac; --brand-d:#3f9e92; --brand-soft:rgba(86,184,172,.14); --brand-lite:#9dded6;
     --brand-ink:#1f7a6e; --hint-line:rgba(86,184,172,.38);
     --ok:#0f9d63; --ok-soft:rgba(15,157,99,.10); --ok-ink:#0b7a4c;
@@ -73,19 +75,20 @@
     --info:#0e7fa1;
     --iv:#6d4bd6; --iv-soft:rgba(109,75,214,.10); --iv-ink:#5638ad;
     --info-soft:rgba(14,127,161,.10); --info-ink:#0b6580;
-    --chip:#e6fffb; --chip-ink:#5a736e;
-    --mock-bg:#eef8f6; --mock-line:#d3eae6; --mock-ink:#5a736e;
+    --chip:#e4efed; --chip-ink:#4e6a65;
+    --mock-bg:#e7f1ef; --mock-line:#c8dedb; --mock-ink:#4e6a65;
     --sun:#d63a39; --sat:#2f6fd0;
     --toast-bg:#1b4343;
     --gbtn-bg:#ffffff; --gbtn-ink:#3c4043; --gbtn-line:#dadce0;
-    --shadow:0 1px 2px rgba(27,67,67,.05),0 1px 3px rgba(27,67,67,.08);
+    --shadow:0 1px 2px rgba(27,67,67,.06),0 2px 6px rgba(27,67,67,.07);
     --glow:0 0 0 1px var(--brand-soft),0 10px 28px rgba(86,184,172,.16);
-    --aurora-op:.22;
-    --glass:rgba(255,255,255,.86);
+    /* 背景のにじみも、明るさを足す方向に効くので薄くする */
+    --aurora-op:.14;
+    --glass:rgba(241,247,246,.9);
     /* ライトでも塗り（brand）の上は白文字。参考にした画面と同じ扱い */
     --on-fill:#ffffff;
-    /* 六角形の輪郭は、淡いミント地の上でも形が分かる濃さにする */
-    --hex-line:#b3ddd6;
+    /* 六角形の輪郭は、地の上でも形が分かる濃さにする */
+    --hex-line:#a6c9c4;
     /* 左端の縦メニューだけは濃いエメラルドの面にする。
        中の文字・罫線は、その面の上で読める明るさに置き換える */
     --sb-bg:#1b4343; --sb-ink:#ffffff; --sb-sub:#cde7e2; --sb-mut:#a9cec8;
