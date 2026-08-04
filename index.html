@@ -1362,12 +1362,30 @@ async function openInternInviteLink(){
     return;
   }
   openSheet(`<h3>インターン生に渡すリンク</h3>
-    <p class="page-sub" style="margin-top:0">このリンクから会員登録した学生は、担当スタッフが自動で
-      <b>${esc(ME.nickname)}</b>さんになります。</p>
+    <p class="page-sub" style="margin-top:0"><b>${esc(branchName(ME.branch_id))}</b>の共通リンクです。
+      同じ支部のスタッフは全員このリンクを配ります。</p>
     <div class="invite-url" id="inviteUrl">${esc(url)}</div>
     <button class="btn pri block" style="margin-top:12px" onclick="copyInviteLink('${esc(url)}')">リンクをコピーする</button>
-    <p class="fine" style="margin-top:14px">学生がリンクを開くと、いつものログイン画面が出ます。
-      そこで「メールアドレスで会員登録する」に進むと、担当スタッフが入った状態になります。</p>`);
+    <p class="fine" style="margin-top:14px">学生がリンクを開くと、会員登録もログインも無しで面談を申請できます。
+      入力するのは本名だけです。申請の相手は、この支部のスタッフから学生が選びます。</p>
+    ${isAdminLike()?`<button class="btn block" style="margin-top:10px"
+      onclick="regenerateInviteLink()">リンクを作り直す</button>
+    <p class="fine" style="margin-top:8px">${ic('alert')}リンクが外部に漏れたときに使います。
+      作り直すと<b>今のリンクは使えなくなる</b>ので、学生に配り直してください。</p>`:''}`);
+}
+/* 合言葉を新しくして、古いリンクを無効にする。
+   配り直しが必要になるため、押し間違いが起きないよう一度確認する */
+async function regenerateInviteLink(){
+  if(!confirm('今のリンクは使えなくなります。学生に新しいリンクを配り直す必要があります。作り直しますか？'))return;
+  try{
+    const res=await api('/api/staff/intern-invite-url/regenerate',{method:'POST'});
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error||'作り直せませんでした');
+    toast('新しいリンクを作りました');
+    openInternInviteLink();
+  }catch(e){
+    toast(e.message||'作り直せませんでした');
+  }
 }
 async function copyInviteLink(url){
   try{
@@ -2164,18 +2182,30 @@ function viewMyInterviews(){
 /* =========================================================
    面談一覧・確定・不成立（スタッフ）
    ========================================================= */
+/* 面談のインターン生まわり。
+   アカウントを廃止したため、申請にはユーザーが結びついていないものがある。
+   その場合は本人が入力した本名（intern_name）を使う。
+   古い申請はこれまでどおりユーザーから引く。 */
+function ivIntern(iv){return findUser(iv.intern_id);}
+function ivInternName(iv){const u=ivIntern(iv);return u?u.nickname:(iv.intern_name||'—');}
+function ivInternBranch(iv){const u=ivIntern(iv);return u?u.branch_id:iv.branch_id;}
+/* アカウントを持たない申請か。
+   メール送信など、相手のアカウントが要る操作を出し分けるのに使う */
+function ivIsGuest(iv){return !ivIntern(iv);}
+/* この面談が自分の支部のものか。ゲスト申請は支部が直接入っている */
+function ivInMyBranch(iv){return ivInternBranch(iv)===ME.branch_id;}
+
 function viewStaffInterviews(){
   // staff sees interviews of own branch (assigned to them or their branch)
   const all=(DB.interviews||[]).filter(iv=>{
-    const intern=findUser(iv.intern_id);
-    return iv.staff_id===ME.id || (intern&&intern.branch_id===ME.branch_id);
+    return iv.staff_id===ME.id || ivInMyBranch(iv);
   }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||new Date(b.created_at)-new Date(a.created_at);});
   if(!all.length)return `<h1 class="page">面談一覧</h1><div class="empty"><div class="ei">${ic('list')}</div><p>担当する面談はまだありません。</p></div>`;
   // フィルタ適用
   const q=(IVFILTER.q||'').trim();
   const list=all.filter(iv=>{
     if(IVFILTER.status!=='all'&&iv.status!==IVFILTER.status)return false;
-    if(q){const intern=findUser(iv.intern_id);if(!(intern?.nickname||'').includes(q))return false;}
+    if(q&&!ivInternName(iv).includes(q))return false;
     return true;
   });
   const cnt={all:all.length,applied:0,fixed:0,failed:0};all.forEach(i=>cnt[i.status]++);
@@ -2192,11 +2222,11 @@ function viewStaffInterviews(){
     <p class="page-sub">${branchName(ME.branch_id)}の面談 ${all.length}件</p>
     ${filterBar}
     <div class="empty"><div class="ei">${ic('search')}</div><p>条件に一致する面談がありません。</p></div>`;
-  const rows=list.map(iv=>{const s=STATUS[iv.status];const intern=findUser(iv.intern_id);
+  const rows=list.map(iv=>{const s=STATUS[iv.status];const intern=ivIntern(iv);const nm=ivInternName(iv);
     return `<div class="row" onclick="openInterview('${iv.id}')">
-      <span class="av ${accOf(intern?.id)}">${esc(initials(intern?.nickname))}</span>
+      <span class="av ${accOf(intern?.id||iv.id)}">${esc(initials(nm))}</span>
       <span class="rmain">
-        <span class="rt">${esc(intern?.nickname||'—')} <span class="tag">${branchName(intern?.branch_id)}</span></span>
+        <span class="rt">${esc(nm)} <span class="tag">${branchName(ivInternBranch(iv))}</span></span>
         <span class="rs">申請 ${fmtRel(iv.created_at)}${iv.status==='fixed'?'・確定 '+fmtDT(iv.confirmed_datetime):''}</span>
       </span>
       <span class="pill ${s.c}">${s.t}</span>
@@ -2209,7 +2239,8 @@ function viewStaffInterviews(){
 function setIvFilter(key,val){IVFILTER[key]=val;render();}
 function clearIvFilter(){IVFILTER={status:'all',branch:'all',q:''};render();}
 function openInterview(id){
-  const iv=(DB.interviews||[]).find(x=>x.id===id);const intern=findUser(iv.intern_id);const s=STATUS[iv.status];
+  const iv=(DB.interviews||[]).find(x=>x.id===id);const intern=ivIntern(iv);const s=STATUS[iv.status];
+  const internName=ivInternName(iv);const guest=ivIsGuest(iv);
   const choiceRow=(n,val)=>`<div class="choice ${iv.confirmed_datetime===val?'sel':''}">
       <span class="cn">${n}</span><span>${fmtDT(val)}</span>
       ${iv.status==='applied'?`<button class="btn pri sm pick" onclick="confirmInterview('${id}','${val}')">これで確定</button>`:
@@ -2235,16 +2266,18 @@ function openInterview(id){
   }else if(iv.status==='fixed'){
     actions=`<div class="hint">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
       <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
-      <button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','面談リンクの送付','お疲れ様です。面談のリンクをお送りします。')">面談リンクを送る</button>`;
+      ${guest?`<div class="hint mock" style="margin-top:12px">${ic('alert')}<span>この申請にはメールアドレスがありません。
+        確定した日時は、LINEなどで直接お伝えください。</span></div>`
+      :`<button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','面談リンクの送付','お疲れ様です。面談のリンクをお送りします。')">面談リンクを送る</button>`}`;
   }else{
     actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>この面談は不成立として処理されています。</span></div>
       <button class="btn block" style="margin-top:12px" onclick="reopenInterview('${id}')">申請中に戻す</button>`;
   }
   openSheet(`
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-      <span class="av ${accOf(intern?.id)}" style="width:40px;height:40px">${esc(initials(intern?.nickname))}</span>
-      <div><h3 style="margin:0">${esc(intern?.nickname)}</h3>
-        <div class="rs" style="color:var(--sub);font-size:13px">${branchName(intern?.branch_id)} ・ 申請 ${fmtRel(iv.created_at)}</div></div>
+      <span class="av ${accOf(intern?.id||iv.id)}" style="width:40px;height:40px">${esc(initials(internName))}</span>
+      <div><h3 style="margin:0">${esc(internName)}</h3>
+        <div class="rs" style="color:var(--sub);font-size:13px">${branchName(ivInternBranch(iv))} ・ 申請 ${fmtRel(iv.created_at)}</div></div>
       <span class="pill ${s.c}" style="margin-left:auto">${s.t}</span>
     </div>
     <div style="height:12px"></div>
@@ -2265,6 +2298,11 @@ async function confirmInterview(id,dt){
   applyInterview(next);
   updateBell();
   closeSheet();
+  // アカウントの無い申請は宛先が無いので、メール作成画面へは進まない
+  if(ivIsGuest(iv)){
+    toast('面談を確定しました。日時は直接お伝えください');
+    return;
+  }
   toast('面談を確定しました（カレンダー登録・通知済み）');
   openSendMail(iv.intern_id,'面談確定のお知らせ',
     `お疲れ様です。\n面談日程が下記のとおり確定しましたのでお知らせします。\n\n日時：${fmtDT(dt)}\n\nよろしくお願いいたします。`,'fixed');
@@ -2287,15 +2325,18 @@ function doCustomConfirm(id){
 async function failInterview(id){
   const iv=(DB.interviews||[]).find(x=>x.id===id);
   if(!iv)return;
-  const intern=findUser(iv.intern_id);
+  const guest=ivIsGuest(iv);
   if(!await confirmSheet('面談を不成立にする',
-    `${intern?.nickname||'この学生'}さんの面談を「不成立」にします。続けて、再提出依頼メールの作成画面に進みます。`,
+    guest
+      ? `${ivInternName(iv)}さんの面談を「不成立」にします。メールアドレスが無いため、再提出のお願いは直接お伝えください。`
+      : `${ivInternName(iv)}さんの面談を「不成立」にします。続けて、再提出依頼メールの作成画面に進みます。`,
     '不成立にする'))return;
   const next=await apiPatch(`/api/interviews/${encodeURIComponent(id)}`,{status:'failed'},'interview');
   if(!next)return;
   applyInterview(next);
   updateBell();
   closeSheet();
+  if(guest){toast('不成立にしました。再提出のお願いは直接お伝えください');return;}
   // show mail template per spec
   openSendMail(iv.intern_id,'面談日程再提出のお願い',
     `お疲れ様です。\n\nご提出いただいた候補日では面談日程の調整が難しかったため、お手数ですが再度候補日をご提出いただけますでしょうか。\n\nご迷惑をおかけし申し訳ありません。\n\nよろしくお願いいたします。`,'failed');
@@ -2547,13 +2588,10 @@ function myInterviewsForCal(){
   return (DB.interviews||[]).filter(iv=>{
     if(iv.status!=='fixed'||!iv.confirmed_datetime)return false;
     if(ME.role==='admin')return true;
-    if(ME.role==='intern')return iv.intern_id===ME.id;
-    const intern=findUser(iv.intern_id);
-    return iv.staff_id===ME.id||(intern&&intern.branch_id===ME.branch_id);
+    return iv.staff_id===ME.id||ivInMyBranch(iv);
   });
 }
-function ivLabel(iv){const intern=findUser(iv.intern_id),staff=findUser(iv.staff_id);
-  return ME.role==='intern'?`面談：${staff?staff.nickname:'担当'}さん`:`面談：${intern?intern.nickname:'—'}さん`;}
+function ivLabel(iv){return `面談：${ivInternName(iv)}さん`;}
 /* 日付を押したときに重ねて出す、その日の予定の一覧。
    カレンダーの表示位置を動かさずに中身だけ確かめられるようにしている。
    予定を押せば、これまでどおりそれぞれの詳細へ進める */
@@ -4454,14 +4492,15 @@ async function confirmRequest(id){
 /* ---------- 依頼を出す ---------- */
 let REQFORM=null; // {mode, picked:Set相当の配列}
 
-/* 宛先の選び方。mode ごとに「展開して選ぶもの」が変わる */
+/* 宛先の選び方。mode ごとに「展開して選ぶもの」が変わる。
+   インターン生あての3つ（all_intern / pick_intern / by_place）は外した。
+   インターン生はアカウントを持たなくなり、依頼を受け取る手段が無いため。
+   受け取れない相手に送れてしまうほうが事故になる。
+   ※ mode を処理する側のコードは、過去の依頼を読むために残してある */
 const REQ_MODES=[
   {id:'all_staff',   label:'支部の全スタッフ'},
   {id:'pick_staff',  label:'スタッフを選ぶ'},
   {id:'by_dept',     label:'部署で選ぶ'},
-  {id:'all_intern',  label:'支部の全インターン生'},
-  {id:'pick_intern', label:'インターン生を選ぶ'},
-  {id:'by_place',    label:'インターン先で選ぶ'},
 ];
 
 function openRequestForm(kind){

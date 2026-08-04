@@ -40,19 +40,25 @@ function check(label, actual, expected) {
 /* ---------- テスト用DBの用意 ----------
    支部は2つ。「他支部のデータが見えてはいけない」を確かめるため、
    b2（大阪）側に、b1（東京）のテストユーザーからは決して見えてはいけないデータを置く */
+/* インターン生のアカウントは廃止した。
+   以前インターン生で試していた「同じ支部の他人」の役は、
+   同支部のスタッフ（staff3 / staff4）が引き継いでいる。
+   oldIntern は、残っているインターン生のセッションが弾かれることを確かめるためだけに使う */
 const TOKENS = {
   staff: 'e2etoken_staff',       // b1のスタッフ
-  intern: 'e2etoken_intern',     // b1のインターン生
+  staff3: 'e2etoken_staff3',     // b1のもう1人のスタッフ（同支部の他人）
   admin: 'e2etoken_admin',       // 全体管理者
   staff2: 'e2etoken_staff2',     // b2のスタッフ（他支部の代表）
-  intern2: 'e2etoken_intern2',   // b1のもう1人のインターン生（同支部の他人）
+  staff4: 'e2etoken_staff4',     // b1のさらにもう1人のスタッフ
+  oldIntern: 'e2etoken_oldintern', // 廃止済みのインターン生（ログインできないことの確認用）
 };
 const USERS = [
   ['u_e2e_staff', 'e2e_staff@dot-jp.or.jp', 'staff', 'b1'],
-  ['u_e2e_intern', 'e2e_intern@example.com', 'intern', 'b1'],
-  ['u_e2e_intern2', 'e2e_intern2@example.com', 'intern', 'b1'],
+  ['u_e2e_staff3', 'e2e_staff3@dot-jp.or.jp', 'staff', 'b1'],
+  ['u_e2e_staff4', 'e2e_staff4@dot-jp.or.jp', 'staff', 'b1'],
   ['u_e2e_admin', 'e2e_admin@dot-jp.or.jp', 'admin', null],
   ['u_e2e_staff2', 'e2e_staff2@dot-jp.or.jp', 'staff', 'b2'],
+  ['u_e2e_oldintern', 'e2e_oldintern@example.com', 'intern', 'b1'],
 ];
 
 async function setupDB(dbPath) {
@@ -82,7 +88,8 @@ async function setupDB(dbPath) {
     });
   }
   for (const [key, token] of Object.entries(TOKENS)) {
-    const userId = { staff: 'u_e2e_staff', intern: 'u_e2e_intern', admin: 'u_e2e_admin', staff2: 'u_e2e_staff2', intern2: 'u_e2e_intern2' }[key];
+    const userId = { staff: 'u_e2e_staff', staff3: 'u_e2e_staff3', admin: 'u_e2e_admin',
+      staff2: 'u_e2e_staff2', staff4: 'u_e2e_staff4', oldIntern: 'u_e2e_oldintern' }[key];
     await c.execute({
       sql: 'INSERT OR REPLACE INTO sessions (token_hash,user_id,created_at,expires_at) VALUES (?,?,?,?)',
       args: [crypto.createHash('sha256').update(token).digest('hex'), userId, now, exp],
@@ -93,12 +100,12 @@ async function setupDB(dbPath) {
     branches: [{ id: 'b1', name: '東京' }, { id: 'b2', name: '大阪' }],
     availability: {},
     // 面談も専用テーブルへ引っ越す対象
-    interviews: [{ id: 'iv_old', intern_id: 'u_e2e_intern', staff_id: 'u_e2e_staff', status: 'applied', choice1: '2026-03-01T10:00:00.000Z', meeting_type: 'meet', created_at: now }],
+    interviews: [{ id: 'iv_old', intern_id: 'u_e2e_staff3', staff_id: 'u_e2e_staff', status: 'applied', choice1: '2026-03-01T10:00:00.000Z', meeting_type: 'meet', created_at: now }],
     /* メール履歴も専用テーブルへ引っ越す対象。
        1件は最近のもの、1件は1年前（アーカイブされるはず）にしておく */
     emails: [
-      { id: 'ml_old', sender_id: 'u_e2e_staff', receiver_id: 'u_e2e_intern', subject: '引っ越し前のメール', body: 'x', sent_at: now, delivered: false },
-      { id: 'ml_ancient', sender_id: 'u_e2e_staff', receiver_id: 'u_e2e_intern', subject: '1年前のメール', body: 'x', sent_at: oneYearAgo, delivered: false },
+      { id: 'ml_old', sender_id: 'u_e2e_staff', receiver_id: 'u_e2e_staff3', subject: '引っ越し前のメール', body: 'x', sent_at: now, delivered: false },
+      { id: 'ml_ancient', sender_id: 'u_e2e_staff', receiver_id: 'u_e2e_staff3', subject: '1年前のメール', body: 'x', sent_at: oneYearAgo, delivered: false },
     ],
     events: [{ id: 'ev_old', creator_id: 'u_e2e_staff2', branch_id: 'b2', title: '旧イベント', date: '2026-01-01', visibility: 'branch' }],
     // b2（他支部）のデータ。b1のユーザーからは見えても触れてもいけない
@@ -149,7 +156,11 @@ async function waitForServer() {
 }
 
 /* ---------- APIの呼び出し ---------- */
-const H = (t) => ({ Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' });
+/* トークンに null を渡すと、ログインしていない状態で叩ける。
+   支部リンクからの申請はログイン不要なので、その検証に使う */
+const H = (t) => (t
+  ? { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }
+  : { 'Content-Type': 'application/json' });
 
 /* fetch は同じ宛先への接続を1本しか張らないため、Promise.all で並べても
    実際には順番に処理されてしまい、同時アクセスの検証にならない。
@@ -248,7 +259,7 @@ async function testAttendance() {
 
   const made = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: 'チーム懇親会', body: '場所は未定です',
-    target_label: '支部の全インターン生', recipient_ids: ['u_e2e_intern', 'u_e2e_intern2'],
+    target_label: '支部の全インターン生', recipient_ids: ['u_e2e_staff3', 'u_e2e_staff4'],
     kind: 'attend',
     options: [{ start: mk(t1, 19), end: mk(t1, 21) }, { start: mk(t2, 19), end: mk(t2, 21) }],
   });
@@ -259,27 +270,27 @@ async function testAttendance() {
   const attId = made.json.request?.id;
 
   const noOpts = await api(TOKENS.staff, 'POST', '/api/requests', {
-    subject: '候補なし', target_label: 'x', recipient_ids: ['u_e2e_intern'], kind: 'attend', options: [],
+    subject: '候補なし', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'attend', options: [],
   });
   check('候補が無い出欠確認は作れない', noOpts.status, 400);
 
   const badDate = await api(TOKENS.staff, 'POST', '/api/requests', {
-    subject: '壊れた候補', target_label: 'x', recipient_ids: ['u_e2e_intern'],
+    subject: '壊れた候補', target_label: 'x', recipient_ids: ['u_e2e_staff3'],
     kind: 'attend', options: [{ start: 'これは日付ではない' }],
   });
   check('日時として読めない候補ははじかれる', badDate.status, 400);
 
   // ---- 回答 ----
-  const ans = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+  const ans = await api(TOKENS.staff3, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: 'op0', response: 'ok' }, { option_id: 'op1', response: 'no' }] });
   check('あて先の人は答えられる', ans.status, 200);
   check('答えた数だけ保存される', ans.json.saved?.length, 2);
 
-  const ans2 = await api(TOKENS.intern2, 'PUT', `/api/requests/${attId}/response`,
+  const ans2 = await api(TOKENS.staff4, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: 'op0', response: 'may' }, { option_id: 'op1', response: 'ok' }] });
   check('もう1人も答えられる', ans2.status, 200);
 
-  const again = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+  const again = await api(TOKENS.staff3, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: 'op0', response: 'may' }] });
   check('答え直せる', again.status, 200);
 
@@ -287,7 +298,7 @@ async function testAttendance() {
     { answers: [{ option_id: 'op0', response: 'ok' }] });
   check('あて先でない人は答えられない', outsider.status, 403);
 
-  const junk = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+  const junk = await api(TOKENS.staff3, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: '存在しない候補', response: 'ok' }, { option_id: 'op1', response: 'まる' }] });
   check('候補にないidと決まった3つ以外の答えは捨てられる', junk.json.saved?.length, 0);
 
@@ -295,14 +306,14 @@ async function testAttendance() {
   const row = (seen.requests || []).find((r) => r.id === attId);
   check('送った本人に回答が見える', row?.responses?.length, 4);
   check('答え直した結果が上書きされている',
-    row?.responses?.find((a) => a.user_id === 'u_e2e_intern' && a.option_id === 'op0')?.response, 'may');
+    row?.responses?.find((a) => a.user_id === 'u_e2e_staff3' && a.option_id === 'op0')?.response, 'may');
 
   const hidden = await getDB(TOKENS.staff2);
   check('他支部の人にはこの出欠確認自体が見えない',
     (hidden.requests || []).some((r) => r.id === attId), false);
 
   // ---- 確定 ----
-  const byOther = await api(TOKENS.intern, 'POST', `/api/requests/${attId}/confirm`, { option_id: 'op0' });
+  const byOther = await api(TOKENS.staff3, 'POST', `/api/requests/${attId}/confirm`, { option_id: 'op0' });
   check('送った本人以外は確定できない', byOther.status, 403);
 
   const badOpt = await api(TOKENS.staff, 'POST', `/api/requests/${attId}/confirm`, { option_id: 'op9' });
@@ -319,17 +330,17 @@ async function testAttendance() {
   check('できた予定が支部のカレンダーに入っている',
     (after.events || []).some((e) => e.id === done.json.event?.id), true);
 
-  const late = await api(TOKENS.intern, 'PUT', `/api/requests/${attId}/response`,
+  const late = await api(TOKENS.staff3, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: 'op0', response: 'no' }] });
   check('確定後はもう答えられない', late.status, 409);
 
   // ---- ふつうの依頼が壊れていないこと ----
   const normal = await api(TOKENS.staff, 'POST', '/api/requests', {
-    subject: 'ふつうの依頼', body: '本文', target_label: 'x', recipient_ids: ['u_e2e_intern'],
+    subject: 'ふつうの依頼', body: '本文', target_label: 'x', recipient_ids: ['u_e2e_staff3'],
   });
   check('ふつうの依頼は今までどおり作れる', normal.status, 200);
   check('ふつうの依頼には出欠の印が付かない', normal.json.request?.kind, 'normal');
-  const notAttend = await api(TOKENS.intern, 'PUT', `/api/requests/${normal.json.request?.id}/response`,
+  const notAttend = await api(TOKENS.staff3, 'PUT', `/api/requests/${normal.json.request?.id}/response`,
     { answers: [{ option_id: 'op0', response: 'ok' }] });
   check('ふつうの依頼には出欠で答えられない', notAttend.status, 400);
 }
@@ -358,7 +369,7 @@ async function testMyCalendar() {
 
   /* 誰のカレンダーを返すかは、URLではなくログインしている本人から決めている。
      他人のIDを添えても自分のぶんしか返らない（＝他人の予定は取り出せない） */
-  const spoof = await api(TOKENS.intern, 'GET', '/api/my-calendar/events' + range + '&staffId=u_e2e_staff');
+  const spoof = await api(TOKENS.staff3, 'GET', '/api/my-calendar/events' + range + '&staffId=u_e2e_staff');
   check('他人のIDを付けても他人の予定は取れない', spoof.json.connected, false);
 }
 
@@ -464,7 +475,7 @@ async function run() {
 
   console.log('\n─────── 情報漏えい（他支部のデータが見えないこと） ───────');
   {
-    const intern = await getDB(TOKENS.intern);
+    const intern = await getDB(TOKENS.staff3);
     const staff = await getDB(TOKENS.staff);
     check('インターン生に他支部の依頼が見えない',
       (intern.requests || []).some((r) => r.id === 'rq_osaka'), false);
@@ -506,13 +517,13 @@ async function run() {
   {
     const sent = await api(TOKENS.staff, 'POST', '/api/requests', {
       subject: '東京の依頼', body: 'テスト本文', target_label: '支部全員',
-      recipient_ids: ['u_e2e_intern', 'u_e2e_intern2'],
+      recipient_ids: ['u_e2e_staff3', 'u_e2e_staff4'],
     });
     check('スタッフが依頼を送れる', sent.status, 200);
     REQ_ID = sent.json.request?.id;
     check('依頼IDが返る', typeof REQ_ID === 'string', true);
 
-    const internView = await getDB(TOKENS.intern);
+    const internView = await getDB(TOKENS.staff3);
     const mine = (internView.requests || []).find((r) => r.id === REQ_ID);
     check('あて先のインターン生に依頼が見えている', !!mine, true);
     check('通知が積まれている', (internView.notifications || []).some((n) => n.msg?.includes('東京の依頼')), true);
@@ -520,24 +531,26 @@ async function run() {
     const other = await getDB(TOKENS.staff2);
     check('他支部のスタッフには見えない', (other.requests || []).some((r) => r.id === REQ_ID), false);
 
-    const read = await api(TOKENS.intern, 'POST', `/api/requests/${REQ_ID}/read`);
+    const read = await api(TOKENS.staff3, 'POST', `/api/requests/${REQ_ID}/read`);
     check('あて先の人が確認できる', read.status, 200);
-    const afterRead = await getDB(TOKENS.intern);
+    const afterRead = await getDB(TOKENS.staff3);
     const r = (afterRead.requests || []).find((x) => x.id === REQ_ID);
-    check('自分の確認が記録されている', (r?.read_by || []).some((x) => x.user_id === 'u_e2e_intern'), true);
+    check('自分の確認が記録されている', (r?.read_by || []).some((x) => x.user_id === 'u_e2e_staff3'), true);
 
     // 二度押しても増えない（回線の再送や連打で二重に記録されないこと）
-    await api(TOKENS.intern, 'POST', `/api/requests/${REQ_ID}/read`);
-    const twice = await getDB(TOKENS.intern);
+    await api(TOKENS.staff3, 'POST', `/api/requests/${REQ_ID}/read`);
+    const twice = await getDB(TOKENS.staff3);
     const r2 = (twice.requests || []).find((x) => x.id === REQ_ID);
-    check('二度確認しても記録は1件のまま', (r2?.read_by || []).filter((x) => x.user_id === 'u_e2e_intern').length, 1);
+    check('二度確認しても記録は1件のまま', (r2?.read_by || []).filter((x) => x.user_id === 'u_e2e_staff3').length, 1);
 
     const notMine = await api(TOKENS.staff2, 'POST', `/api/requests/${REQ_ID}/read`);
     check('あて先でない人は確認できない', notMine.status, 403);
-    const byIntern = await api(TOKENS.intern, 'POST', '/api/requests', {
-      subject: 'なりすまし', recipient_ids: ['u_e2e_intern2'],
+    /* インターン生のアカウントを廃止したので、
+       「送れない相手」の検証は他支部のスタッフで行う */
+    const crossSend = await api(TOKENS.staff2, 'POST', '/api/requests', {
+      subject: 'なりすまし', recipient_ids: ['u_e2e_staff4'],
     });
-    check('インターン生は依頼を送れない', byIntern.status, 403);
+    check('他支部の相手には依頼を送れない', crossSend.status, 403);
     const crossBranch = await api(TOKENS.staff, 'POST', '/api/requests', {
       subject: '他支部あて', recipient_ids: ['u_e2e_staff2'],
     });
@@ -554,21 +567,21 @@ async function run() {
     });
     check('イベントを作成できる', mk.status, 200);
 
-    const v1 = await api(TOKENS.intern, 'PUT', '/api/events/ev_e2e/response', { response: 'yes' });
+    const v1 = await api(TOKENS.staff3, 'PUT', '/api/events/ev_e2e/response', { response: 'yes' });
     check('出欠に回答できる', v1.status, 200);
-    let view = await getDB(TOKENS.intern);
+    let view = await getDB(TOKENS.staff3);
     check('回答が記録されている',
-      (view.event_responses || []).some((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_intern' && r.response === 'yes'), true);
+      (view.event_responses || []).some((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_staff3' && r.response === 'yes'), true);
 
-    await api(TOKENS.intern, 'PUT', '/api/events/ev_e2e/response', { response: 'no' });
-    view = await getDB(TOKENS.intern);
+    await api(TOKENS.staff3, 'PUT', '/api/events/ev_e2e/response', { response: 'no' });
+    view = await getDB(TOKENS.staff3);
     check('回答を変えると上書きされる（重複しない）',
-      (view.event_responses || []).filter((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_intern').map((r) => r.response), ['no']);
+      (view.event_responses || []).filter((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_staff3').map((r) => r.response), ['no']);
 
-    await api(TOKENS.intern, 'PUT', '/api/events/ev_e2e/response', { response: 'no' });
-    view = await getDB(TOKENS.intern);
+    await api(TOKENS.staff3, 'PUT', '/api/events/ev_e2e/response', { response: 'no' });
+    view = await getDB(TOKENS.staff3);
     check('同じ回答をもう一度押すと取り消される',
-      (view.event_responses || []).some((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_intern'), false);
+      (view.event_responses || []).some((r) => r.event_id === 'ev_e2e' && r.user_id === 'u_e2e_staff3'), false);
 
     const outsider = await api(TOKENS.staff2, 'PUT', '/api/events/ev_e2e/response', { response: 'yes' });
     check('見えないイベントには回答できない', outsider.status, 403);
@@ -576,15 +589,15 @@ async function run() {
 
   console.log('\n─────── 権限（許されない変更が拒否されること） ───────');
   {
-    let res = await putDB(TOKENS.intern, (db) => {
-      db.profiles = { ...(db.profiles || {}), u_e2e_intern2: { departments: ['乗っ取り'] } };
+    let res = await putDB(TOKENS.staff3, (db) => {
+      db.profiles = { ...(db.profiles || {}), u_e2e_staff4: { departments: ['乗っ取り'] } };
     });
     check('インターン生が他人のプロフィールを書き換えられない', res.status, 403);
 
-    res = await putDB(TOKENS.intern, (db) => {
+    res = await putDB(TOKENS.staff2, (db) => {
       db.internships = [...(db.internships || []), { id: 'ip_hack', branch_id: 'b1', name: '勝手に追加' }];
     });
-    check('インターン生がインターン先マスタを追加できない', res.status, 403);
+    check('他支部のインターン先マスタは追加できない', res.status, 403);
 
     /* 他支部のものは絞り込みで既に見えないので「書き換え」は送りようがない。
        意味のある攻撃は「他支部あてに新しく作る」ほうなので、そちらを試す */
@@ -609,11 +622,11 @@ async function run() {
   console.log('\n─────── スタッフによる代理設定（許される変更） ───────');
   {
     const res = await putDB(TOKENS.staff, (db) => {
-      db.profiles = { ...(db.profiles || {}), u_e2e_intern: { ...(db.profiles?.u_e2e_intern || {}), internship_id: 'ip_tokyo' } };
+      db.profiles = { ...(db.profiles || {}), u_e2e_staff3: { ...(db.profiles?.u_e2e_staff3 || {}), internship_id: 'ip_tokyo' } };
     });
     check('スタッフが同支部インターン生のインターン先を設定できる', res.status, 200);
-    const after = await getDB(TOKENS.intern);
-    check('設定した内容が残っている', (after.profiles || {}).u_e2e_intern?.internship_id, 'ip_tokyo');
+    const after = await getDB(TOKENS.staff3);
+    check('設定した内容が残っている', (after.profiles || {}).u_e2e_staff3?.internship_id, 'ip_tokyo');
   }
 
   console.log('\n─────── 楽観ロック（同時編集の検出） ───────');
@@ -637,7 +650,7 @@ async function run() {
     const before = (await getDB(TOKENS.admin)).emails?.length || 0;
     const N = 50;
     const statuses = await Promise.all(Array.from({ length: N }, (_, i) =>
-      rawPost(TOKENS.staff, '/api/mail/send', { receiver_id: 'u_e2e_intern', subject: '同時送信テスト' + i, body: 'x', kind: 'note' })));
+      rawPost(TOKENS.staff, '/api/mail/send', { receiver_id: 'u_e2e_staff3', subject: '同時送信テスト' + i, body: 'x', kind: 'note' })));
     check(`メール${N}通の同時送信がすべて成功する`, statuses.every((s) => s === 200), true);
     const after = (await getDB(TOKENS.admin)).emails?.length || 0;
     check(`メール履歴が${N}件ぶん増えている（1件も消えない）`, after - before, N);
@@ -660,90 +673,124 @@ async function run() {
     check('成功した1件だけが保存されている', saved, 1);
   }
 
-  console.log('\n─────── 面談（専用API） ───────');
+  console.log('\n─────── 面談（支部リンクからの申請） ───────');
   {
-    // 希望日時は choices 配列。並びがそのまま第1希望・第2希望…になる
-    const applied = await api(TOKENS.intern, 'POST', '/api/interviews', {
-      staff_id: 'u_e2e_staff',
-      choices: ['2026-09-01T10:00:00.000Z', '2026-09-02T10:00:00.000Z', '2026-09-05T10:00:00.000Z',
-        '2026-09-06T10:00:00.000Z'],
-      meeting_type: 'meet', note: 'よろしくお願いします',
-    });
-    check('インターン生が面談を申請できる', applied.status, 200);
-    IV_ID = applied.json.interview?.id;
-    check('状態が「申請中」で作られる', applied.json.interview?.status, 'applied');
-    check('申請の通知が積まれる', !!applied.json.notification, true);
-    // 3つを超える希望も、選んだ順のまま保存される
-    check('希望日時が選んだ順に4件保存される',
-      (applied.json.interview?.choices || []).join(','),
-      '2026-09-01T10:00:00.000Z,2026-09-02T10:00:00.000Z,2026-09-05T10:00:00.000Z,2026-09-06T10:00:00.000Z');
-    check('先頭3件は旧項目にも入る', applied.json.interview?.choice3, '2026-09-05T10:00:00.000Z');
-    check('面談方法は保存されない', applied.json.interview?.meeting_type, undefined);
+    /* インターン生のアカウントは廃止した。
+       支部の合言葉つきURLから、本名だけで申請する形になっている */
+    const linkRes = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
+    check('スタッフが支部の申請URLを取れる', linkRes.status, 200);
+    const token1 = String(linkRes.json.url || '').split('/i/')[1];
+    check('URLに合言葉が入っている', typeof token1 === 'string' && token1.length >= 32, true);
 
-    // choices に移す前の形式。古い画面から届いても申請できることを確かめる
-    const oldStyle = await api(TOKENS.intern, 'POST', '/api/interviews',
-      { staff_id: 'u_e2e_staff', choice1: '2026-09-08T10:00:00.000Z', choice2: '2026-09-09T10:00:00.000Z' });
-    check('旧形式（choice1〜3）でも申請できる', oldStyle.status, 200);
-    check('旧形式は choices に移されて返る', (oldStyle.json.interview?.choices || []).join(','),
-      '2026-09-08T10:00:00.000Z,2026-09-09T10:00:00.000Z');
+    const again = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
+    check('同じ支部なら同じURLが返る', String(again.json.url || '').split('/i/')[1], token1);
+    const otherLink = await api(TOKENS.staff2, 'GET', '/api/staff/intern-invite-url');
+    check('支部が違えば別のURLになる',
+      String(otherLink.json.url || '').split('/i/')[1] !== token1, true);
 
-    const noChoice = await api(TOKENS.intern, 'POST', '/api/interviews',
-      { staff_id: 'u_e2e_staff', choices: [] });
-    check('希望を1つも選ばないと申請できない', noChoice.status, 400);
+    // 合言葉が正しくないと、支部の情報は一切出さない
+    const bad = await api(null, 'GET', '/api/apply/deadbeef');
+    check('でたらめな合言葉では開けない', bad.status, 404);
 
-    // 同じ支部の別のインターン生の面談。上の絞り込みが効いているか確かめるために作る
-    await api(TOKENS.intern2, 'POST', '/api/interviews',
-      { staff_id: 'u_e2e_staff', choices: ['2026-09-03T10:00:00.000Z'] });
+    const page = await api(null, 'GET', `/api/apply/${token1}`);
+    check('合言葉だけで申請ページを開ける', page.status, 200);
+    check('支部名が返る', page.json.branch?.name, '東京');
+    const staffIds = (page.json.staff || []).map((x) => x.id).sort();
+    check('選べるのは同じ支部のスタッフだけ', staffIds.join(','),
+      'u_e2e_staff,u_e2e_staff3,u_e2e_staff4');
+    check('メールアドレスは渡さない', 'email' in ((page.json.staff || [])[0] || {}), false);
 
-    const byStaff = await api(TOKENS.staff, 'POST', '/api/interviews', { choice1: '2026-09-01T10:00:00.000Z' });
-    check('スタッフは面談を申請できない', byStaff.status, 403);
-    const crossStaff = await api(TOKENS.intern, 'POST', '/api/interviews',
-      { staff_id: 'u_e2e_staff2', choice1: '2026-09-01T10:00:00.000Z' });
-    check('他支部のスタッフには申請できない', crossStaff.status, 403);
+    // 空き枠。スタッフが受付時間を決めていなくても既定値で出る
+    const slotRes = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff`);
+    check('空き枠を取れる', slotRes.status, 200);
+    const days = slotRes.json.days || [];
+    check('空き枠が1日以上ある', days.length > 0, true);
+    const firstOpen = days.flatMap((d) => d.slots).find((x) => x.ok);
+    check('選べる枠がある', !!firstOpen, true);
 
-    // 見える範囲
+    const crossSlots = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff2`);
+    check('他支部のスタッフの枠は見られない', crossSlots.status, 400);
+
+    // 申請
+    const noName = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '  ', staff_id: 'u_e2e_staff', choices: [firstOpen.iso] });
+    check('名前が空だと申請できない', noName.status, 400);
+    const noSlot = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '山田 太郎', staff_id: 'u_e2e_staff', choices: [] });
+    check('希望を選ばないと申請できない', noSlot.status, 400);
+    const crossApply = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '山田 太郎', staff_id: 'u_e2e_staff2', choices: [firstOpen.iso] });
+    check('他支部のスタッフには申請できない', crossApply.status, 400);
+    const pastSlot = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '山田 太郎', staff_id: 'u_e2e_staff', choices: ['2020-01-01T10:00:00.000Z'] });
+    check('過ぎた日時は申請できない', pastSlot.status, 409);
+
+    const applied = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '山田 太郎', staff_id: 'u_e2e_staff', choices: [firstOpen.iso], note: 'よろしくお願いします' });
+    check('本名だけで面談を申請できる', applied.status, 200);
+    check('相手のスタッフ名が返る', applied.json.staff_nickname, 'E2E-staff');
+
+    // スタッフ側からの見え方
     const staffView = await getDB(TOKENS.staff);
-    check('担当スタッフに見える', (staffView.interviews || []).some((iv) => iv.id === IV_ID), true);
-    const otherView = await getDB(TOKENS.staff2);
-    check('他支部のスタッフには見えない', (otherView.interviews || []).some((iv) => iv.id === IV_ID), false);
-    const internView = await getDB(TOKENS.intern);
-    check('申請した本人に見える', (internView.interviews || []).some((iv) => iv.id === IV_ID), true);
-    /* 同じ支部でも、他のインターン生の面談は見えてはいけない。
-       面談には希望日時や相談内容が入るため */
-    check('インターン生に見えるのは自分の面談だけ',
-      (internView.interviews || []).every((iv) => iv.intern_id === 'u_e2e_intern'), true);
-    check('希望日時が保たれている',
-      (internView.interviews || []).find((iv) => iv.id === IV_ID)?.choice1, '2026-09-01T10:00:00.000Z');
+    const mine = (staffView.interviews || []).find((iv) => iv.intern_name === '山田 太郎');
+    check('担当スタッフに見える', !!mine, true);
+    IV_ID = mine?.id;
+    check('状態が「申請中」で作られる', mine?.status, 'applied');
+    check('アカウントが無いので intern_id は空', mine?.intern_id, '');
+    check('入力した本名が残る', mine?.intern_name, '山田 太郎');
+    check('支部が入る', mine?.branch_id, 'b1');
+    check('希望日時が保たれている', (mine?.choices || [])[0], firstOpen.iso);
+    check('相談内容が残る', mine?.note, 'よろしくお願いします');
 
-    // 状態の変更
-    const byIntern = await api(TOKENS.intern, 'PATCH', `/api/interviews/${IV_ID}`,
-      { status: 'fixed', confirmed_datetime: '2026-09-01T10:00:00.000Z' });
-    check('インターン生は面談を確定できない', byIntern.status, 403);
+    const otherView = await getDB(TOKENS.staff2);
+    check('他支部のスタッフには見えない',
+      (otherView.interviews || []).some((iv) => iv.id === IV_ID), false);
+
+    // 状態の変更（ここはこれまでどおりスタッフだけ）
     const noDate = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'fixed' });
     check('日時なしでは確定できない', noDate.status, 400);
     const badStatus = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'なにか' });
     check('知らない状態は受け付けない', badStatus.status, 400);
 
     const fixed = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`,
-      { status: 'fixed', confirmed_datetime: '2026-09-01T10:00:00.000Z' });
+      { status: 'fixed', confirmed_datetime: firstOpen.iso });
     check('スタッフが面談を確定できる', fixed.status, 200);
-    check('確定日時が入る', fixed.json.interview?.confirmed_datetime, '2026-09-01T10:00:00.000Z');
-    check('確定の通知が積まれる', fixed.json.notification?.type, '面談確定');
+    check('確定日時が入る', fixed.json.interview?.confirmed_datetime, firstOpen.iso);
+    check('確定しても本名は残る', fixed.json.interview?.intern_name, '山田 太郎');
 
-    const failed = await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'failed' });
-    check('不成立にすると確定日時が消える', failed.json.interview?.confirmed_datetime, null);
+    // 確定した枠は、次の人には出さない
+    const afterFix = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff`);
+    const stillOpen = (afterFix.json.days || []).flatMap((d) => d.slots)
+      .some((x) => x.iso === firstOpen.iso && x.ok);
+    check('確定済みの枠はもう選べない', stillOpen, false);
+    const retry = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '別の人', staff_id: 'u_e2e_staff', choices: [firstOpen.iso] });
+    check('埋まった枠を指定すると断られる', retry.status, 409);
 
     const crossBranch = await api(TOKENS.staff2, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'applied' });
     check('他支部のスタッフは変更できない', crossBranch.status, 403);
-    await api(TOKENS.staff, 'PATCH', `/api/interviews/${IV_ID}`, { status: 'applied' });
 
-    // 取り下げ
-    const otherDelete = await api(TOKENS.staff2, 'DELETE', `/api/interviews/${IV_ID}`);
-    check('関係ない人は取り下げできない', otherDelete.status, 403);
-    const own = await api(TOKENS.intern, 'DELETE', `/api/interviews/${IV_ID}`);
-    check('本人が申請中のものを取り下げできる', own.status, 200);
-    const gone = await getDB(TOKENS.intern);
-    check('取り下げた面談は消えている', (gone.interviews || []).some((iv) => iv.id === IV_ID), false);
+    // 合言葉の作り直し
+    const byStaff = await api(TOKENS.staff, 'POST', '/api/staff/intern-invite-url/regenerate');
+    check('ふつうのスタッフは作り直せない', byStaff.status, 403);
+    const regen = await api(TOKENS.admin, 'POST', '/api/staff/intern-invite-url/regenerate',
+      { branch_id: 'b1' });
+    check('管理者は作り直せる', regen.status, 200);
+    const token2 = String(regen.json.url || '').split('/i/')[1];
+    check('合言葉が新しくなる', token2 !== token1, true);
+    const oldGone = await api(null, 'GET', `/api/apply/${token1}`);
+    check('古い合言葉はもう通らない', oldGone.status, 404);
+    const newOk = await api(null, 'GET', `/api/apply/${token2}`);
+    check('新しい合言葉なら通る', newOk.status, 200);
+
+    // 廃止した入口
+    const oldRegister = await api(null, 'POST', '/api/auth/register-intern',
+      { email: 'x@example.com', password: 'password123', nickname: 'x' });
+    check('インターン生の会員登録は廃止されている', oldRegister.status, 410);
+    const oldApply = await api(TOKENS.staff, 'POST', '/api/interviews', { choices: ['2026-09-01T10:00:00.000Z'] });
+    check('ログイン経由の面談申請は廃止されている', oldApply.status, 410);
+    const internSession = await api(TOKENS.oldIntern, 'GET', '/api/db');
+    check('残っているインターン生のセッションでは入れない', internSession.status, 401);
 
     // 引っ越し前からあった面談
     const admin = await getDB(TOKENS.admin);
@@ -755,13 +802,13 @@ async function run() {
   console.log('\n─────── メール履歴 ───────');
   {
     const sent = await api(TOKENS.staff, 'POST', '/api/mail/send',
-      { receiver_id: 'u_e2e_intern', subject: '履歴テスト', body: '本文', kind: 'note' });
+      { receiver_id: 'u_e2e_staff3', subject: '履歴テスト', body: '本文', kind: 'note' });
     check('メールを送れる', sent.status, 200);
     check('書き込んだ1件が返る', typeof sent.json.email?.id === 'string', true);
 
     const senderView = await getDB(TOKENS.staff);
     check('送った人には見える', (senderView.emails || []).some((m) => m.subject === '履歴テスト'), true);
-    const receiverView = await getDB(TOKENS.intern);
+    const receiverView = await getDB(TOKENS.staff3);
     check('受け取った人にも見える', (receiverView.emails || []).some((m) => m.subject === '履歴テスト'), true);
     const other = await getDB(TOKENS.staff2);
     check('当事者以外には見えない', (other.emails || []).some((m) => m.subject === '履歴テスト'), false);
@@ -800,7 +847,7 @@ async function run() {
       const token = 'loadtoken' + i;
       await c.execute({
         sql: 'INSERT OR REPLACE INTO users (id,email,password_hash,nickname,role,branch_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)',
-        args: [id, `load${i}@example.com`, 'dummy:dummy', '負荷' + i, 'intern', 'b1', 'active', now],
+        args: [id, `load${i}@example.com`, 'dummy:dummy', '負荷' + i, 'staff', 'b1', 'active', now],
       });
       await c.execute({
         sql: 'INSERT OR REPLACE INTO sessions (token_hash,user_id,created_at,expires_at) VALUES (?,?,?,?)',
@@ -828,14 +875,21 @@ async function run() {
     console.log(`       （${N}件の同時確認にかかった時間: ${ms}ms）`);
 
     /* 締切前にインターン生が一斉に面談を申請する状況。
-       ここも専用APIへ移したので、全員が申請できるはず */
+       アカウントが無いので、支部リンクから名前だけで一斉に申し込む。
+       希望はそれぞれ別の枠にする（同じ枠を100人が取り合う話ではないため） */
+    const link = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
+    const applyToken = String(link.json.url || '').split('/i/')[1];
+    const free = await api(null, 'GET', `/api/apply/${applyToken}/slots?staff_id=u_e2e_staff4`);
+    const openSlots = (free.json.days || []).flatMap((d) => d.slots).filter((x) => x.ok);
+    check('一斉申請に使える枠が100件以上ある', openSlots.length >= N, true);
+
     const t1 = Date.now();
-    const applyCodes = await Promise.all(users.map((u) => rawPost(u.token, '/api/interviews',
-      { staff_id: 'u_e2e_staff', choice1: '2026-10-01T10:00:00.000Z', meeting_type: 'meet' })));
+    const applyCodes = await Promise.all(users.map((u, i) => rawPost(null, `/api/apply/${applyToken}`,
+      { name: '負荷' + i, staff_id: 'u_e2e_staff4', choices: [openSlots[i].iso] })));
     const applyMs = Date.now() - t1;
     check(`${N}人が同時に面談を申請して全員成功する`, applyCodes.filter((s) => s === 200).length, N);
     const staffView = await getDB(TOKENS.staff);
-    const applied = (staffView.interviews || []).filter((iv) => String(iv.intern_id).startsWith('u_load'));
+    const applied = (staffView.interviews || []).filter((iv) => String(iv.intern_name || '').startsWith('負荷'));
     check(`申請が${N}件すべて記録されている`, applied.length, N);
     console.log(`       （${N}件の同時申請にかかった時間: ${applyMs}ms）`);
   }

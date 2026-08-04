@@ -33,6 +33,7 @@ const google = require('./google');
 const auth = require('./auth');
 const mail = require('./mail');
 const sharedCalFilter = require('./shared-cal-filter');
+const slots = require('./slots');
 
 const PORT = process.env.PORT || 8080;
 /* パスワード再設定リンクの有効時間。長すぎると危険、短すぎるとメール到着前に切れるため60分 */
@@ -217,6 +218,18 @@ async function initDB() {
       data TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    )
+  `);
+  /* 支部ごとの申請リンクに使う合言葉。
+     支部の一覧（/api/branches）はログイン無しで誰でも読めるので、
+     store の branches には絶対に入れず、ここへ分けて持つ。
+     漏れたときは作り直せばよく、古い合言葉はその時点で通らなくなる */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS branch_invites (
+      branch_id TEXT PRIMARY KEY,
+      token TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      created_by TEXT
     )
   `);
   /* メール履歴。件数がいちばん増えやすく、store に入れておくと
@@ -560,7 +573,11 @@ async function listInterviewsFor(user, users) {
   });
   // branch_id が入っていない古い行のために、インターン生の所属でも確かめる
   const inBranch = new Set((users || []).filter((u) => u.branch_id === user.branch_id).map((u) => u.id));
-  return rs.rows.map(rowToInterview).filter((iv) => iv.staff_id === user.id || inBranch.has(iv.intern_id));
+  /* アカウントを持たないインターン生の申請は intern_id が空なので、
+     所属では判定できない。支部が一致していれば同じ支部のスタッフに見せる */
+  return rs.rows.map(rowToInterview).filter((iv) => iv.staff_id === user.id
+    || (iv.branch_id && iv.branch_id === user.branch_id)
+    || inBranch.has(iv.intern_id));
 }
 async function getInterview(id) {
   const rs = await client.execute({ sql: 'SELECT * FROM interviews WHERE id = ?', args: [id] });
@@ -776,6 +793,15 @@ async function requireAuth(req, res, next) {
     // code はフロント側で「セッション切れ」と「パスワード違いなどの業務上の401」を
     // 見分けるために使う。これが無いと、パスワード変更に失敗しただけでログアウトしてしまう
     if (!user || user.status !== 'active') return res.status(401).json({ error: '認証が必要です', code: 'unauthenticated' });
+    /* インターン生のログインは廃止した。ここで止めるのは、
+       残っているセッションやGoogleログインなど、入口が複数あるため。
+       1か所にまとめておけば、塞ぎ忘れが起きない */
+    if (user.role === 'intern') {
+      return res.status(401).json({
+        error: 'インターン生のログインは不要になりました。支部の担当者から届いた申請用リンクをお使いください。',
+        code: 'unauthenticated',
+      });
+    }
     req.authUser = user;
     // パスワード変更時に「今使っている端末だけ残す」判定に使う
     req.authSessionTokenHash = auth.hashToken(token);
@@ -1233,24 +1259,13 @@ async function validStaffIdFor(staffId, branchId) {
   return row.id;
 }
 
+/* 旧・インターン生の会員登録。
+   支部ごとのリンクから、本名だけで面談を申請する方式に切り替えたため廃止した。
+   古いURLがLINEやブックマークに残っていても、行き先を案内できるように残してある */
 app.post('/api/auth/register-intern', async (req, res) => {
-  const { email, password, nickname, branch_id, staff_id } = req.body || {};
-  if (!email || !password || !nickname) return res.status(400).json({ error: 'email・password・nicknameは必須です' });
-  if (String(password).length < 8) return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
-  try {
-    const existing = await findUserByEmail(email);
-    if (existing) return res.status(409).json({ error: 'このメールアドレスは既に登録されています' });
-    const passwordHash = await auth.hashPassword(password);
-    // 担当スタッフは任意。指定が不正なら黙って未設定にする（登録自体は通す）
-    const staffId = await validStaffIdFor(staff_id, branch_id);
-    const user = await insertUser({ email, passwordHash, nickname, role: 'intern', branchId: branch_id, status: 'active', staffId });
-    // 登録直後はそのタブ限りのログイン。自動ログインはログイン画面のチェックで選んでもらう
-    const token = await createSessionRow(user.id, false);
-    res.json({ ok: true, token, user: toPublicUser(user) });
-  } catch (e) {
-    console.error('インターン生登録に失敗しました', e);
-    res.status(500).json({ error: '登録に失敗しました' });
-  }
+  return res.status(410).json({
+    error: '会員登録は不要になりました。支部の担当者から届いた申請用リンクから、お名前を入れるだけで面談を申し込めます。',
+  });
 });
 
 /* 旧・秘密キー付き招待URL（?staff=...）による登録。
@@ -1276,6 +1291,13 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' });
     }
     if (row.status !== 'active') return res.status(403).json({ error: 'このアカウントではログインできません' });
+    /* インターン生のログインは廃止した。行と過去の面談は消していないので、
+       スタッフ側からは今までどおり見える。本人が入る必要がなくなっただけ */
+    if (row.role === 'intern') {
+      return res.status(403).json({
+        error: 'インターン生のログインは不要になりました。支部の担当者から届いた申請用リンクから、お名前を入れるだけで面談を申し込めます。',
+      });
+    }
     const token = await createSessionRow(row.id, remember === true);
     res.json({ ok: true, token, user: toPublicUser(row) });
   } catch (e) {
@@ -1607,16 +1629,69 @@ app.get('/api/admin/staff-invite-url', requireAuth, requireBranchAdmin, (req, re
 });
 
 /* ---------- スタッフ：インターン生を招くURL ----------
-   自分のIDを付けただけのURL。開いた学生が会員登録に進むと、
-   担当スタッフの欄にこの人が入る。秘密の値ではないので期限も持たせない
-   （このURLが無くても、これまでどおり誰でもインターン生登録はできる） */
-app.get('/api/staff/intern-invite-url', requireAuth, (req, res) => {
+   支部ごとに1本のURL。同じ支部のスタッフは全員これを配る。
+   以前は「自分のIDを付けた個人ごとのURL」だったが、インターン生の会員登録を
+   廃止したため、登録先ではなく申請ページの入口になった。
+
+   合言葉は推測できない長さにしてある。配布先が広いぶん漏れることも想定し、
+   作り直せるようにしてある（作り直すと古いURLはその場で通らなくなる）。 */
+
+/* 支部の合言葉を引く。まだ無ければ作って返す。
+   支部を作るたびに用意するのは忘れやすいので、最初に必要になった時点で用意する */
+async function getOrCreateBranchInvite(branchId, createdBy) {
+  const rs = await client.execute({
+    sql: 'SELECT token FROM branch_invites WHERE branch_id = ?',
+    args: [String(branchId)],
+  });
+  if (rs.rows[0]) return rs.rows[0].token;
+  const token = crypto.randomBytes(24).toString('hex');
+  await client.execute({
+    sql: 'INSERT INTO branch_invites (branch_id, token, created_at, created_by) VALUES (?,?,?,?)',
+    args: [String(branchId), token, new Date().toISOString(), createdBy || null],
+  });
+  return token;
+}
+
+/* スタッフが自分の支部の申請URLを見る。
+   admin は支部を持たないことがあるので、その場合は支部を指定してもらう */
+app.get('/api/staff/intern-invite-url', requireAuth, async (req, res) => {
   const me = req.authUser;
   if (!['staff', 'branch_admin', 'admin'].includes(me.role)) {
     return res.status(403).json({ error: 'インターン生を招けるのはスタッフだけです' });
   }
-  const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-  res.json({ url: `${base}/?staff=${encodeURIComponent(me.id)}`, nickname: me.nickname });
+  // 他支部のURLを覗けないよう、admin 以外は自分の支部に固定する
+  const branchId = me.role === 'admin' ? (req.query.branch_id || me.branch_id) : me.branch_id;
+  if (!branchId) return res.status(400).json({ error: '支部が設定されていません' });
+  try {
+    const token = await getOrCreateBranchInvite(branchId, me.id);
+    const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    res.json({ url: `${base}/i/${token}`, branch_id: branchId });
+  } catch (e) {
+    console.error('支部の申請URLの取得に失敗しました', e);
+    res.status(500).json({ error: '取得に失敗しました' });
+  }
+});
+
+/* 申請URLを作り直す。漏れたときの唯一の対処なので、支部管理者以上に限る。
+   古い合言葉は消すので、配り直すまで誰も申請できなくなる点に注意 */
+app.post('/api/staff/intern-invite-url/regenerate', requireAuth, requireBranchAdmin, async (req, res) => {
+  const me = req.authUser;
+  const branchId = me.role === 'admin' ? (req.body?.branch_id || me.branch_id) : me.branch_id;
+  if (!branchId) return res.status(400).json({ error: '支部が設定されていません' });
+  try {
+    const token = crypto.randomBytes(24).toString('hex');
+    await client.execute({
+      sql: `INSERT INTO branch_invites (branch_id, token, created_at, created_by) VALUES (?,?,?,?)
+            ON CONFLICT(branch_id) DO UPDATE SET token = excluded.token,
+              created_at = excluded.created_at, created_by = excluded.created_by`,
+      args: [String(branchId), token, new Date().toISOString(), me.id],
+    });
+    const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    res.json({ url: `${base}/i/${token}`, branch_id: branchId });
+  } catch (e) {
+    console.error('支部の申請URLの作り直しに失敗しました', e);
+    res.status(500).json({ error: '作り直しに失敗しました' });
+  }
 });
 
 /* ---------- 管理者：ユーザー管理 ---------- */
@@ -2234,44 +2309,144 @@ app.put('/api/events/:id/response', requireAuth, async (req, res) => {
   }
 });
 
-/* 面談を申請する。締切前にインターン生が一斉に押す場所 */
-app.post('/api/interviews', requireAuth, async (req, res) => {
-  const actor = req.authUser;
-  if (actor.role !== 'intern') return res.status(403).json({ error: '面談を申請できるのはインターン生だけです' });
-  const { staff_id, choices, choice1, choice2, choice3, note } = req.body || {};
-  /* 希望日時は choices 配列で受け取る。並びがそのまま第1希望・第2希望…になる。
-     choice1〜choice3 は配列に移す前の形式で、古い画面から届いたときの受け口 */
-  const list = (Array.isArray(choices) && choices.length ? choices : [choice1, choice2, choice3])
-    .filter(Boolean).map(String);
-  if (!list.length) return res.status(400).json({ error: '希望する枠を選んでください' });
+/* ---------- アカウント無しの面談申請（支部リンク経由） ----------
+   ここだけはログインを求めない。インターン生に登録の手間をかけないため。
+   合言葉を知っていることが唯一の入場条件なので、
+   合言葉から支部を割り出し、その支部の外へは一切手が届かないようにする。 */
+
+/* 合言葉から支部を引く。見つからなければ null。
+   有効・無効の判断はここ1か所に集約し、各APIで書き分けない */
+async function branchByInviteToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const rs = await client.execute({
+    sql: 'SELECT branch_id FROM branch_invites WHERE token = ?',
+    args: [token],
+  });
+  if (!rs.rows[0]) return null;
+  const branchId = rs.rows[0].branch_id;
+  const obj = await readDB();
+  const branch = (obj?.branches || []).find((b) => b.id === branchId);
+  // 支部そのものが消されていたら、リンクは無効として扱う
+  return branch ? { id: branchId, name: branch.name } : null;
+}
+
+/* 申請ページの最初の読み込み。支部名と、選べるスタッフの一覧を返す。
+   返すのは表示に要る分だけ。メールアドレスや権限は渡さない */
+app.get('/api/apply/:token', async (req, res) => {
   try {
-    // 担当スタッフは自分の支部の人だけ
-    if (staff_id) {
-      const staff = await findUserById(staff_id);
-      if (!staff || (staff.branch_id !== actor.branch_id)) {
-        return res.status(403).json({ error: '他の支部のスタッフには申請できません' });
+    const branch = await branchByInviteToken(req.params.token);
+    if (!branch) return res.status(404).json({ error: 'このリンクは使えません。支部の担当者に確認してください' });
+    const rs = await client.execute({
+      sql: `SELECT id, nickname FROM users
+            WHERE branch_id = ? AND status = 'active' AND role IN ('staff','branch_admin')
+            ORDER BY nickname`,
+      args: [branch.id],
+    });
+    res.json({
+      branch: { name: branch.name },
+      staff: rs.rows.map((r) => ({ id: r.id, nickname: r.nickname })),
+    });
+  } catch (e) {
+    console.error('申請ページの読み込みに失敗しました', e);
+    res.status(500).json({ error: '読み込めませんでした' });
+  }
+});
+
+/* 指定スタッフが選んでいる担当可能な相手か確かめたうえで、材料を集める。
+   スタッフ選択・枠取得・申請の3か所で同じ確認が要るのでまとめてある */
+async function applyContextFor(token, staffId) {
+  const branch = await branchByInviteToken(token);
+  if (!branch) return { error: 'このリンクは使えません。支部の担当者に確認してください', code: 404 };
+  const rs = await client.execute({
+    sql: `SELECT id, nickname, branch_id FROM users
+          WHERE id = ? AND status = 'active' AND role IN ('staff','branch_admin')`,
+    args: [String(staffId || '')],
+  });
+  const staff = rs.rows[0];
+  // 他支部のスタッフを指定されても、合言葉の支部の外は認めない
+  if (!staff || staff.branch_id !== branch.id) {
+    return { error: 'このスタッフは選べません', code: 400 };
+  }
+  const obj = await readDB();
+  const availability = (obj?.availability || {})[staff.id] || {};
+  const ivs = await client.execute({
+    sql: `SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'`,
+    args: [staff.id],
+  });
+  const takenMs = ivs.rows.map(rowToInterview)
+    .map((iv) => new Date(iv.confirmed_datetime).getTime());
+  return { branch, staff, availability, takenMs };
+}
+
+/* 選んだスタッフの空き枠を返す */
+app.get('/api/apply/:token/slots', async (req, res) => {
+  try {
+    const ctx = await applyContextFor(req.params.token, req.query.staff_id);
+    if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
+    res.json({ days: slots.generateSlots(ctx.availability, ctx.takenMs) });
+  } catch (e) {
+    console.error('空き枠の取得に失敗しました', e);
+    res.status(500).json({ error: '取得できませんでした' });
+  }
+});
+
+/* 本名だけで面談を申請する。
+   アカウントを作らないので、intern_id は空にして名前を data に持たせる */
+app.post('/api/apply/:token', async (req, res) => {
+  const { name, staff_id, choices, note } = req.body || {};
+  const internName = String(name || '').trim();
+  if (!internName) return res.status(400).json({ error: 'お名前を入力してください' });
+  if (internName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
+
+  const list = (Array.isArray(choices) ? choices : []).filter(Boolean).map(String);
+  if (!list.length) return res.status(400).json({ error: '希望する枠を選んでください' });
+  if (list.length > 5) return res.status(400).json({ error: '希望は5つまでにしてください' });
+
+  try {
+    const ctx = await applyContextFor(req.params.token, staff_id);
+    if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
+
+    /* 画面を細工されても、埋まっている枠や受付時間外を掴まされないようにする。
+       1つでも通らなければ、選び直してもらう */
+    for (const iso of list) {
+      if (!slots.isSelectableSlot(iso, ctx.availability, ctx.takenMs)) {
+        return res.status(409).json({ error: '選んだ枠が埋まりました。選び直してください' });
       }
     }
+
     const iv = {
       id: 'iv_' + crypto.randomBytes(6).toString('hex'),
-      intern_id: actor.id, staff_id: staff_id || null, branch_id: actor.branch_id || null,
-      status: 'applied', choices: list,
-      /* 先頭3件は旧項目にも入れておく。この変更を巻き戻したときに
-         申請が読めなくなるのを防ぐための保険 */
+      intern_id: '',                 // アカウントが無いので空。名前で判別する
+      intern_name: internName,
+      staff_id: ctx.staff.id,
+      branch_id: ctx.branch.id,
+      status: 'applied',
+      choices: list,
+      // 旧項目にも入れておく（この変更を巻き戻しても申請が読めるようにする保険）
       choice1: list[0], choice2: list[1] || null, choice3: list[2] || null,
       confirmed_datetime: null,
-      note: String(note || '').trim(), created_at: new Date().toISOString(),
+      note: String(note || '').trim().slice(0, 500),
+      created_at: new Date().toISOString(),
     };
     await saveInterview(iv);
-    const notification = await insertNotification({
-      type: '面談申請', branch_id: actor.branch_id || null,
-      msg: `${actor.nickname}さんが面談を申請しました`,
+    await insertNotification({
+      type: '面談申請', branch_id: ctx.branch.id,
+      msg: `${internName}さんが面談を申請しました`,
     });
-    res.json({ ok: true, interview: iv, notification });
+    res.json({ ok: true, staff_nickname: ctx.staff.nickname });
   } catch (e) {
     console.error('面談の申請に失敗しました', e);
     res.status(500).json({ error: '申請できませんでした' });
   }
+});
+
+/* 旧・ログインした状態からの面談申請。
+   インターン生のログインを廃止したため、この入口は誰も通れなくなった。
+   古い画面が残っている端末に、行き先を案内できるように残してある */
+app.post('/api/interviews', (req, res) => {
+  return res.status(410).json({
+    error: '申請の方法が変わりました。支部の担当者から届いた申請用リンクをお使いください。',
+  });
 });
 
 /* 面談の状態を変える（確定・不成立・申請中に戻す）。スタッフ側だけ */
@@ -2725,6 +2900,8 @@ const PUBLIC_FILES = {
   '/terms.html': 'terms.html',
   // スタッフ登録ページ。中身はアプリ本体と同じHTMLで、URLを見て画面を切り替えている
   '/staff': 'index.html',
+  // アカウント無しの面談申請ページ。ログイン処理を一切通らないよう別ファイルにしてある
+  '/apply.html': 'apply.html',
   // Google Search Console のサイト所有権確認用。確認状態を保つため削除しないこと
   '/googlee6411894890471cb.html': 'googlee6411894890471cb.html',
 };
@@ -2733,6 +2910,11 @@ app.get('*', (req, res) => {
   try { p = decodeURIComponent(req.path); } catch (e) { p = req.path; }
   // 末尾スラッシュ付きだと style.css の相対パスがずれるため、正規化してから配信する
   if (p === '/staff/') return res.redirect(301, '/staff');
+  /* 支部ごとの申請URL。合言葉の正しさはここでは見ず、ページを出してから
+     APIで確かめる。ここで弾くと、正しいかどうかがURLを叩くだけで分かってしまう */
+  if (/^\/i\/[A-Za-z0-9_-]+\/?$/.test(p)) {
+    return res.sendFile(path.join(PUBLIC_ROOT, 'apply.html'));
+  }
   const file = PUBLIC_FILES[p];
   if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');
   res.sendFile(path.join(PUBLIC_ROOT, file));
