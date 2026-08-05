@@ -2378,12 +2378,13 @@ async function applyContextFor(token, staffId) {
   return { branch, staff, availability, takenMs };
 }
 
-/* 選んだスタッフの空き枠を返す */
+/* 選んだスタッフの空き枠を、月曜始まりの1週間ぶんの表として返す。
+   画面はこれを並べるだけにして、枠の判断はサーバーだけが持つ */
 app.get('/api/apply/:token/slots', async (req, res) => {
   try {
     const ctx = await applyContextFor(req.params.token, req.query.staff_id);
     if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
-    res.json({ days: slots.generateSlots(ctx.availability, ctx.takenMs) });
+    res.json(slots.generateWeekGrid(ctx.availability, ctx.takenMs, req.query.week));
   } catch (e) {
     console.error('空き枠の取得に失敗しました', e);
     res.status(500).json({ error: '取得できませんでした' });
@@ -2398,9 +2399,12 @@ app.post('/api/apply/:token', async (req, res) => {
   if (!internName) return res.status(400).json({ error: 'お名前を入力してください' });
   if (internName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
 
-  const list = (Array.isArray(choices) ? choices : []).filter(Boolean).map(String);
+  /* 続いた30分枠は画面上でひとつの希望にまとまるが、送られてくるのは枠のままなので
+     件数ではなく枠数で数える。「10時〜13時」のような長い希望も通せるだけの幅を取り、
+     そのうえで際限なく送りつけられないよう上限は設ける */
+  const list = [...new Set((Array.isArray(choices) ? choices : []).filter(Boolean).map(String))];
   if (!list.length) return res.status(400).json({ error: '希望する枠を選んでください' });
-  if (list.length > 5) return res.status(400).json({ error: '希望は5つまでにしてください' });
+  if (list.length > 40) return res.status(400).json({ error: '希望する枠が多すぎます。絞ってください' });
 
   try {
     const ctx = await applyContextFor(req.params.token, staff_id);
@@ -2408,8 +2412,10 @@ app.post('/api/apply/:token', async (req, res) => {
 
     /* 画面を細工されても、埋まっている枠や受付時間外を掴まされないようにする。
        1つでも通らなければ、選び直してもらう */
+    const ok = slots.selectableTimes(ctx.availability, ctx.takenMs);
     for (const iso of list) {
-      if (!slots.isSelectableSlot(iso, ctx.availability, ctx.takenMs)) {
+      const t = new Date(iso).getTime();
+      if (!Number.isFinite(t) || !ok.has(t)) {
         return res.status(409).json({ error: '選んだ枠が埋まりました。選び直してください' });
       }
     }

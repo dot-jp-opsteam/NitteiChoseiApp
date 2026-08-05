@@ -185,6 +185,34 @@ async function getDB(token) {
   if (!r.ok) throw new Error('GET /api/db が ' + r.status);
   return r.json();
 }
+/* 申請ページの空き枠は週ごとの表で返るので、選べる枠を探すには週をめくる必要がある。
+   受付時間が短いスタッフだと今週に空きが無いこともあるため、上限まで見に行く */
+async function firstOpenSlot(token, staffId, skip = []) {
+  const ng = new Set(skip);
+  for (let week = 0; week <= 4; week++) {
+    const r = await api(null, 'GET',
+      `/api/apply/${token}/slots?staff_id=${staffId}&week=${week}`);
+    for (const col of (r.json.grid || [])) {
+      for (const cell of col) {
+        if (cell.state === 'ok' && !ng.has(cell.iso)) return cell;
+      }
+    }
+  }
+  return null;
+}
+/* ある枠がまだ選べる状態かどうか。確定後に埋まったことを確かめるのに使う */
+async function slotStillOpen(token, staffId, iso) {
+  for (let week = 0; week <= 4; week++) {
+    const r = await api(null, 'GET',
+      `/api/apply/${token}/slots?staff_id=${staffId}&week=${week}`);
+    for (const col of (r.json.grid || [])) {
+      for (const cell of col) {
+        if (cell.iso === iso) return cell.state === 'ok';
+      }
+    }
+  }
+  return false;
+}
 /* store の生の中身を直接のぞく（APIを通さない）。引っ越しの確認に使う */
 let DB_PATH = null;
 async function readStoreRaw() {
@@ -700,12 +728,22 @@ async function run() {
       'u_e2e_staff,u_e2e_staff3,u_e2e_staff4');
     check('メールアドレスは渡さない', 'email' in ((page.json.staff || [])[0] || {}), false);
 
-    // 空き枠。スタッフが受付時間を決めていなくても既定値で出る
+    // 空き枠。月曜始まりの1週間ぶんの表で返る。受付時間を決めていなくても既定値で出る
     const slotRes = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff`);
     check('空き枠を取れる', slotRes.status, 200);
-    const days = slotRes.json.days || [];
-    check('空き枠が1日以上ある', days.length > 0, true);
-    const firstOpen = days.flatMap((d) => d.slots).find((x) => x.ok);
+    check('今週から始まる', slotRes.json.week, 0);
+    check('7日ぶんの表になる', (slotRes.json.days || []).length, 7);
+    check('時間の見出しがある', (slotRes.json.times || []).length > 0, true);
+    check('表の中身が日数ぶんある', (slotRes.json.grid || []).length, 7);
+    check('表の1列が時間の数と一致する',
+      (slotRes.json.grid || [])[0]?.length, (slotRes.json.times || []).length);
+    check('先の週へ進める', slotRes.json.hasNext, true);
+    check('前の週は無い', (await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff&week=-3`)).json.week, 0);
+    const capped = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff&week=99`);
+    check('先の週は上限で止まる', capped.json.week, 4);
+    check('上限の週では次へ進めない', capped.json.hasNext, false);
+
+    const firstOpen = await firstOpenSlot(token1, 'u_e2e_staff');
     check('選べる枠がある', !!firstOpen, true);
 
     const crossSlots = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff2`);
@@ -724,6 +762,21 @@ async function run() {
     const pastSlot = await api(null, 'POST', `/api/apply/${token1}`,
       { name: '山田 太郎', staff_id: 'u_e2e_staff', choices: ['2020-01-01T10:00:00.000Z'] });
     check('過ぎた日時は申請できない', pastSlot.status, 409);
+    const tooMany = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '山田 太郎', staff_id: 'u_e2e_staff',
+        choices: Array.from({ length: 41 }, (_, i) => `2026-12-0${(i % 9) + 1}T0${i % 10}:00:00.000Z`) });
+    check('希望する枠が多すぎると断られる', tooMany.status, 400);
+
+    /* 画面では続いた枠がひとつの希望にまとまるので、送られてくる枠は1件とは限らない。
+       希望順は送った並びのまま保たれる必要がある */
+    const second = await firstOpenSlot(token1, 'u_e2e_staff3');
+    const third = await firstOpenSlot(token1, 'u_e2e_staff3', [second.iso]);
+    const multi = await api(null, 'POST', `/api/apply/${token1}`,
+      { name: '複数希望 花子', staff_id: 'u_e2e_staff3', choices: [third.iso, second.iso] });
+    check('希望を複数まとめて申請できる', multi.status, 200);
+    const multiView = await getDB(TOKENS.staff3);
+    const multiIv = (multiView.interviews || []).find((iv) => iv.intern_name === '複数希望 花子');
+    check('送った並びのまま希望順が残る', (multiIv?.choices || []).join(','), `${third.iso},${second.iso}`);
 
     const applied = await api(null, 'POST', `/api/apply/${token1}`,
       { name: '山田 太郎', staff_id: 'u_e2e_staff', choices: [firstOpen.iso], note: 'よろしくお願いします' });
@@ -759,10 +812,8 @@ async function run() {
     check('確定しても本名は残る', fixed.json.interview?.intern_name, '山田 太郎');
 
     // 確定した枠は、次の人には出さない
-    const afterFix = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff`);
-    const stillOpen = (afterFix.json.days || []).flatMap((d) => d.slots)
-      .some((x) => x.iso === firstOpen.iso && x.ok);
-    check('確定済みの枠はもう選べない', stillOpen, false);
+    check('確定済みの枠はもう選べない',
+      await slotStillOpen(token1, 'u_e2e_staff', firstOpen.iso), false);
     const retry = await api(null, 'POST', `/api/apply/${token1}`,
       { name: '別の人', staff_id: 'u_e2e_staff', choices: [firstOpen.iso] });
     check('埋まった枠を指定すると断られる', retry.status, 409);
@@ -879,8 +930,16 @@ async function run() {
        希望はそれぞれ別の枠にする（同じ枠を100人が取り合う話ではないため） */
     const link = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
     const applyToken = String(link.json.url || '').split('/i/')[1];
-    const free = await api(null, 'GET', `/api/apply/${applyToken}/slots?staff_id=u_e2e_staff4`);
-    const openSlots = (free.json.days || []).flatMap((d) => d.slots).filter((x) => x.ok);
+    /* 1週間ぶんでは100枠に届かないので、週をめくって集める。
+       今日より前の枠は落ちるため、今週だけでは足りない日がある */
+    const openSlots = [];
+    for (let week = 0; week <= 4 && openSlots.length < N; week++) {
+      const free = await api(null, 'GET',
+        `/api/apply/${applyToken}/slots?staff_id=u_e2e_staff4&week=${week}`);
+      (free.json.grid || []).forEach((col) => col.forEach((c) => {
+        if (c.state === 'ok') openSlots.push(c);
+      }));
+    }
     check('一斉申請に使える枠が100件以上ある', openSlots.length >= N, true);
 
     const t1 = Date.now();

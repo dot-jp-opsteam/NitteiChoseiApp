@@ -1,300 +1,564 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-theme="light">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>面談の申請 | OPS日調アプリ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>面談を申請 | OPS日調アプリ</title>
 <!-- 支部ごとの合言葉が入ったURLなので、検索結果に出さない -->
 <meta name="robots" content="noindex,nofollow">
+<!-- テーマはライト固定。アプリ本体と違い、切り替えの設定を持たない画面なので
+     localStorage は読まず、data-theme を最初から light にしてある -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Noto+Sans+JP:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="/style.css">
 <style>
-  :root{
-    --navy:#132a4d; --blue:#2f6fd0; --ink:#1f2937;
-    --muted:#6b7280; --line:#dfe4ec; --bg:#f5f7fb; --ok:#1a7f4b; --ng:#b42318;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
-    line-height:1.7}
-  .wrap{max-width:620px;margin:0 auto;padding:20px 16px 60px}
-  header{background:var(--navy);color:#fff;padding:18px 16px}
-  header .inner{max-width:620px;margin:0 auto}
-  header h1{margin:0;font-size:17px;font-weight:700}
-  header p{margin:4px 0 0;font-size:13px;opacity:.85}
-  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;margin-top:16px}
-  h2{font-size:15px;margin:0 0 4px}
-  .hint{font-size:13px;color:var(--muted);margin:0 0 12px}
-  label{display:block;font-size:14px;font-weight:600;margin-bottom:6px}
-  input[type=text],textarea,select{width:100%;padding:11px 12px;border:1px solid var(--line);
-    border-radius:8px;font-size:16px;font-family:inherit;background:#fff;color:var(--ink)}
-  textarea{min-height:84px;resize:vertical}
-  .staff-list{display:grid;gap:8px}
-  .staff-btn{display:flex;align-items:center;justify-content:space-between;gap:10px;
-    padding:13px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;
-    font-size:15px;font-family:inherit;color:var(--ink);cursor:pointer;text-align:left;width:100%}
-  .staff-btn[aria-pressed=true]{border-color:var(--blue);background:#eef4fd;font-weight:700}
-  .day{margin-top:14px}
-  .day h3{font-size:14px;margin:0 0 8px;color:var(--navy)}
-  .slots{display:flex;flex-wrap:wrap;gap:8px}
-  .slot{padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;
-    font-size:14px;font-family:inherit;color:var(--ink);cursor:pointer;min-width:74px}
-  .slot[aria-pressed=true]{border-color:var(--blue);background:var(--blue);color:#fff;font-weight:700}
-  .slot:disabled{background:#f1f3f7;color:#aeb4bf;cursor:not-allowed;text-decoration:line-through}
-  .rank{display:inline-block;margin-left:6px;font-size:12px}
-  .btn{display:block;width:100%;padding:14px;border:0;border-radius:10px;background:var(--blue);
-    color:#fff;font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:18px}
-  .btn:disabled{background:#a9bcd9;cursor:not-allowed}
-  .msg{padding:12px 14px;border-radius:8px;font-size:14px;margin-top:14px}
-  .msg.err{background:#fdecea;color:var(--ng);border:1px solid #f5c6c2}
-  .msg.info{background:#eef4fd;color:var(--navy);border:1px solid #cfe0f7}
-  .done{text-align:center;padding:34px 18px}
-  .done .mark{font-size:44px;line-height:1}
-  .done h2{font-size:19px;margin:10px 0 6px}
-  .chosen{font-size:13px;color:var(--muted);margin-top:8px}
-  footer{text-align:center;font-size:12px;color:var(--muted);margin-top:26px}
+  /* この画面だけの調整。左メニューが無いぶん、中身を中央に寄せる */
+  main{max-width:920px;margin:0 auto}
+  .applyhead{display:flex;align-items:baseline;gap:10px;margin:8px 0 2px}
+  .applyhead .brand{font-weight:900;letter-spacing:.04em;font-size:13px;color:var(--sub)}
 </style>
 </head>
 <body>
-<header><div class="inner">
-  <h1>面談の申請</h1>
-  <p id="branchName">読み込んでいます…</p>
-</div></header>
 
-<div class="wrap" id="main">
-  <div class="card"><p class="hint">読み込んでいます…</p></div>
-</div>
+<!-- 背景のオーロラ。アプリ本体と同じ装飾なので、中身は空のspan3枚でよい -->
+<div id="aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span></div>
 
-<footer>ドットジェイピー OPS</footer>
+<main id="main"></main>
+<div id="toast"></div>
 
 <script>
 /* アカウントを作らずに面談を申請するためのページ。
    URLに入っている合言葉だけが入場条件で、ログインは一切通らない。
    本体（index.html）と混ぜていないのは、ログイン前提の処理を
-   誤って通してしまう事故を避けるため。 */
+   誤って通してしまう事故を避けるため。
+
+   画面の作りはアプリ本体の「面談を申請」と同じ（週表示の表・なぞって複数選択・
+   希望順の並べ替え）。見た目と操作を揃えるため、style.css をそのまま使っている。
+   本体から持ってきた処理には、その旨を書いてある。 */
 
 // URLは /i/<合言葉> の形。末尾スラッシュが付いていても拾えるようにする
 var TOKEN = (location.pathname.split('/').filter(Boolean)[1] || '');
 
-var state = {
-  staff: [],          // 選べるスタッフ
-  staffId: null,      // 選んだスタッフ
-  days: [],           // 選んだスタッフの空き枠
-  picked: [],         // 選んだ枠（並び順がそのまま第1希望・第2希望…）
+var APPLY = {
+  name: '',          // 入力された本名
+  staff: '',         // 選んだスタッフ
+  staffList: [],     // 選べるスタッフ（同じ支部のみ）
+  weekOffset: 0,
+  grid: null,        // サーバーから受け取った週の表
+  loading: false,
+  loadError: '',
+  sel: [],           // 選んだ枠。並び順がそのまま希望順
+  note: '',
   sending: false,
 };
 
-var MAX_PICK = 3;
-var WD = ['日', '月', '火', '水', '木', '金', '土'];
+/* ---------- アプリ本体から持ってきた道具 ---------- */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function pad(n){return String(n).padStart(2,'0');}
+var WD_JP=['日','月','火','水','木','金','土'];
+// 日本の祝日（2026年）。翌年以降は要更新。key='YYYY-M-D'
+var HOLIDAYS={
+  '2026-1-1':'元日','2026-1-12':'成人の日','2026-2-11':'建国記念の日','2026-2-23':'天皇誕生日',
+  '2026-3-20':'春分の日','2026-4-29':'昭和の日','2026-5-3':'憲法記念日','2026-5-4':'みどりの日',
+  '2026-5-5':'こどもの日','2026-5-6':'振替休日','2026-7-20':'海の日','2026-8-11':'山の日',
+  '2026-9-21':'敬老の日','2026-9-22':'国民の休日','2026-9-23':'秋分の日','2026-10-12':'スポーツの日',
+  '2026-11-3':'文化の日','2026-11-23':'勤労感謝の日'};
+function holidayName(y,m,d){return HOLIDAYS[y+'-'+(m+1)+'-'+d];} // m=0-11
+function hm(iso){var d=new Date(iso);return pad(d.getHours())+':'+pad(d.getMinutes());}
+function fmtDT(iso){if(!iso)return '—';var d=new Date(iso);
+  return (d.getMonth()+1)+'/'+d.getDate()+'('+WD_JP[d.getDay()]+') '+pad(d.getHours())+':'+pad(d.getMinutes());}
+// 'YYYY-MM-DD' を、その端末の暦の日付に直す。ISOのまま new Date すると UTC 扱いでずれる
+function parseYmd(s){var p=String(s).split('-');
+  return new Date(Number(p[0]),Number(p[1])-1,Number(p[2]));}
 
-function el(id) { return document.getElementById(id); }
+var SLOT_MS=30*60*1000;
+/* 続いている30分枠をひとつの希望としてまとめる。
+   12:00・12:30・13:00 を選んだら「12:00〜13:30」で1件という数え方になる。
+   固まりの並び順は「その固まりの枠に最初に触れた位置」で決まるので、
+   なぞった順＝希望順がそのまま残る。日をまたぐ枠は続いていても分ける */
+function groupSlots(list){
+  var first=new Map();
+  (list||[]).forEach(function(iso,i){if(iso&&!first.has(iso))first.set(iso,i);});
+  var sorted=Array.from(first.keys()).sort(function(a,b){return new Date(a)-new Date(b);});
+  var runs=[];
+  sorted.forEach(function(iso){
+    var run=runs[runs.length-1];
+    var prev=run&&run[run.length-1];
+    var d=new Date(iso),p=prev&&new Date(prev);
+    if(p&&d-p===SLOT_MS&&d.getDate()===p.getDate())run.push(iso);
+    else runs.push([iso]);
+  });
+  var at=function(r){return Math.min.apply(null,r.map(function(x){return first.get(x);}));};
+  return runs.sort(function(a,b){return at(a)-at(b);});
+}
+/* 「8/5(火) 12:00〜13:30」。終わりは最後の枠の30分後 */
+function fmtSlotRange(g){
+  if(!g||!g.length)return '—';
+  if(g.length===1)return fmtDT(g[0]);
+  return fmtDT(g[0])+'〜'+hm(new Date(new Date(g[g.length-1]).getTime()+SLOT_MS));
+}
+function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show');},2200);}
 
-/* 画面に出す文字は必ずここを通す。
-   名前やエラー文をそのまま差し込むと、細工されたときに実行されてしまう */
-function esc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+/* アイコン。この画面で使うものだけをアプリ本体から写している */
+var ICON={
+  home:'<path pathLength="1" d="M3 10.4 12 3.2l9 7.2V19.8A1.2 1.2 0 0 1 19.8 21h-4.3v-6.4H8.5V21H4.2A1.2 1.2 0 0 1 3 19.8z"/>',
+  staff:'<path pathLength="1" d="M15 20.2v-1.8a3.8 3.8 0 0 0-3.8-3.8H6.3a3.8 3.8 0 0 0-3.8 3.8v1.8"/>'
+       +'<circle pathLength="1" cx="8.8" cy="7.4" r="3.8"/>'
+       +'<path pathLength="1" d="m15.9 11.6 2.2 2.2 3.4-4"/>',
+  briefcase:'<rect pathLength="1" x="2.5" y="7.2" width="19" height="13.3" rx="2.2"/>'
+           +'<path pathLength="1" d="M15.5 20.5V5.4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v15.1"/>',
+  'slot-empty':'<rect x="3.2" y="4.2" width="17.6" height="15.6" rx="2.4" stroke-dasharray="3 3.4"/>'
+              +'<path pathLength="1" d="M9 12h6"/>',
+  chevron:'<path pathLength="1" d="m9.5 5 7 7-7 7"/>',
+  'chevron-l':'<path pathLength="1" d="m14.5 5-7 7 7 7"/>',
+  check:'<path pathLength="1" d="m4.5 12.5 5 5 10-11"/>',
+  dot:'<circle pathLength="1" cx="12" cy="12" r="2.2"/>',
+};
+function ic(name,cls){
+  return '<svg class="ic'+(cls?' '+cls:'')+'" viewBox="0 0 24 24" aria-hidden="true">'
+    +(ICON[name]||ICON.dot)+'</svg>';
 }
 
-function fmtDate(ymd) {
-  var p = ymd.split('-');
-  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
-  return p[1].replace(/^0/, '') + '月' + p[2].replace(/^0/, '') + '日（' + WD[d.getDay()] + '）';
-}
-
-function api(path, opts) {
-  return fetch(path, opts).then(function (r) {
-    return r.json().catch(function () { return {}; }).then(function (body) {
-      if (!r.ok) throw new Error(body.error || '通信に失敗しました');
+/* ---------- サーバーとのやりとり ---------- */
+function api(path,opts){
+  return fetch(path,opts).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(body){
+      if(!r.ok)throw new Error(body.error||'通信に失敗しました');
       return body;
     });
   });
 }
-
-function showError(message) {
-  el('main').innerHTML = '<div class="card"><div class="msg err">' + esc(message) + '</div></div>';
+function slotsUrl(){
+  return '/api/apply/'+encodeURIComponent(TOKEN)+'/slots'
+    +'?staff_id='+encodeURIComponent(APPLY.staff)
+    +'&week='+encodeURIComponent(APPLY.weekOffset);
 }
-
-/* ---------- 読み込み ---------- */
-function load() {
-  api('/api/apply/' + encodeURIComponent(TOKEN)).then(function (data) {
-    el('branchName').textContent = data.branch.name;
-    state.staff = data.staff || [];
-    render();
-  }).catch(function (e) { showError(e.message); });
+/* 週の表を取り直す。取得中に別のスタッフや週へ移られたら、
+   古い結果で画面を上書きしないよう捨てる */
+function loadGrid(){
+  if(!APPLY.staff){APPLY.grid=null;render();return;}
+  var want=APPLY.staff+'|'+APPLY.weekOffset;
+  APPLY.loading=true;APPLY.loadError='';render();
+  api(slotsUrl()).then(function(data){
+    if(APPLY.staff+'|'+APPLY.weekOffset!==want)return;
+    APPLY.grid=data;APPLY.loading=false;render();
+  }).catch(function(e){
+    if(APPLY.staff+'|'+APPLY.weekOffset!==want)return;
+    APPLY.loading=false;APPLY.loadError=e.message;render();
+  });
 }
 
 /* ---------- 画面 ---------- */
-function render() {
-  if (!state.staff.length) {
-    showError('この支部にはまだ担当できるスタッフがいません。支部の担当者にご連絡ください。');
+function fatal(message){
+  document.getElementById('main').innerHTML=
+    '<h1 class="page">面談を申請</h1>'
+    +'<div class="empty"><div class="ei">'+ic('briefcase')+'</div><p>'+esc(message)+'</p></div>';
+}
+
+function render(){
+  document.getElementById('main').innerHTML=viewApply();
+}
+
+function viewApply(){
+  if(!APPLY.staffList.length){
+    return '<h1 class="page">面談を申請</h1>'
+      +'<div class="empty"><div class="ei">'+ic('briefcase')+'</div>'
+      +'<p>この支部には、いま面談を担当できるスタッフがいません。<br>'
+      +'支部の担当者にご連絡ください。</p></div>';
+  }
+
+  // まとまりごとの希望順。同じ固まりの枠にはすべて同じ番号が付く
+  var groups=groupSlots(APPLY.sel);
+
+  var staffOptions='<option value="">選んでください</option>'
+    +APPLY.staffList.map(function(s){
+      return '<option value="'+esc(s.id)+'"'+(s.id===APPLY.staff?' selected':'')+'>'
+        +esc(s.nickname)+'</option>';
+    }).join('');
+
+  return '<div class="applyhead"><h1 class="page">面談を申請</h1>'
+      +'<span class="brand">'+esc(BRANCH_NAME)+'</span></div>'
+    +'<p class="page-sub">お名前と担当スタッフを選ぶと、空いている枠が表に出ます。'
+      +'空いている枠を上下になぞって選び、下の一覧で希望順に並べ替えてください'
+      +'（なぞれるのは同じ日の中だけです）。続けて選んだ時間はひとつの希望にまとまります。'
+      +'担当スタッフが日程を確定します。</p>'
+    +'<div class="card"><div class="cb">'
+      +'<label class="fl">お名前</label>'
+      +'<input type="text" id="applyname" autocomplete="name" maxlength="50" placeholder="例：山田 太郎"'
+        +' value="'+esc(APPLY.name)+'" oninput="APPLY.name=this.value">'
+      +'<p class="fine" style="margin-top:6px">担当スタッフが本人を確かめるために使います。本名でご記入ください。</p>'
+      +'<div class="divider"></div>'
+      +'<label class="fl">担当スタッフ</label>'
+      +'<select onchange="setApplyStaff(this.value)">'+staffOptions+'</select>'
+      +'<p class="fine" style="margin-top:6px">'+esc(BRANCH_NAME)+'のスタッフから選べます。</p>'
+      +weekBlock(groups)
+      +'<div class="divider"></div>'
+      +'<label class="fl">その他（任意）</label>'
+      +'<textarea placeholder="担当スタッフへのメッセージがあれば記入してください（例：オンラインを希望します）"'
+        +' style="min-height:90px" oninput="APPLY.note=this.value">'+esc(APPLY.note)+'</textarea>'
+      +'<button class="btn pri block" style="margin-top:20px" id="applybtn"'
+        +(groups.length&&!APPLY.sending?'':' disabled')+' onclick="submitApply()">'
+        +(APPLY.sending?'送信しています…':(groups.length?'この'+groups.length+'件で申請する':'枠を選んでください'))
+      +'</button>'
+    +'</div></div>';
+}
+
+/* スタッフを選ぶ前・読み込み中・取れなかったときで出し分ける。
+   表そのものは gridTable() が組み立てる */
+function weekBlock(groups){
+  if(!APPLY.staff){
+    return '<div class="divider"></div>'
+      +'<div class="empty" style="padding:28px"><div class="ei">'+ic('staff')+'</div>'
+      +'<p>担当スタッフを選ぶと、空いている枠が出ます。</p></div>';
+  }
+  var pager='<div class="weekpager">'
+    +'<button class="pg" onclick="setApplyWeek(-1)"'+(APPLY.weekOffset<=0?' disabled':'')+'>'
+      +ic('chevron-l')+'前の1週間</button>'
+    +'<span class="wm">'+esc(monthLabel())+'</span>'
+    +'<button class="pg" onclick="setApplyWeek(1)"'
+      +(APPLY.grid&&!APPLY.grid.hasNext?' disabled':'')+'>次の1週間'+ic('chevron')+'</button>'
+    +'</div>';
+
+  var body;
+  if(APPLY.loadError){
+    body='<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
+      +'<p>'+esc(APPLY.loadError)+'</p></div>';
+  }else if(APPLY.loading||!APPLY.grid){
+    body='<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
+      +'<p>空いている枠を調べています…</p></div>';
+  }else{
+    body=gridTable();
+  }
+
+  return '<div class="divider"></div>'+pager
+    +'<label class="fl" id="slotlabel">日時を選ぶ（'+groups.length+'件選択中）</label>'
+    +body+selSummaryBlock(groups);
+}
+
+function monthLabel(){
+  if(!APPLY.grid||!APPLY.grid.days.length)return '';
+  var d=parseYmd(APPLY.grid.days[0]);
+  return d.getFullYear()+'年'+(d.getMonth()+1)+'月';
+}
+
+function gridTable(){
+  var g=APPLY.grid;
+  if(!g.times.length){
+    return '<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
+      +'<p>この週は面談可能な空き枠がありません。</p></div>';
+  }
+  var todayKey=(function(){var t=new Date();
+    return t.getFullYear()+'-'+pad(t.getMonth()+1)+'-'+pad(t.getDate());})();
+
+  var headCells=g.days.map(function(key){
+    var d=parseYmd(key);var w=d.getDay();
+    var hol=holidayName(d.getFullYear(),d.getMonth(),d.getDate());
+    var cls=['bt-h',(w===0||hol)?'sun':'',w===6?'sat':'',key===todayKey?'today':''].join(' ');
+    return '<th class="'+cls+'">'+d.getDate()+'<small>'+WD_JP[w]+'</small></th>';
+  }).join('');
+
+  var rank=new Map();
+  groupSlots(APPLY.sel).forEach(function(grp,i){grp.forEach(function(iso){rank.set(iso,i+1);});});
+
+  var bodyRows=g.times.map(function(label,ti){
+    var cells=g.grid.map(function(dayCol){
+      var c=dayCol[ti];
+      if(c.state==='off')return '<td class="bt-c off">×</td>';
+      var n=rank.get(c.iso);
+      return '<td class="bt-c ok '+(n?'sel':'')+'" data-iso="'+esc(c.iso)+'"'
+        +' onpointerdown="applyPointerDown(event,\''+esc(c.iso)+'\')"'
+        +' title="タップ、または同じ日の中で上下になぞって選択">'
+        +(n?'<span class="bt-num">'+n+'</span>':'○')+'</td>';
+    }).join('');
+    return '<tr><th class="bt-t">'+esc(label)+'</th>'+cells+'</tr>';
+  }).join('');
+
+  return '<div class="booktable-wrap"><table class="booktable">'
+    +'<thead><tr><th class="bt-corner"></th>'+headCells+'</tr></thead>'
+    +'<tbody>'+bodyRows+'</tbody></table></div>';
+}
+
+/* 選択サマリー。並びがそのまま希望順なので、ここを入れ替えれば順位が変わる。
+   なぞっている最中もここを書き換えるため、0件のときも枠だけ置いて隠しておく */
+function selSummaryBlock(groups){
+  return '<div id="selwrap"'+(groups.length?'':' hidden')+'><div class="divider"></div>'
+    +'<label class="fl"><span id="sellabel">選んだ希望日時（'+groups.length+'件）</span>'
+    +'<span class="fl-sub">上から第1希望です。ドラッグで並べ替えられます</span></label>'
+    +'<div class="selsummary" id="selsummary">'+selSummaryRows()+'</div></div>';
+}
+
+function setApplyStaff(id){
+  APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];APPLY.grid=null;
+  loadGrid();
+}
+function setApplyWeek(delta){
+  APPLY.weekOffset=Math.max(0,(APPLY.weekOffset||0)+delta);
+  loadGrid();
+}
+/* 一覧の「×」。まとまりごと外すので、含まれる枠をすべて落とす。
+   ここで render() を呼ぶと画面ごと作り直しになり、入力中の値や表の位置が飛ぶ。
+   枠を選ぶ操作では画面の骨格は変わらないので、中身だけを書き換える */
+function removeSlots(csv){
+  var gone=new Set(csv.split(','));
+  APPLY.sel=APPLY.sel.filter(function(iso){return !gone.has(iso);});
+  refreshApplyLive();
+}
+
+/* ---- カレンダーをなぞって複数の枠を選ぶ ----
+   アプリ本体と同じ方式。押し始めた枠が未選択なら追加、選択済みなら解除で固定し、
+   往復してもモードが入れ替わらないようにしている。
+   追加は配列の末尾に積むので、なぞった順がそのまま希望順になる。
+   なぞれるのは縦（押し始めた日の列）だけ。列は td の並び順で見分ける。
+   iso の日付部分はUTC基準で列の途中で変わりうるため、判定には使えない */
+var APDRAG=null;
+function applyPointerDown(e,iso){
+  if(e.button!==undefined&&e.button!==0)return;
+  e.preventDefault();
+  APDRAG={mode:APPLY.sel.indexOf(iso)>=0?'remove':'add',touched:new Set(),col:dragColOf(e.currentTarget)};
+  document.body.classList.add('noselect');
+  applyDragApply(e.currentTarget,iso);
+  document.addEventListener('pointermove',applyDragMove);
+  document.addEventListener('pointerup',applyDragEnd);
+  document.addEventListener('pointercancel',applyDragEnd);
+}
+function applyDragMove(e){
+  if(!APDRAG)return;
+  var el=dragCellAt(e,APDRAG.col);
+  if(el)applyDragApply(el,el.dataset.iso);
+}
+function dragColOf(cell){
+  return cell&&cell.cellIndex!==undefined
+    ? {table:cell.closest('table'),index:cell.cellIndex} : null;
+}
+/* 指の位置にある枠を返す。押し始めた列から外れていたら null（＝その行は選ばれない） */
+function dragCellAt(e,col){
+  var el=document.elementFromPoint(e.clientX,e.clientY);
+  if(!el||!el.classList||!el.classList.contains('bt-c')||!el.dataset.iso)return null;
+  if(col&&(el.cellIndex!==col.index||el.closest('table')!==col.table))return null;
+  return el;
+}
+function applyDragApply(cell,iso){
+  if(!APDRAG||APDRAG.touched.has(iso))return;
+  var i=APPLY.sel.indexOf(iso);
+  if(APDRAG.mode==='add'){
+    if(i>=0)return;
+    APPLY.sel.push(iso);
+  }else{
+    if(i<0)return;
+    APPLY.sel.splice(i,1);
+  }
+  APDRAG.touched.add(iso);
+  refreshApplyLive();
+}
+/* なぞっている間の表示更新。枠がつながると番号が繰り上がるので、
+   画面全体を描き直さずに済む範囲（番号・一覧・見出し）だけを書き換える */
+function refreshApplyLive(){
+  var groups=groupSlots(APPLY.sel);
+  var rank=new Map();
+  groups.forEach(function(g,i){g.forEach(function(iso){rank.set(iso,i+1);});});
+  document.querySelectorAll('.booktable .bt-c.ok').forEach(function(td){
+    var n=rank.get(td.dataset.iso);
+    if(n){td.classList.add('sel');td.innerHTML='<span class="bt-num">'+n+'</span>';}
+    else if(td.classList.contains('sel')){td.classList.remove('sel');td.textContent='○';}
+  });
+  var wrap=document.getElementById('selwrap');
+  if(wrap)wrap.hidden=!groups.length;
+  var box=document.getElementById('selsummary');
+  if(box)box.innerHTML=selSummaryRows();
+  var lab=document.getElementById('sellabel');
+  if(lab)lab.textContent='選んだ希望日時（'+groups.length+'件）';
+  var slab=document.getElementById('slotlabel');
+  if(slab)slab.textContent='日時を選ぶ（'+groups.length+'件選択中）';
+  var btn=document.getElementById('applybtn');
+  if(btn){btn.disabled=!groups.length||APPLY.sending;
+    btn.textContent=APPLY.sending?'送信しています…'
+      :(groups.length?'この'+groups.length+'件で申請する':'枠を選んでください');}
+}
+function applyDragEnd(){
+  document.removeEventListener('pointermove',applyDragMove);
+  document.removeEventListener('pointerup',applyDragEnd);
+  document.removeEventListener('pointercancel',applyDragEnd);
+  document.body.classList.remove('noselect');
+  if(!APDRAG)return;
+  APDRAG=null;
+  refreshApplyLive();
+}
+
+/* ---- 選んだ日時の一覧（並びがそのまま希望順） ---- */
+/* 順位の札。第1〜第3は色を変えるので、順位そのものをクラスに持たせる。
+   第4以降はまとめて r4 にして、もとの色のままにする */
+function rankCls(n){return 'cn r'+Math.min(n,4);}
+function selSummaryRows(){
+  return groupSlots(APPLY.sel).map(function(g,i){
+    var csv=g.join(',');
+    return '<div class="sr" data-slots="'+esc(csv)+'" onpointerdown="selDragStart(event,this)">'
+      +'<span class="'+rankCls(i+1)+'">第'+(i+1)+'希望</span>'
+      +'<span class="st">'+esc(fmtSlotRange(g))+'</span>'
+      +'<span class="x" onpointerdown="event.stopPropagation()"'
+        +' onclick="removeSlots(\''+esc(csv)+'\')">×</span>'
+    +'</div>';
+  }).join('');
+}
+/* ---- 一覧をドラッグして希望順を入れ替える ----
+   持ち上げた行は複製して指に付いてくるようにし、元の行は薄いまま列に残して
+   入れ替え先を示す。長押しを待たずに始める方式なので、行には CSS で
+   touch-action:none を当ててブラウザ既定の縦スクロールに指を取られないようにしている */
+var SELDRAG=null;
+function selDragStart(e,row){
+  if(e.button!==undefined&&e.button!==0)return;
+  var box=row.parentElement;
+  if(!box||box.querySelectorAll('.sr').length<2)return;   // 1件なら並べ替えようがない
+  e.preventDefault();
+  var r=row.getBoundingClientRect();
+  var ghost=row.cloneNode(true);
+  ghost.classList.add('ghost');
+  ghost.removeAttribute('onpointerdown');
+  ghost.style.width=r.width+'px';
+  ghost.style.left=r.left+'px';
+  box.appendChild(ghost);   // 一覧の中に入れておかないと .selsummary の見た目が当たらない
+  SELDRAG={row:row,ghost:ghost,box:box,grab:e.clientY-r.top,h:r.height,y:e.clientY};
+  selMoveGhost();
+  row.classList.add('placeholder');
+  document.body.classList.add('noselect');
+  // 指を端で止めたままでも送れるよう、スクロールは時計で回す
+  SELDRAG.timer=setInterval(selEdgeScroll,16);
+  document.addEventListener('pointermove',selDragMove);
+  document.addEventListener('pointerup',selDragEnd);
+  document.addEventListener('pointercancel',selDragEnd);
+}
+function selMoveGhost(){
+  var d=SELDRAG;
+  d.ghost.style.top=Math.max(4,Math.min(window.innerHeight-d.h-4,d.y-d.grab))+'px';
+}
+// 画面の上下の端まで持っていったら、そのままページを送る
+function selEdgeScroll(){
+  var d=SELDRAG;if(!d)return;
+  var m=70;
+  var v=d.y<m?-10:d.y>window.innerHeight-m?10:0;
+  if(!v)return;
+  window.scrollBy(0,v);
+  selReorder();
+}
+function selDragMove(e){
+  if(!SELDRAG)return;
+  SELDRAG.y=e.clientY;
+  selMoveGhost();
+  selReorder();
+}
+/* 指の高さがどの行の真ん中を越えたかで差し込み先を決める。
+   入れ替えは DOM を動かすだけにして、動く前の位置から滑らせる（FLIP） */
+function selReorder(){
+  var d=SELDRAG;if(!d)return;
+  var rows=Array.from(d.box.querySelectorAll('.sr:not(.ghost)'));
+  var anchor=null;
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i];
+    if(r===d.row)continue;
+    var b=r.getBoundingClientRect();
+    if(d.y<b.top+b.height/2){anchor=r;break;}
+  }
+  if(anchor===d.row.nextElementSibling)return;   // すでにその位置にいる
+  var before=rows.map(function(r){return [r,r.getBoundingClientRect().top];});
+  if(anchor)d.box.insertBefore(d.row,anchor);
+  else d.box.insertBefore(d.row,d.ghost);        // 末尾へ。複製は常に最後に置いてある
+  before.forEach(function(pair){
+    var r=pair[0],top=pair[1];
+    var dy=top-r.getBoundingClientRect().top;
+    if(!dy)return;
+    r.style.transition='none';
+    r.style.transform='translateY('+dy+'px)';
+  });
+  void d.box.offsetHeight;   // ここで一度反映させないと、続く指定がアニメにならない
+  before.forEach(function(pair){pair[0].style.transition='transform .16s ease';pair[0].style.transform='';});
+  selRenumber();
+}
+// 番号を振り直す。持ち上げている行とカレンダー側の番号も合わせる
+function selRenumber(){
+  var d=SELDRAG;if(!d)return;
+  var rows=Array.from(d.box.querySelectorAll('.sr:not(.ghost)'));
+  var rank=new Map();
+  rows.forEach(function(r,i){
+    var c=r.querySelector('.cn');
+    if(c){c.textContent='第'+(i+1)+'希望';c.className=rankCls(i+1);}
+    r.dataset.slots.split(',').forEach(function(iso){rank.set(iso,i+1);});
+  });
+  var gc=d.ghost.querySelector('.cn');
+  if(gc){var n=rows.indexOf(d.row)+1;gc.textContent='第'+n+'希望';gc.className=rankCls(n);}
+  document.querySelectorAll('.booktable .bt-c.sel').forEach(function(td){
+    var n2=rank.get(td.dataset.iso);
+    if(n2)td.innerHTML='<span class="bt-num">'+n2+'</span>';
+  });
+}
+function selDragEnd(){
+  document.removeEventListener('pointermove',selDragMove);
+  document.removeEventListener('pointerup',selDragEnd);
+  document.removeEventListener('pointercancel',selDragEnd);
+  document.body.classList.remove('noselect');
+  var d=SELDRAG;if(!d)return;
+  SELDRAG=null;
+  clearInterval(d.timer);
+  d.ghost.remove();
+  d.row.classList.remove('placeholder');
+  // 画面に並んでいるとおりを希望順として取り込む
+  APPLY.sel=Array.from(d.box.querySelectorAll('.sr'))
+    .reduce(function(acc,r){return acc.concat(r.dataset.slots.split(','));},[]);
+  refreshApplyLive();
+}
+
+/* ---------- 申請 ---------- */
+function submitApply(){
+  if(APPLY.sending)return;
+  var name=(APPLY.name||'').trim();
+  if(!name){
+    toast('お名前を入力してください');
+    var f=document.getElementById('applyname');
+    if(f)f.focus();
     return;
   }
-  var html = ''
-    + '<div class="card">'
-    + '  <h2>1. お名前</h2>'
-    + '  <p class="hint">担当者が本人を確認するために使います。本名でご記入ください。</p>'
-    + '  <label for="name">お名前</label>'
-    + '  <input type="text" id="name" autocomplete="name" placeholder="例：山田 太郎" maxlength="50">'
-    + '</div>'
-    + '<div class="card">'
-    + '  <h2>2. 面談したいスタッフ</h2>'
-    + '  <p class="hint">選ぶと、その方の空いている時間が下に出ます。</p>'
-    + '  <div class="staff-list">' + state.staff.map(function (s) {
-      return '<button type="button" class="staff-btn" data-staff="' + esc(s.id) + '"'
-        + ' aria-pressed="' + (state.staffId === s.id) + '">'
-        + '<span>' + esc(s.nickname) + 'さん</span></button>';
-    }).join('') + '</div>'
-    + '</div>'
-    + '<div id="slotArea"></div>';
-  el('main').innerHTML = html;
+  if(!APPLY.staff){toast('担当スタッフを選んでください');return;}
+  if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
 
-  Array.prototype.forEach.call(document.querySelectorAll('.staff-btn'), function (b) {
-    b.addEventListener('click', function () { selectStaff(b.getAttribute('data-staff')); });
-  });
-  renderSlots();
-}
+  /* 続いた枠をまとめた順がそのまま第1希望・第2希望…になる。
+     まとめ直したものを送ることで、重複や並びの乱れが残らないようにする */
+  var choices=groupSlots(APPLY.sel).reduce(function(a,g){return a.concat(g);},[]);
+  APPLY.sending=true;refreshApplyLive();
 
-function selectStaff(id) {
-  if (state.staffId === id) return;
-  state.staffId = id;
-  state.days = [];
-  state.picked = [];
-  // 選び直しが分かるよう、先に印だけ移してから枠を取りに行く
-  Array.prototype.forEach.call(document.querySelectorAll('.staff-btn'), function (b) {
-    b.setAttribute('aria-pressed', String(b.getAttribute('data-staff') === id));
-  });
-  el('slotArea').innerHTML = '<div class="card"><p class="hint">空いている時間を調べています…</p></div>';
-  api('/api/apply/' + encodeURIComponent(TOKEN) + '/slots?staff_id=' + encodeURIComponent(id))
-    .then(function (data) {
-      // 待っている間に別の人を選んでいたら、古い結果は捨てる
-      if (state.staffId !== id) return;
-      state.days = data.days || [];
-      renderSlots();
-    })
-    .catch(function (e) {
-      if (state.staffId !== id) return;
-      el('slotArea').innerHTML = '<div class="card"><div class="msg err">' + esc(e.message) + '</div></div>';
-    });
-}
-
-function renderSlots() {
-  var area = el('slotArea');
-  if (!area) return;
-  if (!state.staffId) { area.innerHTML = ''; return; }
-
-  var open = state.days.filter(function (d) { return d.slots.some(function (s) { return s.ok; }); });
-  if (!open.length) {
-    area.innerHTML = '<div class="card"><div class="msg info">'
-      + 'この方はいま空いている時間がありません。別のスタッフを選ぶか、支部の担当者にご相談ください。'
-      + '</div></div>';
-    return;
-  }
-
-  var html = '<div class="card">'
-    + '<h2>3. 希望する時間</h2>'
-    + '<p class="hint">最大' + MAX_PICK + 'つまで選べます。選んだ順が第1希望・第2希望…になります。</p>'
-    + open.map(function (d) {
-      return '<div class="day"><h3>' + esc(fmtDate(d.date)) + '</h3><div class="slots">'
-        + d.slots.map(function (s) {
-          var rank = state.picked.indexOf(s.iso);
-          return '<button type="button" class="slot" data-iso="' + esc(s.iso) + '"'
-            + (s.ok ? '' : ' disabled')
-            + ' aria-pressed="' + (rank >= 0) + '">' + esc(s.time)
-            + (rank >= 0 ? '<span class="rank">第' + (rank + 1) + '</span>' : '')
-            + '</button>';
-        }).join('')
-        + '</div></div>';
-    }).join('')
-    + '<div class="chosen">' + (state.picked.length ? '選択中：' + state.picked.length + '件' : 'まだ選ばれていません')
-    + '</div>'
-    + '</div>'
-    + '<div class="card">'
-    + '  <h2>4. 伝えたいこと（任意）</h2>'
-    + '  <p class="hint">オンライン希望、時間の都合など。空欄でも構いません。</p>'
-    + '  <textarea id="note" maxlength="500"></textarea>'
-    + '</div>'
-    + '<div id="sendMsg"></div>'
-    + '<button type="button" class="btn" id="send"'
-    + (state.picked.length && !state.sending ? '' : ' disabled') + '>'
-    + (state.sending ? '送信しています…' : 'この内容で申請する') + '</button>';
-
-  // 入力中の値は作り直しで消えるので、先に控えて後から戻す
-  var keepNote = el('note') ? el('note').value : '';
-  area.innerHTML = html;
-  if (el('note')) el('note').value = keepNote;
-
-  Array.prototype.forEach.call(area.querySelectorAll('.slot'), function (b) {
-    if (b.disabled) return;
-    b.addEventListener('click', function () { togglePick(b.getAttribute('data-iso')); });
-  });
-  el('send').addEventListener('click', send);
-}
-
-function togglePick(iso) {
-  var i = state.picked.indexOf(iso);
-  if (i >= 0) {
-    state.picked.splice(i, 1);
-  } else {
-    if (state.picked.length >= MAX_PICK) {
-      // 上限に達したら、いちばん古い選択を押し出す（選び直しで詰まらないように）
-      state.picked.shift();
-    }
-    state.picked.push(iso);
-  }
-  renderSlots();
-}
-
-function send() {
-  var name = el('name') ? el('name').value.trim() : '';
-  var msgBox = el('sendMsg');
-  if (!name) {
-    msgBox.innerHTML = '<div class="msg err">お名前を入力してください。</div>';
-    if (el('name')) el('name').focus();
-    return;
-  }
-  state.sending = true;
-  renderSlots();
-
-  api('/api/apply/' + encodeURIComponent(TOKEN), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: name,
-      staff_id: state.staffId,
-      choices: state.picked,
-      note: el('note') ? el('note').value : '',
-    }),
-  }).then(function (data) {
-    el('main').innerHTML = '<div class="card done">'
-      + '<div class="mark">✓</div>'
-      + '<h2>申請しました</h2>'
-      + '<p>' + esc(data.staff_nickname) + 'さんに届きました。<br>'
-      + '日程が決まりましたら、担当者からご連絡します。</p>'
-      + '<p class="chosen">この画面は閉じていただいて構いません。</p>'
-      + '</div>';
-    document.body.scrollTop = 0;
-    document.documentElement.scrollTop = 0;
-  }).catch(function (e) {
-    state.sending = false;
+  api('/api/apply/'+encodeURIComponent(TOKEN),{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:name,staff_id:APPLY.staff,choices:choices,note:(APPLY.note||'').trim()}),
+  }).then(function(data){
+    document.getElementById('main').innerHTML=
+      '<h1 class="page">申請しました</h1>'
+      +'<div class="card"><div class="cb">'
+      +'<div class="empty" style="padding:28px"><div class="ei">'+ic('check')+'</div>'
+      +'<p><b>'+esc(data.staff_nickname)+'</b>さんに届きました。<br>'
+      +'日程が決まりましたら、担当者からご連絡します。</p>'
+      +'<p class="fine">この画面は閉じていただいて構いません。</p>'
+      +'</div></div></div>';
+    window.scrollTo(0,0);
+  }).catch(function(e){
+    APPLY.sending=false;
     /* 枠が埋まった場合は、古い枠を出したままにすると同じ失敗を繰り返す。
        取り直してから、何が起きたかを伝える */
-    var staffId = state.staffId;
-    api('/api/apply/' + encodeURIComponent(TOKEN) + '/slots?staff_id=' + encodeURIComponent(staffId))
-      .then(function (data) {
-        if (state.staffId !== staffId) return;
-        state.days = data.days || [];
-        state.picked = [];
-        renderSlots();
-        el('sendMsg').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
-      })
-      .catch(function () {
-        renderSlots();
-        el('sendMsg').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
-      });
+    APPLY.sel=[];
+    toast(e.message);
+    loadGrid();
   });
 }
 
-load();
+/* ---------- 読み込み ---------- */
+var BRANCH_NAME='';
+api('/api/apply/'+encodeURIComponent(TOKEN)).then(function(data){
+  BRANCH_NAME=(data.branch&&data.branch.name)||'';
+  if(BRANCH_NAME)document.title=BRANCH_NAME+'の面談を申請 | OPS日調アプリ';
+  APPLY.staffList=data.staff||[];
+  render();
+}).catch(function(e){fatal(e.message);});
 </script>
 </body>
 </html>

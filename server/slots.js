@@ -45,17 +45,19 @@ function toMinutes(hhmm) {
  *          ok が false の枠は、埋まっているので選べない。
  *          画面に「埋まっている」と見せるために、消さずに残している。
  */
+/* 受け付けられない時間帯。開始と終了のミリ秒に直しておく。
+   日付として読めないものは、判定を狂わせるので捨てる */
+function prepBlocks(availability) {
+  return ((availability && availability.blocks) || [])
+    .map((b) => [new Date(b.start).getTime(), new Date(b.end).getTime()])
+    .filter(([s, e]) => Number.isFinite(s) && Number.isFinite(e));
+}
+
 function generateSlots(availability, takenMs, opts = {}) {
   const days = opts.days || 14;
   const nowMs = opts.now ? new Date(opts.now).getTime() : Date.now();
   const weekly = (availability && availability.weekly) || DEFAULT_WEEKLY;
-
-  /* 受け付けられない時間帯。開始と終了のミリ秒に直しておく。
-     日付として読めないものは、判定を狂わせるので捨てる */
-  const blocks = ((availability && availability.blocks) || [])
-    .map((b) => [new Date(b.start).getTime(), new Date(b.end).getTime()])
-    .filter(([s, e]) => Number.isFinite(s) && Number.isFinite(e));
-
+  const blocks = prepBlocks(availability);
   const taken = (takenMs || []).filter((t) => Number.isFinite(t));
 
   const out = [];
@@ -101,13 +103,119 @@ function generateSlots(availability, takenMs, opts = {}) {
   return out;
 }
 
+/* 申請ページで「次の1週間」を押せる回数。
+   ログイン不要のページなので、青天井にすると延々と先の週を作らせる負荷をかけられる */
+const MAX_WEEK_OFFSET = 4;
+
+/* 申請の受け付け時に、希望枠が妥当かを確かめる範囲（日数）。
+   週表示で辿り着ける最も遠い日（今日から最大34日先）を必ず含む長さにしてある。
+   ここが短いと、画面には出ているのに申請だけ弾かれることになる */
+const VALIDATION_DAYS = 45;
+
+/**
+ * 月曜始まりの1週間ぶんの表を作る。申請ページのカレンダー表示用。
+ *
+ * generateSlots が「空いている枠だけを日ごとに並べる」のに対して、
+ * こちらは埋まっている枠も `off` として残す。表の形を崩さないため。
+ *
+ * @param {number} weekOffset 0＝今週。MAX_WEEK_OFFSET を超える指定は丸める
+ * @returns {{week:number, hasNext:boolean, days:string[], times:string[],
+ *            grid:Array<Array<{state:'ok'|'off', iso:string}>>}}
+ *          grid は [日][時刻] の順。days と times がそれぞれの見出しになる。
+ */
+function generateWeekGrid(availability, takenMs, weekOffset, opts = {}) {
+  const nowMs = opts.now ? new Date(opts.now).getTime() : Date.now();
+  const weekly = (availability && availability.weekly) || DEFAULT_WEEKLY;
+  const blocks = prepBlocks(availability);
+  const taken = (takenMs || []).filter((t) => Number.isFinite(t));
+
+  const n = Number(weekOffset);
+  const week = Math.min(Math.max(0, Number.isFinite(n) ? Math.floor(n) : 0), MAX_WEEK_OFFSET);
+
+  // その週の月曜から7日ぶん。日曜は前の週の扱いになるので6日戻す
+  const today = new Date(nowMs);
+  today.setHours(0, 0, 0, 0);
+  const dow = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + (dow === 0 ? -6 : 1 - dow) + week * 7);
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push(d);
+  }
+
+  /* 表の縦幅は、その週に受け付けている曜日の中でいちばん早い時刻から
+     いちばん遅い時刻まで。曜日ごとに幅が違っても1つの表に収まる */
+  let minM = Infinity;
+  let maxM = -Infinity;
+  days.forEach((d) => {
+    const conf = weekly[d.getDay()];
+    if (!conf || !conf.on) return;
+    const s = toMinutes(conf.s);
+    const e = toMinutes(conf.e);
+    if (s === null || e === null) return;
+    minM = Math.min(minM, s);
+    maxM = Math.max(maxM, e);
+  });
+  // その週に受け付けている曜日が1つも無ければ、空の表にはせず既定の幅で「×」を並べる
+  if (minM === Infinity) { minM = 9 * 60; maxM = 19 * 60; }
+
+  const times = [];
+  for (let t = minM; t + SLOT_MINUTES <= maxM; t += SLOT_MINUTES) times.push(t);
+
+  const grid = days.map((day) => {
+    const conf = weekly[day.getDay()];
+    const s = conf && conf.on ? toMinutes(conf.s) : null;
+    const e = conf && conf.on ? toMinutes(conf.e) : null;
+    return times.map((t) => {
+      const dt = new Date(day);
+      dt.setHours(Math.floor(t / 60), t % 60, 0, 0);
+      const st = dt.getTime();
+      const en = st + SLOT_MINUTES * 60 * 1000;
+      const iso = dt.toISOString();
+      const off = { state: 'off', iso };
+      if (s === null || e === null) return off;             // 受け付けていない曜日
+      if (t < s || t + SLOT_MINUTES > e) return off;        // 受付時間の外
+      if (st < nowMs) return off;                           // 過ぎた時刻
+      if (taken.some((x) => Math.abs(x - st) < SLOT_MINUTES * 60 * 1000 - 1)) return off;
+      if (blocks.some(([bs, be]) => st < be && en > bs)) return off;
+      return { state: 'ok', iso };
+    });
+  });
+
+  return {
+    week,
+    hasNext: week < MAX_WEEK_OFFSET,
+    days: days.map((d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`),
+    times: times.map((t) => `${pad(Math.floor(t / 60))}:${pad(t % 60)}`),
+    grid,
+  };
+}
+
+/* 選べる枠の開始時刻（ミリ秒）を集めた Set。
+   希望を何件でも出せるため、1件ごとに枠を作り直すと同じ計算を何度も繰り返す。
+   受け付け側は、これを一度だけ作って照合する */
+function selectableTimes(availability, takenMs, opts = {}) {
+  const days = opts.days || VALIDATION_DAYS;
+  const out = new Set();
+  generateSlots(availability, takenMs, { ...opts, days }).forEach((d) => {
+    d.slots.forEach((s) => { if (s.ok) out.add(new Date(s.iso).getTime()); });
+  });
+  return out;
+}
+
 /* 送られてきた希望枠が、本当に選べる枠なのかを確かめる。
    画面を細工されても、埋まっている枠や受付時間外を掴まされないようにする */
 function isSelectableSlot(iso, availability, takenMs, opts = {}) {
   const target = new Date(iso).getTime();
   if (!Number.isFinite(target)) return false;
-  return generateSlots(availability, takenMs, opts)
+  const days = opts.days || VALIDATION_DAYS;
+  return generateSlots(availability, takenMs, { ...opts, days })
     .some((d) => d.slots.some((s) => s.ok && new Date(s.iso).getTime() === target));
 }
 
-module.exports = { generateSlots, isSelectableSlot, DEFAULT_WEEKLY, SLOT_MINUTES };
+module.exports = {
+  generateSlots, generateWeekGrid, isSelectableSlot, selectableTimes,
+  DEFAULT_WEEKLY, SLOT_MINUTES, MAX_WEEK_OFFSET, VALIDATION_DAYS,
+};
