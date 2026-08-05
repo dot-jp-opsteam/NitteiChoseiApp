@@ -552,6 +552,49 @@ function groupSlots(list){
   const at=r=>Math.min(...r.map(x=>first.get(x)));
   return runs.sort((a,b)=>at(a)-at(b));
 }
+/* 申請の希望を、申請ページと同じ数え方でまとめる。
+   ふつうは続いた30分枠が1件。ただし申請者が「終日OK」を選んだ日は、
+   途中に埋まっていた時間があっても、その日ぜんぶで1件として扱う。
+   「この日はいつでもいい」という申し出を2つにも3つにも割って見せないため。
+   all_day を持たない申請（この仕組みより前のもの）は、今までどおり続き具合だけで分ける */
+function ivGroups(iv){
+  const allDay={};
+  (iv&&Array.isArray(iv.all_day)?iv.all_day:[]).forEach(d=>{allDay[d]=true;});
+  const first=new Map();
+  ivChoices(iv).forEach((iso,i)=>{if(iso&&!first.has(iso))first.set(iso,i);});
+  const sorted=[...first.keys()].sort((a,b)=>new Date(a)-new Date(b));
+  const runs=[];
+  for(const iso of sorted){
+    const key=ymd(new Date(iso));
+    if(allDay[key]){
+      const found=runs.find(r=>r.allDay&&r.key===key);
+      if(found){found.slots.push(iso);continue;}
+      runs.push({allDay:true,key,slots:[iso]});continue;
+    }
+    const last=runs[runs.length-1];
+    const prev=last&&!last.allDay&&last.slots[last.slots.length-1];
+    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS&&key===ymd(new Date(prev))){
+      last.slots.push(iso);continue;
+    }
+    runs.push({allDay:false,key,slots:[iso]});
+  }
+  const at=r=>Math.min(...r.slots.map(x=>first.get(x)));
+  return runs.sort((a,b)=>at(a)-at(b));
+}
+/* まとまりの見出し。「8/6(木) 9:00〜11:30＆14:00〜23:00」。
+   終日OKの日は途中が抜けることがあるので、続いた区間ごとに ＆ でつなぐ */
+function fmtGroupRange(g){
+  if(!g||!g.slots.length)return '—';
+  const runs=[];
+  g.slots.slice().sort((a,b)=>new Date(a)-new Date(b)).forEach(iso=>{
+    const run=runs[runs.length-1];
+    const prev=run&&run[run.length-1];
+    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS)run.push(iso);
+    else runs.push([iso]);
+  });
+  const times=runs.map(r=>`${hm(r[0])}〜${hm(new Date(new Date(r[r.length-1]).getTime()+SLOT_MS))}`).join('＆');
+  return `${fmtDate(g.slots[0])} ${times}`;
+}
 /* 「8/5(火) 12:00〜13:30」。終わりは最後の枠の30分後 */
 function fmtSlotRange(g){
   if(!g||!g.length)return '—';
@@ -593,8 +636,10 @@ function fmtRel(iso){const diff=(Date.now()-new Date(iso))/1000;
 function toInputDT(iso){if(!iso)return '';const d=new Date(iso);
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;}
 const WD_JP=['日','月','火','水','木','金','土'];
-const DEFAULT_WEEKLY={0:{on:false,s:'09:00',e:'19:00'},1:{on:true,s:'09:00',e:'19:00'},2:{on:true,s:'09:00',e:'19:00'},
-  3:{on:true,s:'09:00',e:'19:00'},4:{on:true,s:'09:00',e:'19:00'},5:{on:true,s:'09:00',e:'19:00'},6:{on:false,s:'10:00',e:'16:00'}};
+/* 受付時間を設定していないスタッフの既定値。server/slots.js の DEFAULT_WEEKLY と同じにすること。
+   設定していない人でも実際に申し込んでもらえるよう、曜日を問わず9〜23時にしてある */
+const DEFAULT_WEEKLY={0:{on:true,s:'09:00',e:'23:00'},1:{on:true,s:'09:00',e:'23:00'},2:{on:true,s:'09:00',e:'23:00'},
+  3:{on:true,s:'09:00',e:'23:00'},4:{on:true,s:'09:00',e:'23:00'},5:{on:true,s:'09:00',e:'23:00'},6:{on:true,s:'09:00',e:'23:00'}};
 function getWeekly(id){const a=DB.availability&&DB.availability[id];return (a&&a.weekly)?a.weekly:DEFAULT_WEEKLY;}
 function ymd(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
 function hm(iso){const d=new Date(iso);return `${pad(d.getHours())}:${pad(d.getMinutes())}`;}
@@ -2248,9 +2293,10 @@ function openInterview(id){
     </div>`;
   /* 幅のある希望は、中の30分枠を並べて選んでもらう。
      面談そのものは30分なので、範囲まるごとではなく開始時刻を決める */
-  const choiceGroup=(n,g)=>g.length===1?choiceRow(n,g[0]):`<div class="cgroup ${g.includes(iv.confirmed_datetime)?'sel':''}">
-      <div class="chead"><span class="cn">${n}</span><span>${fmtSlotRange(g)}</span></div>
-      <div class="cslots">${g.map(val=>iv.status==='applied'
+  const choiceGroup=(n,g)=>(g.slots.length===1&&!g.allDay)?choiceRow(n,g.slots[0]):`<div class="cgroup ${g.slots.includes(iv.confirmed_datetime)?'sel':''}">
+      <div class="chead"><span class="cn">${n}</span><span>${fmtGroupRange(g)}</span>
+        ${g.allDay?'<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">終日OK</span>':''}</div>
+      <div class="cslots">${g.slots.map(val=>iv.status==='applied'
         ? `<button class="btn sm" onclick="confirmInterview('${id}','${val}')">${hm(val)}〜</button>`
         : `<span class="cslot ${iv.confirmed_datetime===val?'on':''}">${hm(val)}〜</span>`).join('')}</div>
       ${iv.status==='applied'?'<div class="cnote">この中から開始時刻を選んで確定します</div>':''}
@@ -2258,7 +2304,7 @@ function openInterview(id){
   let actions='';
   if(iv.status==='applied'){
     actions=`<div class="choice-list">
-        ${groupSlots(ivChoices(iv)).map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
+        ${ivGroups(iv).map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
       <div class="btn-row" style="margin-top:14px">
         <button class="btn" style="flex:1" onclick="openCustomConfirm('${id}')">別日時で確定</button>
         <button class="btn bad" style="flex:1" onclick="failInterview('${id}')">不成立にする</button>

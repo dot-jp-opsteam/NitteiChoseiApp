@@ -18,6 +18,22 @@
   main{max-width:920px;margin:0 auto}
   .applyhead{display:flex;align-items:baseline;gap:10px;margin:8px 0 2px}
   .applyhead .brand{font-weight:900;letter-spacing:.04em;font-size:13px;color:var(--sub)}
+
+  /* 日付の下の「終日OK」。その日の空いている枠をまとめて選ぶ */
+  .booktable thead .bt-all{padding:2px 4px 6px;background:var(--panel2)}
+  .allday{display:block;width:100%;font-family:inherit;font-size:10px;font-weight:800;
+    line-height:1;padding:5px 2px;border-radius:6px;border:1px solid var(--line);
+    background:var(--panel);color:var(--sub);cursor:pointer;white-space:nowrap}
+  .allday.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+  .allday.off{opacity:.35;cursor:default;border-style:dashed}
+
+  /* 希望一覧は「日付＋終日の印」と「時間」の2行にする。
+     終日OKの日は時間が2つ以上に割れることがあり、1行では読みにくいため */
+  .selsummary .sr .st{display:flex;flex-direction:column;gap:2px;line-height:1.35;min-width:0}
+  .selsummary .sr .st .sday{font-weight:700}
+  .selsummary .sr .st .stag{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;
+    padding:1px 6px;border-radius:5px;background:var(--brand-soft);color:var(--brand-d)}
+  .selsummary .sr .st .stime{font-size:12.5px;color:var(--sub)}
 </style>
 </head>
 <body>
@@ -50,6 +66,7 @@ var APPLY = {
   loading: false,
   loadError: '',
   sel: [],           // 選んだ枠。並び順がそのまま希望順
+  allDay: {},        // 「終日OK」になっている日 {'2026-08-06':true}
   note: '',
   sending: false,
 };
@@ -75,30 +92,66 @@ function parseYmd(s){var p=String(s).split('-');
   return new Date(Number(p[0]),Number(p[1])-1,Number(p[2]));}
 
 var SLOT_MS=30*60*1000;
-/* 続いている30分枠をひとつの希望としてまとめる。
-   12:00・12:30・13:00 を選んだら「12:00〜13:30」で1件という数え方になる。
-   固まりの並び順は「その固まりの枠に最初に触れた位置」で決まるので、
+// その枠が何日のものか。ISOのままだと日付がUTC基準になるので、必ずここを通す
+function dayKey(iso){
+  var d=new Date(iso);
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+}
+
+/* 希望のまとまりを作る。
+   ふつうは続いている30分枠がひとつの希望になる。
+   12:00・12:30・13:00 を選んだら「12:00〜13:30」で1件という数え方。
+
+   「終日OK」になっている日だけは別扱いで、途中に埋まっている時間があっても
+   その日ぜんぶで1件にまとめる。「この日はいつでもいい」という申し出を
+   3つにも4つにも割ってスタッフに見せると、かえって分かりにくいため。
+
+   並び順は「そのまとまりの枠に最初に触れた位置」で決まるので、
    なぞった順＝希望順がそのまま残る。日をまたぐ枠は続いていても分ける */
-function groupSlots(list){
+function applyGroups(){
   var first=new Map();
-  (list||[]).forEach(function(iso,i){if(iso&&!first.has(iso))first.set(iso,i);});
+  (APPLY.sel||[]).forEach(function(iso,i){if(iso&&!first.has(iso))first.set(iso,i);});
   var sorted=Array.from(first.keys()).sort(function(a,b){return new Date(a)-new Date(b);});
+  var runs=[];
+  sorted.forEach(function(iso){
+    var key=dayKey(iso);
+    if(APPLY.allDay[key]){
+      // 同じ日のまとまりが既にあれば、離れていてもそこへ足す
+      var found=null;
+      runs.forEach(function(r){if(r.allDay&&r.key===key)found=r;});
+      if(found){found.slots.push(iso);return;}
+      runs.push({allDay:true,key:key,slots:[iso]});
+      return;
+    }
+    var last=runs[runs.length-1];
+    var prev=last&&!last.allDay&&last.slots[last.slots.length-1];
+    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS&&key===dayKey(prev)){
+      last.slots.push(iso);return;
+    }
+    runs.push({allDay:false,key:key,slots:[iso]});
+  });
+  var at=function(r){return Math.min.apply(null,r.slots.map(function(x){return first.get(x);}));};
+  return runs.sort(function(a,b){return at(a)-at(b);});
+}
+
+/* 続いた枠を「9:00〜11:30」にまとめ、離れていれば ＆ でつなぐ */
+function fmtRanges(list){
+  var sorted=list.slice().sort(function(a,b){return new Date(a)-new Date(b);});
   var runs=[];
   sorted.forEach(function(iso){
     var run=runs[runs.length-1];
     var prev=run&&run[run.length-1];
-    var d=new Date(iso),p=prev&&new Date(prev);
-    if(p&&d-p===SLOT_MS&&d.getDate()===p.getDate())run.push(iso);
+    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS)run.push(iso);
     else runs.push([iso]);
   });
-  var at=function(r){return Math.min.apply(null,r.map(function(x){return first.get(x);}));};
-  return runs.sort(function(a,b){return at(a)-at(b);});
+  return runs.map(function(r){
+    return hm(r[0])+'〜'+hm(new Date(new Date(r[r.length-1]).getTime()+SLOT_MS));
+  }).join('＆');
 }
-/* 「8/5(火) 12:00〜13:30」。終わりは最後の枠の30分後 */
-function fmtSlotRange(g){
-  if(!g||!g.length)return '—';
-  if(g.length===1)return fmtDT(g[0]);
-  return fmtDT(g[0])+'〜'+hm(new Date(new Date(g[g.length-1]).getTime()+SLOT_MS));
+// 「8/5(火)」
+function fmtDay(iso){
+  var d=new Date(iso);
+  return (d.getMonth()+1)+'/'+d.getDate()+'('+WD_JP[d.getDay()]+')';
 }
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show');},2200);}
@@ -172,7 +225,8 @@ function viewApply(){
   }
 
   // まとまりごとの希望順。同じ固まりの枠にはすべて同じ番号が付く
-  var groups=groupSlots(APPLY.sel);
+  syncAllDay();
+  var groups=applyGroups();
 
   var staffOptions='<option value="">選んでください</option>'
     +APPLY.staffList.map(function(s){
@@ -261,8 +315,18 @@ function gridTable(){
     return '<th class="'+cls+'">'+d.getDate()+'<small>'+WD_JP[w]+'</small></th>';
   }).join('');
 
+  /* 日付の下に「終日OK」。その日の空いている枠をまとめて選べる。
+     空きが1つも無い日は押せないようにしておく */
+  var allDayCells=g.days.map(function(key,di){
+    var open=g.grid[di].filter(function(c){return c.state==='ok';}).length;
+    if(!open)return '<th class="bt-all"><span class="allday off">—</span></th>';
+    return '<th class="bt-all"><button type="button" class="allday'
+      +(APPLY.allDay[key]?' on':'')+'" data-day="'+esc(key)+'"'
+      +' onclick="toggleAllDay('+di+')">終日OK</button></th>';
+  }).join('');
+
   var rank=new Map();
-  groupSlots(APPLY.sel).forEach(function(grp,i){grp.forEach(function(iso){rank.set(iso,i+1);});});
+  applyGroups().forEach(function(grp,i){grp.slots.forEach(function(iso){rank.set(iso,i+1);});});
 
   var bodyRows=g.times.map(function(label,ti){
     var cells=g.grid.map(function(dayCol){
@@ -278,8 +342,47 @@ function gridTable(){
   }).join('');
 
   return '<div class="booktable-wrap"><table class="booktable">'
-    +'<thead><tr><th class="bt-corner"></th>'+headCells+'</tr></thead>'
+    +'<thead><tr><th class="bt-corner"></th>'+headCells+'</tr>'
+    +'<tr><th class="bt-corner"></th>'+allDayCells+'</tr></thead>'
     +'<tbody>'+bodyRows+'</tbody></table></div>';
+}
+
+/* 「終日OK」。その日の空いている枠をまとめて選ぶ／まとめて外す。
+   途中に埋まった時間があっても、希望としては1件にまとめて見せる */
+function toggleAllDay(di){
+  var g=APPLY.grid;
+  if(!g||!g.grid[di])return;
+  var isos=g.grid[di].filter(function(c){return c.state==='ok';})
+    .map(function(c){return c.iso;});
+  if(!isos.length)return;
+  var has={};
+  APPLY.sel.forEach(function(iso){has[iso]=true;});
+  var already=isos.every(function(iso){return has[iso];});
+  if(already){
+    var drop={};
+    isos.forEach(function(iso){drop[iso]=true;});
+    APPLY.sel=APPLY.sel.filter(function(iso){return !drop[iso];});
+  }else{
+    APPLY.sel=APPLY.sel.concat(isos.filter(function(iso){return !has[iso];}));
+  }
+  refreshApplyLive();
+}
+
+/* 「終日OK」の印を、いま選ばれている枠から付け直す。
+   その日の空いている枠がすべて選ばれていれば終日OK、1つでも外れていれば解除。
+   印を別に持って食い違うより、選択そのものから毎回導くほうが確実。
+   確かめられるのは表に出ている週だけなので、他の週の印はそのまま残す */
+function syncAllDay(){
+  var g=APPLY.grid;
+  if(!g)return;
+  var has={};
+  APPLY.sel.forEach(function(iso){has[iso]=true;});
+  g.days.forEach(function(key,di){
+    var isos=g.grid[di].filter(function(c){return c.state==='ok';})
+      .map(function(c){return c.iso;});
+    var all=isos.length>0&&isos.every(function(iso){return has[iso];});
+    if(all)APPLY.allDay[key]=true; else delete APPLY.allDay[key];
+  });
 }
 
 /* 選択サマリー。並びがそのまま希望順なので、ここを入れ替えれば順位が変わる。
@@ -309,61 +412,97 @@ function removeSlots(csv){
 }
 
 /* ---- カレンダーをなぞって複数の枠を選ぶ ----
-   アプリ本体と同じ方式。押し始めた枠が未選択なら追加、選択済みなら解除で固定し、
+   押し始めた枠から今いる枠までの**範囲ぜんぶ**を選ぶ。
+
+   以前は「指が実際に通ったマス」だけを選んでいたが、指を速く動かすと
+   途中のマスが飛ばされ、選んだ時間に穴が空いて希望が分かれてしまっていた。
+   範囲で選べば、指の動きの速さに関係なく必ず続いた時間になる。
+
+   押し始めた枠が未選択なら追加、選択済みなら解除でモードを固定し、
    往復してもモードが入れ替わらないようにしている。
-   追加は配列の末尾に積むので、なぞった順がそのまま希望順になる。
-   なぞれるのは縦（押し始めた日の列）だけ。列は td の並び順で見分ける。
-   iso の日付部分はUTC基準で列の途中で変わりうるため、判定には使えない */
+   なぞれるのは縦（押し始めた日の列）だけ。列は td の並び順で見分ける */
 var APDRAG=null;
 function applyPointerDown(e,iso){
   if(e.button!==undefined&&e.button!==0)return;
   e.preventDefault();
-  APDRAG={mode:APPLY.sel.indexOf(iso)>=0?'remove':'add',touched:new Set(),col:dragColOf(e.currentTarget)};
+  var col=dragColOf(e.currentTarget);
+  var cells=colCells(col);
+  APDRAG={
+    mode:APPLY.sel.indexOf(iso)>=0?'remove':'add',
+    col:col, cells:cells,
+    anchor:cells.indexOf(e.currentTarget),
+    base:APPLY.sel.slice(),          // なぞる前の状態。範囲を作り直すたびにここから組み立てる
+  };
   document.body.classList.add('noselect');
-  applyDragApply(e.currentTarget,iso);
+  applyDragTo(APDRAG.anchor);
   document.addEventListener('pointermove',applyDragMove);
   document.addEventListener('pointerup',applyDragEnd);
   document.addEventListener('pointercancel',applyDragEnd);
-}
-function applyDragMove(e){
-  if(!APDRAG)return;
-  var el=dragCellAt(e,APDRAG.col);
-  if(el)applyDragApply(el,el.dataset.iso);
 }
 function dragColOf(cell){
   return cell&&cell.cellIndex!==undefined
     ? {table:cell.closest('table'),index:cell.cellIndex} : null;
 }
-/* 指の位置にある枠を返す。押し始めた列から外れていたら null（＝その行は選ばれない） */
-function dragCellAt(e,col){
-  var el=document.elementFromPoint(e.clientX,e.clientY);
-  if(!el||!el.classList||!el.classList.contains('bt-c')||!el.dataset.iso)return null;
-  if(col&&(el.cellIndex!==col.index||el.closest('table')!==col.table))return null;
-  return el;
+/* その列のマスを、表に並んでいる順で返す。行番号として使う */
+function colCells(col){
+  if(!col||!col.table)return [];
+  return Array.prototype.filter.call(
+    col.table.querySelectorAll('tbody .bt-c'),
+    function(td){return td.cellIndex===col.index;});
 }
-function applyDragApply(cell,iso){
-  if(!APDRAG||APDRAG.touched.has(iso))return;
-  var i=APPLY.sel.indexOf(iso);
-  if(APDRAG.mode==='add'){
-    if(i>=0)return;
-    APPLY.sel.push(iso);
-  }else{
-    if(i<0)return;
-    APPLY.sel.splice(i,1);
+/* 指の高さが何行目にあたるか。横の位置は見ない（列は押し始めた日に固定なので）。
+   表の外まで動かしたときは、いちばん近い端に寄せる */
+function dragRowIndexAt(e){
+  var cells=APDRAG&&APDRAG.cells;
+  if(!cells||!cells.length)return -1;
+  for(var i=0;i<cells.length;i++){
+    var r=cells[i].getBoundingClientRect();
+    if(e.clientY>=r.top&&e.clientY<=r.bottom)return i;
   }
-  APDRAG.touched.add(iso);
+  if(e.clientY<cells[0].getBoundingClientRect().top)return 0;
+  if(e.clientY>cells[cells.length-1].getBoundingClientRect().bottom)return cells.length-1;
+  return -1;
+}
+function applyDragMove(e){
+  if(!APDRAG)return;
+  var i=dragRowIndexAt(e);
+  if(i>=0)applyDragTo(i);
+}
+/* 押し始めた行から i 行目までを、まとめて追加または解除する。
+   毎回「なぞる前の状態」から組み立て直すので、指を戻せば選択も戻る */
+function applyDragTo(i){
+  var d=APDRAG;
+  if(!d||i<0||d.anchor<0)return;
+  var from=Math.min(d.anchor,i),to=Math.max(d.anchor,i);
+  var range=d.cells.slice(from,to+1)
+    .filter(function(td){return td.classList.contains('ok');})   // 埋まった枠はまたぐだけ
+    .map(function(td){return td.dataset.iso;});
+  if(d.mode==='add'){
+    var had={};
+    d.base.forEach(function(iso){had[iso]=true;});
+    APPLY.sel=d.base.concat(range.filter(function(iso){return !had[iso];}));
+  }else{
+    var drop={};
+    range.forEach(function(iso){drop[iso]=true;});
+    APPLY.sel=d.base.filter(function(iso){return !drop[iso];});
+  }
   refreshApplyLive();
 }
 /* なぞっている間の表示更新。枠がつながると番号が繰り上がるので、
    画面全体を描き直さずに済む範囲（番号・一覧・見出し）だけを書き換える */
 function refreshApplyLive(){
-  var groups=groupSlots(APPLY.sel);
+  syncAllDay();
+  var groups=applyGroups();
   var rank=new Map();
-  groups.forEach(function(g,i){g.forEach(function(iso){rank.set(iso,i+1);});});
+  groups.forEach(function(g,i){g.slots.forEach(function(iso){rank.set(iso,i+1);});});
   document.querySelectorAll('.booktable .bt-c.ok').forEach(function(td){
     var n=rank.get(td.dataset.iso);
     if(n){td.classList.add('sel');td.innerHTML='<span class="bt-num">'+n+'</span>';}
     else if(td.classList.contains('sel')){td.classList.remove('sel');td.textContent='○';}
+  });
+  // 「終日OK」の押された状態も合わせる
+  document.querySelectorAll('.booktable .allday[data-day]').forEach(function(b){
+    b.classList.toggle('on',!!APPLY.allDay[b.dataset.day]);
   });
   var wrap=document.getElementById('selwrap');
   if(wrap)wrap.hidden=!groups.length;
@@ -393,11 +532,15 @@ function applyDragEnd(){
    第4以降はまとめて r4 にして、もとの色のままにする */
 function rankCls(n){return 'cn r'+Math.min(n,4);}
 function selSummaryRows(){
-  return groupSlots(APPLY.sel).map(function(g,i){
-    var csv=g.join(',');
+  return applyGroups().map(function(g,i){
+    var csv=g.slots.join(',');
     return '<div class="sr" data-slots="'+esc(csv)+'" onpointerdown="selDragStart(event,this)">'
       +'<span class="'+rankCls(i+1)+'">第'+(i+1)+'希望</span>'
-      +'<span class="st">'+esc(fmtSlotRange(g))+'</span>'
+      +'<span class="st">'
+        +'<span class="sday">'+esc(fmtDay(g.slots[0]))
+          +(g.allDay?'<span class="stag">終日OK</span>':'')+'</span>'
+        +'<span class="stime">'+esc(fmtRanges(g.slots))+'</span>'
+      +'</span>'
       +'<span class="x" onpointerdown="event.stopPropagation()"'
         +' onclick="removeSlots(\''+esc(csv)+'\')">×</span>'
     +'</div>';
@@ -522,15 +665,19 @@ function submitApply(){
   if(!APPLY.staff){toast('担当スタッフを選んでください');return;}
   if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
 
-  /* 続いた枠をまとめた順がそのまま第1希望・第2希望…になる。
-     まとめ直したものを送ることで、重複や並びの乱れが残らないようにする */
-  var choices=groupSlots(APPLY.sel).reduce(function(a,g){return a.concat(g);},[]);
+  /* まとめた順がそのまま第1希望・第2希望…になる。
+     まとめ直したものを送ることで、重複や並びの乱れが残らないようにする。
+     終日OKの日は、スタッフ側でも1件として見せたいので別に伝える */
+  var groups=applyGroups();
+  var choices=groups.reduce(function(a,g){return a.concat(g.slots);},[]);
+  var allDay=groups.filter(function(g){return g.allDay;}).map(function(g){return g.key;});
   APPLY.sending=true;refreshApplyLive();
 
   api('/api/apply/'+encodeURIComponent(TOKEN),{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:name,staff_id:APPLY.staff,choices:choices,note:(APPLY.note||'').trim()}),
+    body:JSON.stringify({name:name,staff_id:APPLY.staff,choices:choices,
+      all_day:allDay,note:(APPLY.note||'').trim()}),
   }).then(function(data){
     document.getElementById('main').innerHTML=
       '<h1 class="page">申請しました</h1>'

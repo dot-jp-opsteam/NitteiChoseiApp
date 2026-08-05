@@ -25,6 +25,14 @@
    それでも反映されない場合は、Renderの管理画面から
    Manual Deploy を実行すること。
    ========================================================= */
+/* 時計は日本時間で動かす。
+   Renderの実行環境はUTCなので、指定しないと「9:00の枠」が UTC の9:00＝日本の18:00
+   として作られ、申請ページに出ている時刻と実際の日時が9時間ずれる。
+   利用者は全員日本にいるため、サーバー全体を日本時間に固定してしまうのが確実。
+   Date を1度でも使う前に決める必要があるので、読み込みより先に置いてある。
+   時計を見て日付を組み立てているのは server/slots.js だけ */
+process.env.TZ = 'Asia/Tokyo';
+
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createClient } = require('@libsql/client');
@@ -2438,17 +2446,24 @@ app.get('/api/apply/:token/slots', async (req, res) => {
 /* 本名だけで面談を申請する。
    アカウントを作らないので、intern_id は空にして名前を data に持たせる */
 app.post('/api/apply/:token', async (req, res) => {
-  const { name, staff_id, choices, note } = req.body || {};
+  const { name, staff_id, choices, note, all_day } = req.body || {};
   const internName = String(name || '').trim();
   if (!internName) return res.status(400).json({ error: 'お名前を入力してください' });
   if (internName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
 
   /* 続いた30分枠は画面上でひとつの希望にまとまるが、送られてくるのは枠のままなので
-     件数ではなく枠数で数える。「10時〜13時」のような長い希望も通せるだけの幅を取り、
-     そのうえで際限なく送りつけられないよう上限は設ける */
+     件数ではなく枠数で数える。「終日OK」で1日28枠になるため、
+     見られる範囲（3週間ぶん）をすべて終日OKにしても通る幅を取ってある。
+     そのうえで、際限なく送りつけられないよう上限は設ける */
   const list = [...new Set((Array.isArray(choices) ? choices : []).filter(Boolean).map(String))];
   if (!list.length) return res.status(400).json({ error: '希望する枠を選んでください' });
-  if (list.length > 40) return res.status(400).json({ error: '希望する枠が多すぎます。絞ってください' });
+  if (list.length > 600) return res.status(400).json({ error: '希望する枠が多すぎます。絞ってください' });
+
+  /* 「終日OK」で選んだ日（YYYY-MM-DD）。
+     途中に埋まった時間があっても希望をひとまとめに見せるために使う。
+     表示のための印なので、ここでは形だけ整えて中身は信じない */
+  const allDay = [...new Set((Array.isArray(all_day) ? all_day : [])
+    .filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)))].slice(0, 40);
 
   try {
     const ctx = await applyContextFor(req.params.token, staff_id);
@@ -2472,6 +2487,7 @@ app.post('/api/apply/:token', async (req, res) => {
       branch_id: ctx.branch.id,
       status: 'applied',
       choices: list,
+      all_day: allDay,
       // 旧項目にも入れておく（この変更を巻き戻しても申請が読めるようにする保険）
       choice1: list[0], choice2: list[1] || null, choice3: list[2] || null,
       confirmed_datetime: null,

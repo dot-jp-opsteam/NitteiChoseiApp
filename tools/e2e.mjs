@@ -753,14 +753,18 @@ async function run() {
     check('空き枠を取れる', slotRes.status, 200);
     check('今週から始まる', slotRes.json.week, 0);
     check('7日ぶんの表になる', (slotRes.json.days || []).length, 7);
-    check('時間の見出しがある', (slotRes.json.times || []).length > 0, true);
+    /* 表の高さはスタッフの受付時間に関わらず9:00〜23:00で固定。
+       週ごとに伸び縮みすると、同じ時刻の行が上下にずれて選びにくくなるため */
+    check('表はいつも9:00から始まる', (slotRes.json.times || [])[0], '09:00');
+    check('表は22:30の枠で終わる', (slotRes.json.times || []).slice(-1)[0], '22:30');
+    check('30分刻みで28行ある', (slotRes.json.times || []).length, 28);
     check('表の中身が日数ぶんある', (slotRes.json.grid || []).length, 7);
     check('表の1列が時間の数と一致する',
       (slotRes.json.grid || [])[0]?.length, (slotRes.json.times || []).length);
     check('先の週へ進める', slotRes.json.hasNext, true);
     check('前の週は無い', (await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff&week=-3`)).json.week, 0);
     const capped = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff&week=99`);
-    check('先の週は上限で止まる', capped.json.week, 4);
+    check('先の週は上限で止まる', capped.json.week, 2);
     check('上限の週では次へ進めない', capped.json.hasNext, false);
 
     const firstOpen = await firstOpenSlot(token1, 'u_e2e_staff');
@@ -782,9 +786,11 @@ async function run() {
     const pastSlot = await api(null, 'POST', `/api/apply/${token1}`,
       { name: '山田 太郎', staff_id: 'u_e2e_staff', choices: ['2020-01-01T10:00:00.000Z'] });
     check('過ぎた日時は申請できない', pastSlot.status, 409);
+    /* 「終日OK」で1日28枠になるため、上限は見られる範囲をすべて選んでも通る幅にしてある。
+       それでも際限なくは受け付けない */
     const tooMany = await api(null, 'POST', `/api/apply/${token1}`,
       { name: '山田 太郎', staff_id: 'u_e2e_staff',
-        choices: Array.from({ length: 41 }, (_, i) => `2026-12-0${(i % 9) + 1}T0${i % 10}:00:00.000Z`) });
+        choices: Array.from({ length: 601 }, (_, i) => new Date(Date.now() + i * 60000).toISOString()) });
     check('希望する枠が多すぎると断られる', tooMany.status, 400);
 
     /* 画面では続いた枠がひとつの希望にまとまるので、送られてくる枠は1件とは限らない。
@@ -814,6 +820,33 @@ async function run() {
     check('支部が入る', mine?.branch_id, 'b1');
     check('希望日時が保たれている', (mine?.choices || [])[0], firstOpen.iso);
     check('相談内容が残る', mine?.note, 'よろしくお願いします');
+
+    /* 「終日OK」で申し込んだ日。途中に埋まった時間があっても
+       スタッフ側で1件の希望として見せるため、日付を別に持たせている */
+    const dayOf = (iso) => {
+      const d = new Date(iso);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const allDaySlot = await firstOpenSlot(token1, 'u_e2e_staff4');
+    const allDayApply = await api(null, 'POST', `/api/apply/${token1}`, {
+      name: '終日 太郎', staff_id: 'u_e2e_staff4',
+      choices: [allDaySlot.iso], all_day: [dayOf(allDaySlot.iso), 'これは日付ではない'],
+    });
+    check('終日OKつきで申請できる', allDayApply.status, 200);
+    const allDayView = await getDB(TOKENS.staff4);
+    const allDayIv = (allDayView.interviews || []).find((iv) => iv.intern_name === '終日 太郎');
+    check('終日OKの日が残る', (allDayIv?.all_day || []).join(','), dayOf(allDaySlot.iso));
+    check('日付の形でないものは捨てる', (allDayIv?.all_day || []).length, 1);
+
+    /* サーバーの時計は日本時間に固定してある。Renderの実行環境はUTCなので、
+       固定しないと画面に出ている時刻と実際の日時が9時間ずれる */
+    const jstCheck = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff`);
+    const anyCell = (jstCheck.json.grid || [])[0]?.[0];
+    check('表の見出しの時刻と、枠の実際の時刻が一致する',
+      `${String(new Date(anyCell.iso).getHours()).padStart(2, '0')}:${String(new Date(anyCell.iso).getMinutes()).padStart(2, '0')}`,
+      jstCheck.json.times[0]);
+    check('表の見出しの日付と、枠の実際の日付が一致する',
+      dayOf(anyCell.iso), jstCheck.json.days[0]);
 
     const otherView = await getDB(TOKENS.staff2);
     check('他支部のスタッフには見えない',

@@ -8,16 +8,23 @@
 
 const SLOT_MINUTES = 30;
 
+/* 申請ページの表に出す時間の幅。スタッフの設定に関わらず、いつもこの高さで出す。
+   週によって表の高さが変わると、同じ時刻の行が上下にずれて選びにくいため。
+   受け付けていない時間は「×」として並ぶ */
+const GRID_START = '09:00';
+const GRID_END = '23:00';
+
 /* 曜日ごとの受付時間の既定値。スタッフが何も設定していないときに使う。
-   0=日曜。平日は9〜19時、土曜は10〜16時、日曜は受け付けない */
+   0=日曜。設定していない人でも実際に選んでもらえるよう、
+   曜日を問わず9〜23時を受け付ける（2026-08-05にユーザーの指示で広げた） */
 const DEFAULT_WEEKLY = {
-  0: { on: false, s: '09:00', e: '19:00' },
-  1: { on: true, s: '09:00', e: '19:00' },
-  2: { on: true, s: '09:00', e: '19:00' },
-  3: { on: true, s: '09:00', e: '19:00' },
-  4: { on: true, s: '09:00', e: '19:00' },
-  5: { on: true, s: '09:00', e: '19:00' },
-  6: { on: false, s: '10:00', e: '16:00' },
+  0: { on: true, s: GRID_START, e: GRID_END },
+  1: { on: true, s: GRID_START, e: GRID_END },
+  2: { on: true, s: GRID_START, e: GRID_END },
+  3: { on: true, s: GRID_START, e: GRID_END },
+  4: { on: true, s: GRID_START, e: GRID_END },
+  5: { on: true, s: GRID_START, e: GRID_END },
+  6: { on: true, s: GRID_START, e: GRID_END },
 };
 
 function pad(n) {
@@ -105,12 +112,12 @@ function generateSlots(availability, takenMs, opts = {}) {
 
 /* 申請ページで「次の1週間」を押せる回数。
    ログイン不要のページなので、青天井にすると延々と先の週を作らせる負荷をかけられる */
-const MAX_WEEK_OFFSET = 4;
+const MAX_WEEK_OFFSET = 2;
 
 /* 申請の受け付け時に、希望枠が妥当かを確かめる範囲（日数）。
-   週表示で辿り着ける最も遠い日（今日から最大34日先）を必ず含む長さにしてある。
+   週表示で辿り着ける最も遠い日（今日から最大20日先）を必ず含む長さにしてある。
    ここが短いと、画面には出ているのに申請だけ弾かれることになる */
-const VALIDATION_DAYS = 45;
+const VALIDATION_DAYS = 30;
 
 /**
  * 月曜始まりの1週間ぶんの表を作る。申請ページのカレンダー表示用。
@@ -145,21 +152,11 @@ function generateWeekGrid(availability, takenMs, weekOffset, opts = {}) {
     days.push(d);
   }
 
-  /* 表の縦幅は、その週に受け付けている曜日の中でいちばん早い時刻から
-     いちばん遅い時刻まで。曜日ごとに幅が違っても1つの表に収まる */
-  let minM = Infinity;
-  let maxM = -Infinity;
-  days.forEach((d) => {
-    const conf = weekly[d.getDay()];
-    if (!conf || !conf.on) return;
-    const s = toMinutes(conf.s);
-    const e = toMinutes(conf.e);
-    if (s === null || e === null) return;
-    minM = Math.min(minM, s);
-    maxM = Math.max(maxM, e);
-  });
-  // その週に受け付けている曜日が1つも無ければ、空の表にはせず既定の幅で「×」を並べる
-  if (minM === Infinity) { minM = 9 * 60; maxM = 19 * 60; }
+  /* 表の縦幅はいつも同じ（9:00〜23:00）。
+     スタッフの受付時間に合わせて伸び縮みさせると、週を移るたびに行がずれて
+     同じ時刻を探しにくくなる。受け付けていない時間は「×」として並ぶ */
+  const minM = toMinutes(GRID_START);
+  const maxM = toMinutes(GRID_END);
 
   const times = [];
   for (let t = minM; t + SLOT_MINUTES <= maxM; t += SLOT_MINUTES) times.push(t);
@@ -218,4 +215,5 @@ function isSelectableSlot(iso, availability, takenMs, opts = {}) {
 module.exports = {
   generateSlots, generateWeekGrid, isSelectableSlot, selectableTimes,
   DEFAULT_WEEKLY, SLOT_MINUTES, MAX_WEEK_OFFSET, VALIDATION_DAYS,
+  GRID_START, GRID_END,
 };
