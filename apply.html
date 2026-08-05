@@ -19,13 +19,31 @@
   .applyhead{display:flex;align-items:baseline;gap:10px;margin:8px 0 2px}
   .applyhead .brand{font-weight:900;letter-spacing:.04em;font-size:13px;color:var(--sub)}
 
-  /* 日付の下の「終日OK」。その日の空いている枠をまとめて選ぶ */
-  .booktable thead .bt-all{padding:2px 4px 6px;background:var(--panel2)}
+  /* 日付の下の「終日OK」。その日の空いている枠をまとめて選ぶ。
+     枠線で囲むと表のマスに紛れて見出しに見えてしまうので、枠は付けず、
+     代わりにチェックの四角を置いて「押して入り切りするもの」だと分かるようにする */
+  .booktable thead .bt-all{padding:3px 2px 5px;background:var(--panel2)}
   .allday{display:block;width:100%;font-family:inherit;font-size:10px;font-weight:800;
-    line-height:1;padding:5px 2px;border-radius:6px;border:1px solid var(--line);
-    background:var(--panel);color:var(--sub);cursor:pointer;white-space:nowrap}
-  .allday.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
-  .allday.off{opacity:.35;cursor:default;border-style:dashed}
+    line-height:1.2;padding:4px 2px;border:0;border-radius:6px;background:transparent;
+    color:var(--sub);cursor:pointer;white-space:nowrap}
+  .allday:hover{background:var(--ok-soft);color:var(--brand-d)}
+  .allday.on{color:var(--brand-d)}
+  .allday.off{opacity:.35;cursor:default}
+  /* チェックの四角。文字（☑）だと端末によって出ないので、CSSで描いている */
+  .allday .box{display:inline-block;width:11px;height:11px;margin-right:3px;
+    border:1.5px solid currentColor;border-radius:3px;vertical-align:-2px;position:relative}
+  .allday.on .box{background:var(--brand);border-color:var(--brand)}
+  .allday.on .box::after{content:"";position:absolute;left:3px;top:0;width:3px;height:6px;
+    border:solid var(--on-fill);border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
+
+  /* 選んだ枠は希望順で色を変える。一覧の「第1希望」の札と同じ色にして、
+     表を見ただけでどれが第1希望なのか分かるようにする。第4以降はもとの色のまま */
+  .booktable .bt-c.ok.sel.r1{background:var(--rank1)}
+  .booktable .bt-c.ok.sel.r2{background:var(--rank2)}
+  .booktable .bt-c.ok.sel.r3{background:var(--rank3)}
+  .booktable .bt-c.ok.sel.r1 .bt-num{color:var(--rank1)}
+  .booktable .bt-c.ok.sel.r2 .bt-num{color:var(--rank2)}
+  .booktable .bt-c.ok.sel.r3 .bt-num{color:var(--rank3)}
 
   /* 希望一覧は「日付＋終日の印」と「時間」の2行にする。
      終日OKの日は時間が2つ以上に割れることがあり、1行では読みにくいため */
@@ -322,7 +340,8 @@ function gridTable(){
     if(!open)return '<th class="bt-all"><span class="allday off">—</span></th>';
     return '<th class="bt-all"><button type="button" class="allday'
       +(APPLY.allDay[key]?' on':'')+'" data-day="'+esc(key)+'"'
-      +' onclick="toggleAllDay('+di+')">終日OK</button></th>';
+      +' aria-pressed="'+(APPLY.allDay[key]?'true':'false')+'"'
+      +' onclick="toggleAllDay('+di+')"><span class="box"></span>終日OK</button></th>';
   }).join('');
 
   var rank=new Map();
@@ -333,7 +352,7 @@ function gridTable(){
       var c=dayCol[ti];
       if(c.state==='off')return '<td class="bt-c off">×</td>';
       var n=rank.get(c.iso);
-      return '<td class="bt-c ok '+(n?'sel':'')+'" data-iso="'+esc(c.iso)+'"'
+      return '<td class="bt-c ok '+(n?'sel '+rankOnly(n):'')+'" data-iso="'+esc(c.iso)+'"'
         +' onpointerdown="applyPointerDown(event,\''+esc(c.iso)+'\')"'
         +' title="タップ、または同じ日の中で上下になぞって選択">'
         +(n?'<span class="bt-num">'+n+'</span>':'○')+'</td>';
@@ -497,12 +516,19 @@ function refreshApplyLive(){
   groups.forEach(function(g,i){g.slots.forEach(function(iso){rank.set(iso,i+1);});});
   document.querySelectorAll('.booktable .bt-c.ok').forEach(function(td){
     var n=rank.get(td.dataset.iso);
-    if(n){td.classList.add('sel');td.innerHTML='<span class="bt-num">'+n+'</span>';}
-    else if(td.classList.contains('sel')){td.classList.remove('sel');td.textContent='○';}
+    td.classList.remove('r1','r2','r3','r4');
+    if(n){
+      td.classList.add('sel',rankOnly(n));
+      td.innerHTML='<span class="bt-num">'+n+'</span>';
+    }else if(td.classList.contains('sel')){
+      td.classList.remove('sel');td.textContent='○';
+    }
   });
   // 「終日OK」の押された状態も合わせる
   document.querySelectorAll('.booktable .allday[data-day]').forEach(function(b){
-    b.classList.toggle('on',!!APPLY.allDay[b.dataset.day]);
+    var on=!!APPLY.allDay[b.dataset.day];
+    b.classList.toggle('on',on);
+    b.setAttribute('aria-pressed',on?'true':'false');
   });
   var wrap=document.getElementById('selwrap');
   if(wrap)wrap.hidden=!groups.length;
@@ -530,7 +556,9 @@ function applyDragEnd(){
 /* ---- 選んだ日時の一覧（並びがそのまま希望順） ---- */
 /* 順位の札。第1〜第3は色を変えるので、順位そのものをクラスに持たせる。
    第4以降はまとめて r4 にして、もとの色のままにする */
-function rankCls(n){return 'cn r'+Math.min(n,4);}
+/* 順位そのものをクラスに持たせる。表のマスと一覧の札で同じ色を使う */
+function rankOnly(n){return 'r'+Math.min(n,4);}
+function rankCls(n){return 'cn '+rankOnly(n);}
 function selSummaryRows(){
   return applyGroups().map(function(g,i){
     var csv=g.slots.join(',');
@@ -617,24 +645,9 @@ function selReorder(){
   });
   void d.box.offsetHeight;   // ここで一度反映させないと、続く指定がアニメにならない
   before.forEach(function(pair){pair[0].style.transition='transform .16s ease';pair[0].style.transform='';});
-  selRenumber();
-}
-// 番号を振り直す。持ち上げている行とカレンダー側の番号も合わせる
-function selRenumber(){
-  var d=SELDRAG;if(!d)return;
-  var rows=Array.from(d.box.querySelectorAll('.sr:not(.ghost)'));
-  var rank=new Map();
-  rows.forEach(function(r,i){
-    var c=r.querySelector('.cn');
-    if(c){c.textContent='第'+(i+1)+'希望';c.className=rankCls(i+1);}
-    r.dataset.slots.split(',').forEach(function(iso){rank.set(iso,i+1);});
-  });
-  var gc=d.ghost.querySelector('.cn');
-  if(gc){var n=rows.indexOf(d.row)+1;gc.textContent='第'+n+'希望';gc.className=rankCls(n);}
-  document.querySelectorAll('.booktable .bt-c.sel').forEach(function(td){
-    var n2=rank.get(td.dataset.iso);
-    if(n2)td.innerHTML='<span class="bt-num">'+n2+'</span>';
-  });
+  /* 番号はここでは振り直さない。動かしている最中にくるくる変わると、
+     どこへ置こうとしているのか分からなくなるため。
+     指を離した時点で refreshApplyLive() がまとめて振り直す */
 }
 function selDragEnd(){
   document.removeEventListener('pointermove',selDragMove);
