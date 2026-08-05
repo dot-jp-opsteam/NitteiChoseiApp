@@ -498,6 +498,8 @@
   .attable{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
   .attable th,.attable td{padding:9px 10px;border-bottom:1px solid var(--line2);text-align:center}
   .attable thead th{font-size:11px;color:var(--sub);font-weight:700;background:var(--panel2)}
+  /* まだ答えていない人。名前は出すが薄くして、誰待ちかが一目で分かるようにする */
+  .attable thead th.nores{opacity:.5;font-weight:400}
   .attable tbody tr:last-child td{border-bottom:0}
   .attable .atd{text-align:left}
   .attable tr.on{background:var(--ok-soft)}

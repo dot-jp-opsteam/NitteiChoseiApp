@@ -241,6 +241,138 @@
     },
   ];
 
+  /* ---------- 出欠確認 ----------
+     依頼の一種（kind:'attend'）。候補ごとに ○△× を集め、送った人が1つ選んで確定する。
+     見え方をひと通り確かめられるよう、4つの状態を用意してある。
+       rq_att1  自分はまだ答えていない（他の人の回答は見えている）
+       rq_att2  自分も含め全員が答えている（未確定）
+       rq_att3  日程が確定したあと
+       rq_att4  自分が送った側（URLのコピー欄と「この日で確定」が出る）
+     候補はどれも3つ。ans() は3つぶんの回答をまとめて作る道具 */
+  function opt(id, d, h, m, endH) {
+    return { id: id, start: at(d, h, m), end: at(d, endH, m) };
+  }
+  function ans(userId, a, b, c) {
+    return [
+      { option_id: 'op0', user_id: userId, response: a },
+      { option_id: 'op1', user_id: userId, response: b },
+      { option_id: 'op2', user_id: userId, response: c },
+    ];
+  }
+  var attendRequests = [
+    {
+      id: 'rq_att1', sender_id: 'u_badmin', branch_id: HOME_BRANCH, kind: 'attend',
+      subject: '9月の支部定例ミーティングの日程',
+      body: '9月の定例の日程を決めたいです。\n候補ごとに ○（参加できる）△（たぶん）×（無理） で答えてください。',
+      target_label: '支部の全スタッフ',
+      recipient_ids: ['u_staff1', 'u_staff2', 'u_staff3'],
+      options: [opt('op0', 6, 19, 0, 21), opt('op1', 7, 19, 0, 21), opt('op2', 8, 13, 0, 15)],
+      confirmed: null,
+      // 東さん（既定のログイン相手）だけ未回答。答える前から他の人の回答が見える
+      responses: [].concat(ans('u_staff2', 'ok', 'no', 'ok'), ans('u_staff3', 'may', 'ok', 'ok')),
+      read_by: [{ user_id: 'u_staff2', at: at(-1, 9, 10) }],
+      created_at: at(-1, 8, 40),
+    },
+    {
+      id: 'rq_att2', sender_id: 'u_staff2', branch_id: HOME_BRANCH, kind: 'attend',
+      subject: '広報チームの打ち合わせ',
+      body: '来週の打ち合わせの日程です。1時間くらいを想定しています。',
+      target_label: '広報（部署）',
+      recipient_ids: ['u_staff1', 'u_staff3', 'u_badmin'],
+      options: [opt('op0', 4, 18, 0, 19), opt('op1', 5, 18, 0, 19), opt('op2', 5, 20, 0, 21)],
+      confirmed: null,
+      responses: [].concat(
+        ans('u_staff1', 'ok', 'ok', 'no'),
+        ans('u_staff3', 'no', 'ok', 'may'),
+        ans('u_badmin', 'may', 'ok', 'ok'),
+      ),
+      read_by: [{ user_id: 'u_staff1', at: at(-2, 13, 5) }],
+      created_at: at(-2, 12, 30),
+    },
+    {
+      id: 'rq_att3', sender_id: 'u_badmin', branch_id: HOME_BRANCH, kind: 'attend',
+      subject: '夏合宿の打ち上げ',
+      body: 'お疲れ様でした。打ち上げの日程を決めます。',
+      target_label: '支部の全スタッフ',
+      recipient_ids: ['u_staff1', 'u_staff2', 'u_staff3'],
+      options: [opt('op0', -1, 19, 0, 21), opt('op1', 2, 19, 0, 21), opt('op2', 3, 19, 0, 21)],
+      confirmed: 'op1',
+      event_id: 'ev_att3',
+      responses: [].concat(
+        ans('u_staff1', 'no', 'ok', 'ok'),
+        ans('u_staff2', 'may', 'ok', 'no'),
+        ans('u_staff3', 'no', 'ok', 'ok'),
+      ),
+      read_by: [{ user_id: 'u_staff1', at: at(-4, 20, 0) }],
+      created_at: at(-5, 10, 0),
+    },
+    {
+      id: 'rq_att4', sender_id: 'u_staff1', branch_id: HOME_BRANCH, kind: 'attend',
+      subject: 'インターン生の面談ふりかえり会',
+      body: 'ふりかえり会をやりたいです。都合のよい日を教えてください。',
+      target_label: '支部の全スタッフ',
+      recipient_ids: ['u_staff2', 'u_staff3', 'u_badmin'],
+      options: [opt('op0', 9, 17, 0, 18), opt('op1', 10, 17, 0, 18), opt('op2', 11, 10, 0, 11)],
+      confirmed: null,
+      // 1人だけ回答済み。残り2人が未回答として薄く並ぶ
+      responses: ans('u_staff2', 'ok', 'may', 'no'),
+      read_by: [],
+      created_at: at(0, 9, 0),
+    },
+  ];
+  requests = requests.concat(attendRequests);
+
+  /* 確定した出欠確認からできた予定。本番では確定ボタンを押した時点で作られる */
+  events.push({
+    id: 'ev_att3', creator_id: 'u_badmin', title: '夏合宿の打ち上げ',
+    description: 'お疲れ様でした。打ち上げの日程を決めます。',
+    start_datetime: at(2, 19, 0), end_datetime: at(2, 21, 0),
+    location: '', branch_id: HOME_BRANCH, visibility: 'branch',
+    color: '#56b8ac', meet_url: '', zoom_url: '',
+  });
+
+  /* 出欠確認は、依頼として届くのと合わせてメール履歴にも残る。
+     依頼の一覧を見ていない人が、メール画面からでも気づけるようにするため。
+     実際には送っていないので delivered は false（画面では「アプリ内の記録のみ」と出る）。
+     候補の日時は上の options から組み立てる（手で書くと日付がずれるため） */
+  function attendMailBody(r) {
+    var sender = users.filter(function (u) { return u.id === r.sender_id; })[0];
+    var lines = [(sender ? sender.nickname : '—') + 'さんから出欠確認が届きました。', ''];
+    if (r.body) lines = lines.concat([r.body, '']);
+    lines.push('【日程の候補】');
+    r.options.forEach(function (o, i) {
+      var s = new Date(o.start), e = new Date(o.end);
+      var w = '日月火水木金土'[s.getDay()];
+      var hm = function (d) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
+      lines.push('  ' + (i + 1) + '. ' + (s.getMonth() + 1) + '/' + s.getDate() + '(' + w + ') '
+        + hm(s) + '〜' + hm(e));
+    });
+    lines.push('', '下のリンクを開くと、候補ごとに ○△× で答えられます。',
+      'https://ops-nittyou-app.onrender.com/?req=' + r.id);
+    return lines.join('\n');
+  }
+  attendRequests.forEach(function (r) {
+    var sender = users.filter(function (u) { return u.id === r.sender_id; })[0];
+    notifications.push({
+      id: 'nt_' + r.id, type: '出欠確認', branch_id: HOME_BRANCH, at: r.created_at,
+      msg: (sender ? sender.nickname : '—') + 'さんから出欠確認「' + r.subject + '」が届きました',
+    });
+    if (r.confirmed) {
+      notifications.push({
+        id: 'nt_' + r.id + '_fix', type: '出欠確認', branch_id: HOME_BRANCH, at: r.created_at,
+        msg: '「' + r.subject + '」の日程が確定しました',
+      });
+    }
+    // 自分が送ったものは自分あてに届かないので、メールも作らない
+    if (r.recipient_ids.indexOf(ME.id) < 0) return;
+    emails.push({
+      id: 'ml_' + r.id, sender_id: r.sender_id, receiver_id: ME.id,
+      subject: '【出欠確認】' + r.subject,
+      body: attendMailBody(r),
+      sent_at: r.created_at, delivered: false, kind: null,
+    });
+  });
+
   /* ---------- スタッフの空き時間 ---------- */
   var weekday = { on: true, s: '09:00', e: '21:00' };
   var weekend = { on: false, s: '10:00', e: '16:00' };
@@ -351,12 +483,22 @@
         target_label: (body && body.target_label) || null,
         recipient_ids: (body && body.recipient_ids) || [],
         read_by: [], created_at: new Date().toISOString(),
+        // 出欠確認のときは候補の日時が付く。本番と同じ形で持たせる
+        kind: (body && body.kind) === 'attend' ? 'attend' : 'normal',
+        options: ((body && body.options) || []).map(function (o, i) {
+          return { id: 'op' + i, start: o.start, end: o.end || o.start };
+        }),
+        confirmed: null, event_id: null, responses: [],
       };
       STORE.requests = STORE.requests || [];
       STORE.requests.push(rq);
+      var isAtt = rq.kind === 'attend';
       var noti = {
-        id: 'nt_' + uid(), type: '依頼', branch_id: ME.branch_id,
-        msg: ME.nickname + 'さんから「' + rq.subject + '」が届きました', at: new Date().toISOString(),
+        id: 'nt_' + uid(), type: isAtt ? '出欠確認' : '依頼', branch_id: ME.branch_id,
+        msg: isAtt
+          ? ME.nickname + 'さんから出欠確認「' + rq.subject + '」が届きました'
+          : ME.nickname + 'さんから「' + rq.subject + '」が届きました',
+        at: new Date().toISOString(),
       };
       STORE.notifications = STORE.notifications || [];
       STORE.notifications.push(noti);
@@ -374,6 +516,48 @@
       }
       touch();
       return json({ ok: true, read: { user_id: ME.id, at: at } });
+    }
+    /* 出欠確認に答える。本番と同じく、自分の回答だけを入れ替える */
+    var attAnsMatch = /^\/api\/requests\/([^/]+)\/response$/.exec(path);
+    if (attAnsMatch && method === 'PUT') {
+      var att = (STORE.requests || []).filter(function (r) { return r.id === attAnsMatch[1]; })[0];
+      if (!att) return json({ error: '出欠確認が見つかりません' }, 404);
+      if (att.kind !== 'attend') return json({ error: 'これは出欠確認ではありません' }, 400);
+      var saved = ((body && body.answers) || []).map(function (a) {
+        return { option_id: a.option_id, user_id: ME.id, response: a.response };
+      });
+      att.responses = (att.responses || [])
+        .filter(function (a) { return a.user_id !== ME.id; })
+        .concat(saved);
+      touch();
+      return json({ ok: true, saved: saved });
+    }
+    /* 日程を確定する。本番では支部のカレンダーに予定が1件できるので、ここでも作る */
+    var attConfMatch = /^\/api\/requests\/([^/]+)\/confirm$/.exec(path);
+    if (attConfMatch && method === 'POST') {
+      var att2 = (STORE.requests || []).filter(function (r) { return r.id === attConfMatch[1]; })[0];
+      if (!att2) return json({ error: '出欠確認が見つかりません' }, 404);
+      var picked = (att2.options || []).filter(function (o) {
+        return o.id === (body && body.option_id);
+      })[0];
+      if (!picked) return json({ error: '候補が見つかりません' }, 400);
+      var newEvent = {
+        id: 'ev_' + uid(), title: att2.subject, description: att2.body || '',
+        start_datetime: picked.start, end_datetime: picked.end,
+        location: '', branch_id: att2.branch_id, visibility: 'branch',
+        color: '#56b8ac', creator_id: ME.id, meet_url: '', zoom_url: '',
+        created_at: new Date().toISOString(),
+      };
+      STORE.events = (STORE.events || []).concat([newEvent]);
+      att2.confirmed = picked.id;
+      att2.event_id = newEvent.id;
+      var confNoti = {
+        id: 'nt_' + uid(), type: '出欠確認', branch_id: att2.branch_id,
+        msg: '「' + att2.subject + '」の日程が確定しました', at: new Date().toISOString(),
+      };
+      STORE.notifications = (STORE.notifications || []).concat([confNoti]);
+      touch();
+      return json({ ok: true, confirmed: picked.id, event: newEvent, notification: confNoti });
     }
     var voteMatch = /^\/api\/events\/([^/]+)\/response$/.exec(path);
     if (voteMatch && method === 'PUT') {

@@ -1516,7 +1516,7 @@ function viewHome(){
       hex("go('interviews')",'list','面談一覧・確定','担当インターン生の面談',pend),
       hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread),
       hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごと・不可時間も'),
-      hex('openMailHistory()','mail','メール履歴','送信済みメール'),
+      hex('openMailHistory()','mail','メール履歴','送信・受信の記録'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
        毎日使うものではないので、六角形の上に控えめな帯として置く */
@@ -4259,8 +4259,16 @@ function attendTally(r){
   });
   return byOpt;
 }
-/* 1人でも答えた人の一覧。表の列になる */
+/* 表の列になる人。あて先の全員を並べ、まだ答えていない人も出す。
+   誰待ちなのかが分からないと催促できないため。
+   あて先から外れたあとに答えが残っている人（部署の変更など）も落とさない */
 function attendResponders(r){
+  const ids=[...(r.recipient_ids||[])];
+  (r.responses||[]).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
+  return ids;
+}
+/* 1人でも答えた人。集計の「回答者◯名」に使う */
+function attendAnswered(r){
   const ids=[];
   (r.responses||[]).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
   return ids;
@@ -4290,6 +4298,7 @@ function openAttendDetail(id){
   const isOwner=r.sender_id===ME.id||ME.role==='admin';
   const tally=attendTally(r);
   const responders=attendResponders(r);
+  const answered=new Set(attendAnswered(r));
   const opts=r.options||[];
   const confirmedOpt=r.confirmed?opts.find(o=>o.id===r.confirmed):null;
 
@@ -4298,7 +4307,8 @@ function openAttendDetail(id){
   opts.forEach(o=>{const t=tally.get(o.id);if(!best||t.ok>tally.get(best.id).ok)best=o;});
 
   const head=`<tr><th class="atd">日程</th>
-    ${responders.map(uid=>`<th>${esc((findUser(uid)||{}).nickname||'—')}</th>`).join('')}
+    ${responders.map(uid=>`<th class="${answered.has(uid)?'':'nores'}"
+      title="${answered.has(uid)?'':'まだ答えていません'}">${esc((findUser(uid)||{}).nickname||'—')}</th>`).join('')}
     <th class="atc ok">○</th><th class="atc may">△</th><th class="atc no">×</th>
     ${isOwner&&!r.confirmed?'<th></th>':''}</tr>`;
 
@@ -4345,11 +4355,13 @@ function openAttendDetail(id){
     ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
       <b>${fmtSlot(confirmedOpt)}</b> で確定しました。カレンダーに予定を追加しています。</span></div>`:''}
     <div class="statrow" style="margin-top:14px">
-      <div class="statbox a1"><small>回答者</small><b>${responders.length}<i>名</i></b></div>
+      <div class="statbox a1"><small>回答</small><b>${answered.size}<i>/${responders.length}名</i></b></div>
       <div class="statbox a3"><small>候補</small><b>${opts.length}<i>件</i></b></div>
       <div class="statbox a2"><small>最有力（○が最多）</small><b>${best?tally.get(best.id).ok:0}<i>名○</i></b></div>
     </div>
-    <label class="fl" style="margin-top:16px">出欠集計（${responders.length}名）</label>
+    <label class="fl" style="margin-top:16px">出欠集計
+      <span class="fl-sub">${answered.size}名が回答済み${responders.length>answered.size
+        ? ` ／ 未回答 ${responders.length-answered.size}名（薄い名前）`:''}</span></label>
     <div class="atwrap"><table class="attable"><thead>${head}</thead><tbody>${body}</tbody></table></div>
     ${answerBlock}`);
 }
@@ -4766,21 +4778,24 @@ async function submitRequest(){
 /* =========================================================
    メール履歴の閲覧
    ========================================================= */
+/* 送ったものと受け取ったものの両方を並べる。
+   以前はスタッフに送信済みしか出しておらず、出欠確認のように
+   「自分あてに届く記録」を受け取っても気づけなかった。
+   管理者にはサーバーが全員分を返すので、当事者のものだけに絞る */
 function openMailHistory(){
-  let list=(DB.emails||[]).slice();
-  if(ME.role==='intern')list=list.filter(m=>m.receiver_id===ME.id);        // 受信
-  else if(ME.role==='staff'||ME.role==='branch_admin')list=list.filter(m=>m.sender_id===ME.id); // 送信
-  list.sort((a,b)=>new Date(b.sent_at||0)-new Date(a.sent_at||0));
+  const mine=(DB.emails||[]).filter(m=>m.sender_id===ME.id||m.receiver_id===ME.id);
+  const list=mine.sort((a,b)=>new Date(b.sent_at||0)-new Date(a.sent_at||0));
   const rows=list.length?list.map(m=>{
-    const other=ME.role==='intern'?findUser(m.sender_id):findUser(m.receiver_id);
-    const who=ME.role==='intern'?'差出人':'宛先';
+    const got=m.receiver_id===ME.id;
+    const other=findUser(got?m.sender_id:m.receiver_id);
     return `<div class="row" style="cursor:pointer" onclick="openMailDetail('${m.id}')">
       <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('mail')}</span>
       <span class="rmain"><span class="rt">${esc(m.subject)}</span>
-      <span class="rs">${who}：${esc(other?.nickname||'—')} ・ ${m.sent_at?fmtRel(m.sent_at):''}</span></span>
+      <span class="rs"><span class="tag ${got?'ok':''}">${got?'受信':'送信'}</span>
+        ${got?'差出人':'宛先'}：${esc(other?.nickname||'—')} ・ ${m.sent_at?fmtRel(m.sent_at):''}</span></span>
       <span class="tile-arrow">${ic('chevron')}</span></div>`;}).join('')
-    :`<div class="empty" style="padding:26px"><div class="ei">${ic('mail')}</div><p>${ME.role==='intern'?'受信したメールはありません。':'送信したメールはありません。'}</p></div>`;
-  openSheet(`<h3>${ME.role==='intern'?'受信メール':'メール履歴（送信済み）'}</h3>
+    :`<div class="empty" style="padding:26px"><div class="ei">${ic('mail')}</div><p>メールの記録はまだありません。</p></div>`;
+  openSheet(`<h3>メール履歴</h3>
     <div class="hint">${ic('mail')}<span>面談の確定・不成立のお知らせはメールでも届きます。
       それ以外はアプリ内の記録のみです。</span></div>
     <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>`);

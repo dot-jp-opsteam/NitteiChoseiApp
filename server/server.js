@@ -611,6 +611,45 @@ async function listEmailsFor(user) {
   }));
 }
 
+/* 候補の日時を「9/12(土) 19:00〜21:00」の形にする。
+   利用者は全員日本にいるので、サーバーの時間帯に関係なく日本時間で出す */
+function fmtSlotJP(o) {
+  const f = (iso, opts) => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', ...opts })
+    .format(new Date(iso));
+  const day = f(o.start, { month: 'numeric', day: 'numeric', weekday: 'short' });
+  const from = f(o.start, { hour: '2-digit', minute: '2-digit', hour12: false });
+  const to = o.end ? f(o.end, { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+  return `${day} ${from}${to ? '〜' + to : ''}`;
+}
+
+/* 出欠確認を、あて先ひとりずつのメール履歴にも残す。
+   依頼の一覧を見ていない人が、メール画面からでも気づけるようにするため。
+   実際の送信はしないので delivered は 0（画面では「アプリ内の記録のみ」と出る） */
+async function recordAttendMails(actor, request) {
+  const url = `${process.env.PUBLIC_BASE_URL || ''}/?req=${encodeURIComponent(request.id)}`;
+  const lines = [
+    `${actor.nickname}さんから出欠確認が届きました。`,
+    '',
+    ...(request.body ? [request.body, ''] : []),
+    '【日程の候補】',
+    ...request.options.map((o, i) => `  ${i + 1}. ${fmtSlotJP(o)}`),
+    '',
+    '下のリンクを開くと、候補ごとに ○△× で答えられます。',
+    url,
+  ];
+  const body = lines.join('\n');
+  const sentAt = new Date().toISOString();
+  /* あて先の数だけ行が増えるが、1人1行にしないと「自分あて」で絞り込めない。
+     古い履歴は183日でアーカイブ用テーブルへ移るので、際限なく溜まることはない */
+  for (const receiverId of request.recipient_ids) {
+    await client.execute({
+      sql: 'INSERT INTO emails (id, sender_id, receiver_id, subject, body, sent_at, delivered) VALUES (?,?,?,?,?,?,?)',
+      args: ['ml_' + crypto.randomBytes(6).toString('hex'), actor.id, receiverId,
+        `【出欠確認】${request.subject}`, body, sentAt, 0],
+    });
+  }
+}
+
 /* 通知は依頼の送信などに付随して積まれる。専用APIの中から呼ぶ。
    画面側が積まれた通知をその場で表示できるよう、作った1件を返す */
 async function insertNotification({ type, msg, branch_id }) {
@@ -2124,6 +2163,11 @@ app.post('/api/requests', requireAuth, async (req, res) => {
         request.body, request.target_label, JSON.stringify(ids), request.created_at,
         request.kind, JSON.stringify(opts)],
     });
+    /* 出欠確認は、あて先ひとりずつのメール履歴にも残す。
+       依頼の一覧を見ていない人でも、メール画面から気づけるようにするため。
+       delivered は 0（＝アプリ内の記録のみ）。実際の送信はしていない */
+    if (isAttend) await recordAttendMails(actor, request);
+
     const notification = await insertNotification({
       type: isAttend ? '出欠確認' : '依頼', branch_id: actor.branch_id || null,
       msg: isAttend

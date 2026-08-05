@@ -297,6 +297,23 @@ async function testAttendance() {
   check('候補にidが振られる', made.json.request?.options?.[0]?.id, 'op0');
   const attId = made.json.request?.id;
 
+  /* 依頼の一覧を見ていない人がメール画面からでも気づけるよう、
+     出欠確認はあて先ひとりずつのメール履歴にも残す */
+  const mailView = await getDB(TOKENS.staff3);
+  const attMail = (mailView.emails || []).find((m) => m.subject === '【出欠確認】チーム懇親会');
+  check('出欠確認がメール履歴にも残る', !!attMail, true);
+  check('あて先本人が受け取っている', attMail?.receiver_id, 'u_e2e_staff3');
+  check('実際には送っていない印が付く', attMail?.delivered, false);
+  check('本文に候補が並ぶ', (attMail?.body || '').includes('【日程の候補】'), true);
+  check('本文に回答用のリンクが入る', (attMail?.body || '').includes(`/?req=${attId}`), true);
+  const otherMail = await getDB(TOKENS.staff4);
+  check('あて先の人数ぶん作られる',
+    (otherMail.emails || []).some((m) => m.subject === '【出欠確認】チーム懇親会'
+      && m.receiver_id === 'u_e2e_staff4'), true);
+  const notForOthers = await getDB(TOKENS.staff2);
+  check('あて先でない人のメールには出ない',
+    (notForOthers.emails || []).some((m) => m.subject === '【出欠確認】チーム懇親会'), false);
+
   const noOpts = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '候補なし', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'attend', options: [],
   });
@@ -368,6 +385,9 @@ async function testAttendance() {
   });
   check('ふつうの依頼は今までどおり作れる', normal.status, 200);
   check('ふつうの依頼には出欠の印が付かない', normal.json.request?.kind, 'normal');
+  const normalMail = await getDB(TOKENS.staff3);
+  check('ふつうの依頼はメール履歴に残さない',
+    (normalMail.emails || []).some((m) => String(m.subject || '').includes(normal.json.request?.subject)), false);
   const notAttend = await api(TOKENS.staff3, 'PUT', `/api/requests/${normal.json.request?.id}/response`,
     { answers: [{ option_id: 'op0', response: 'ok' }] });
   check('ふつうの依頼には出欠で答えられない', notAttend.status, 400);
