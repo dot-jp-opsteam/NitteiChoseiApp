@@ -22,6 +22,10 @@ services:
         - style.css
         - privacy.html
         - terms.html
+        # 2026-08-05に追加。アカウント無しの面談申請ページ。
+        # これが抜けていたため、apply.html だけを直したpushがビルドされず、
+        # 「pushしたのに本番が変わらない」状態になった
+        - apply.html
     envVars:
       - key: TURSO_DATABASE_URL
         sync: false
