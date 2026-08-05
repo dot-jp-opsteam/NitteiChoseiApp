@@ -147,10 +147,6 @@ const ICON={
          +'<rect pathLength="1" x="15.4" y="16.6" width="6" height="4.4" rx="1.2"/>'
          +'<path pathLength="1" d="M12 7.4v4.4"/>'
          +'<path pathLength="1" d="M5.6 16.6v-2.4a2.4 2.4 0 0 1 2.4-2.4h8a2.4 2.4 0 0 1 2.4 2.4v2.4"/>',
-  // インターン先（かばんと場所）
-  workplace:'<rect pathLength="1" x="3" y="7.4" width="18" height="12.4" rx="2"/>'
-           +'<path pathLength="1" d="M8.8 7.4V5.8a1.8 1.8 0 0 1 1.8-1.8h2.8a1.8 1.8 0 0 1 1.8 1.8v1.6"/>'
-           +'<path pathLength="1" d="M3 12.4h18"/>',
   alarm:'<circle pathLength="1" cx="12" cy="13.2" r="7.6"/>'
        +'<path pathLength="1" d="M12 9.6v3.6l2.4 1.4"/>'
        +'<path pathLength="1" d="M5.4 3.6 2.9 6.1"/><path pathLength="1" d="m18.6 3.6 2.5 2.5"/>',
@@ -323,8 +319,10 @@ function seed(){
   // 支部の一覧は STANDARD_BRANCHES（helpers内）にまとめてある
   const branches=STANDARD_BRANCHES.map((name,i)=>({id:'b'+(i+1),name}));
   return {branches,interviews:[],events:[],event_responses:[],emails:[],availability:{},notifications:[],
-    // profiles＝ユーザーごとの追加情報（所属部署・インターン先）。
-    // ユーザー表はサーバー側の正規テーブルなので、こちら側の付加情報はここに持つ
+    // profiles＝ユーザーごとの追加情報（所属部署など）。
+    // ユーザー表はサーバー側の正規テーブルなので、こちら側の付加情報はここに持つ。
+    // internships はインターン先の一覧。画面と機能は 2026-08-05 に取り除いたが、
+    // 中身は消していないので、読み書きの器だけ残してある
     profiles:{},internships:[],requests:[],
     seededAt:nowISO()};
 }
@@ -840,7 +838,18 @@ function goGoogleLogin(){
   // Google側の欄と、メール側の欄。どちらにチェックが入っていても自動ログインにする
   const remember=document.getElementById('googleRemember')?.checked
               || document.getElementById('loginRemember')?.checked;
+  keepDeepLink();
   location.href='/api/auth/google/login'+(remember?'?remember=1':'');
+}
+/* 出欠URL（/?req=xxx）からログイン画面に来た人がGoogleを選ぶと、
+   ページごとGoogleへ移るので ?req= が消えてしまう。戻ってきたときは
+   #token=… しか無く、回答画面ではなくホームに着いていた。
+   送り出す前に行き先を控えておき、戻ってきたら openDeepLink() が拾う */
+const DEEPLINK_KEY='ops_deeplink_req';
+function keepDeepLink(){
+  const id=new URLSearchParams(location.search).get('req');
+  // このタブ限りで足りる。localStorage だと別のタブや翌日にも残ってしまう
+  if(id)sessionStorage.setItem(DEEPLINK_KEY,id);
 }
 function toggleLoginPw(cb){
   const el=document.getElementById('loginPassword');
@@ -1154,7 +1163,10 @@ function enterApp(){
    自動ログインが効いていればログイン画面を挟まずにここへ来る。
    一度開いたらURLからは消す（再読み込みのたびに開き直さないため） */
 function openDeepLink(){
-  const id=new URLSearchParams(location.search).get('req');
+  // Googleログインを挟むとURLから消えるので、控えておいたものも見る
+  const kept=sessionStorage.getItem(DEEPLINK_KEY);
+  sessionStorage.removeItem(DEEPLINK_KEY);   // 一度使ったら捨てる
+  const id=new URLSearchParams(location.search).get('req')||kept;
   if(!id)return;
   history.replaceState(null,'',location.pathname);
   const r=allRequests().find(x=>x.id===id);
@@ -1364,10 +1376,6 @@ function buildNav(){
   document.getElementById('sbAct').innerHTML=`
     ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す登録リンクを作る">
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
-    ${canSendRequest()?`<button class="sb-item" onclick="openInternshipMaster()" title="支部のインターン先を登録・編集する">
-      <span class="si">${ic('workplace')}</span><span class="sl">インターン先一覧</span></button>`:''}
-    ${ME.role==='intern'?`<button class="sb-item" onclick="openMyInternshipForm()" title="自分のインターン先を設定する">
-      <span class="si">${ic('workplace')}</span><span class="sl">インターン先</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
     ${ME.role==='intern'?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
@@ -1543,7 +1551,7 @@ function viewHome(){
         <span class="cta-go">${ic('chevron')}</span>
       </span></button>`;
     /* ここは「これからやること」だけに絞る。
-       インターン先・受信メール・カレンダー連携は左メニューへ移した */
+       受信メール・カレンダー連携は左メニューへ移した */
     return hi+hexgrid([
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
       hex("go('requests')",'megaphone','受けた依頼','スタッフからの連絡',unread),
@@ -3587,13 +3595,12 @@ async function refreshUsersAfterAdminChange(){
   try{const remote=await apiGetDB();if(remote&&remote.users)DB.users=remote.users;}catch(e){}
   render();
 }
-/* ユーザー一覧の2行目。インターン生は担当スタッフとインターン先、
-   スタッフは所属部署を出す（どちらも未設定なら空にする） */
+/* ユーザー一覧の2行目。インターン生は担当スタッフ、
+   スタッフは所属部署を出す（未設定なら空にする） */
 function userRowSub(u){
   if(u.role==='intern'){
     const staff=findUser(u.staff_id);
-    const place=findInternship(getProfile(u.id).internship_id);
-    return [staff?'担当：'+esc(staff.nickname):'担当なし',place?esc(place.name):''].filter(Boolean).join(' ・ ');
+    return staff?'担当：'+esc(staff.nickname):'担当なし';
   }
   const d=getDepts(u.id);
   return d.length?esc(d.join('・')):'';
@@ -3638,9 +3645,6 @@ function openUserForm(id){
       <label class="fl">担当スタッフ</label>
       <select id="usStaff">${staffOptionsFor(u.branch_id,u.staff_id)}</select>
       <p class="fine" style="margin-top:6px">インターン生にだけ設定できます。</p>
-      <label class="fl">インターン先</label>
-      <select id="usPlace">${internshipOptionsFor(getProfile(u.id).internship_id)}</select>
-      <p class="fine" style="margin-top:6px">本人も設定できます。一覧に無いときは「インターン先一覧」から先に追加してください。</p>
     </div>
     <div class="btn-row" style="margin-top:18px">
       ${u.id!==ME.id?`<button class="btn bad" onclick="deleteUser('${u.id}')">削除</button>`:''}
@@ -3657,11 +3661,6 @@ function staffOptionsFor(branchId,selected){
   return `<option value="">設定しない</option>`
     +list.map(s=>`<option value="${s.id}" ${s.id===selected?'selected':''}>${esc(s.nickname)}</option>`).join('');
 }
-/* 自支部のインターン先を選択肢にする */
-function internshipOptionsFor(selected){
-  return `<option value="">設定しない</option>`
-    +branchInternships().map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.name)}</option>`).join('');
-}
 function syncUserStaffField(){
   const role=document.querySelector('input[name=usRole]:checked').value;
   const wrap=document.getElementById('usStaffWrap');
@@ -3677,15 +3676,9 @@ async function saveUser(id){
   const role=document.querySelector('input[name=usRole]:checked').value;
   const data={nickname:nick,branch_id:document.getElementById('usBranch').value,role,
     staff_id:role==='intern'?(document.getElementById('usStaff').value||null):null};
-  // インターン先はサーバーのユーザー表ではなくDB側に持っているので、別々に保存する
-  const placeEl=document.getElementById('usPlace');
-  const place=role==='intern'?(placeEl?placeEl.value||null:null):null;
   try{
     const res=await api(`/api/admin/users/${id}`,{method:'PATCH',body:JSON.stringify(data)});
     if(!res.ok){const d=await res.json().catch(()=>({}));toast(d.error||'保存に失敗しました');return;}
-    if(place!==(getProfile(id).internship_id||null)){
-      await mutate(db=>{profileOf(db,id).internship_id=place;});
-    }
     closeSheet();toast('保存しました');
     await refreshUsersAfterAdminChange();
   }catch(e){toast('保存に失敗しました');}
@@ -3766,8 +3759,7 @@ function openNotifications(){
 /* =========================================================
    担当一覧（スタッフ・支部管理者）
    ---------------------------------------------------------
-   自分が担当しているインターン生を並べ、担当の引き継ぎと
-   インターン先の変更ができる。
+   自分が担当しているインターン生を並べ、担当を引き継げる。
    引き継げるのは「自分が担当している人」だけ（サーバー側でも同じ判定）。
    ========================================================= */
 function myInterns(){
@@ -3785,13 +3777,13 @@ function viewMyInterns(){
         左メニューの「リンク作成」から登録リンクを渡すと、あなたが担当になります。</p></div>`;
   }
   const rows=list.map(u=>{
-    const place=findInternship(getProfile(u.id).internship_id);
     const pend=(DB.interviews||[]).filter(i=>i.intern_id===u.id&&i.status==='applied').length;
+    const staff=findUser(u.staff_id);
     return `<div class="row" style="cursor:pointer" onclick="openInternCard('${u.id}')">
       <span class="av hexav ${accOf(u.id)}">${esc(initials(u.nickname))}</span>
       <span class="rmain"><span class="rt">${esc(u.nickname)}
         ${pend?`<span class="tag" style="background:var(--warn-soft);color:var(--warn)">申請 ${pend}件</span>`:''}</span>
-      <span class="rs">${place?esc(place.name):'インターン先は未設定'}</span></span>
+      <span class="rs">${staff?'担当：'+esc(staff.nickname):'担当なし'}</span></span>
       <span class="tile-arrow">${ic('chevron')}</span></div>`;
   }).join('');
   return `<h1 class="page">担当一覧</h1>
@@ -3806,8 +3798,6 @@ function openInternCard(id){
     .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
   const staffOpts=`<option value="">担当を外す</option>`
     +others.map(s=>`<option value="${s.id}" ${s.id===u.staff_id?'selected':''}>${esc(s.nickname)}${s.id===ME.id?'（あなた）':''}</option>`).join('');
-  const place=getProfile(u.id).internship_id||'';
-
   openSheet(`<h3>${esc(u.nickname)}さん</h3>
     <dl class="kv" style="margin:12px 0">
       <dt>所属支部</dt><dd>${esc(branchName(u.branch_id))}</dd>
@@ -3819,16 +3809,12 @@ function openInternCard(id){
     <select id="icStaff">${staffOpts}</select>
     <p class="fine" style="margin-top:6px">ほかのスタッフに引き継げます。引き継ぐと、この一覧からは消えます。</p>
 
-    <label class="fl">インターン先</label>
-    <select id="icPlace">${internshipOptionsFor(place)}</select>
-
     <div class="field-err" id="icErr"></div>
     <button class="btn pri block" style="margin-top:18px" onclick="saveInternCard('${u.id}')">保存する</button>`);
 }
 
 async function saveInternCard(id){
   const staff_id=document.getElementById('icStaff').value||null;
-  const place=document.getElementById('icPlace').value||null;
   const err=document.getElementById('icErr');
   err.classList.remove('show');
   const before=findUser(id);
@@ -3840,9 +3826,6 @@ async function saveInternCard(id){
       const data=await res.json().catch(()=>({}));
       if(!res.ok){err.textContent=data.error||'変更に失敗しました';err.classList.add('show');return;}
     }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');return;}
-  }
-  if(place!==(getProfile(id).internship_id||null)){
-    await mutate(db=>{profileOf(db,id).internship_id=place;});
   }
   closeSheet();
   // 担当が変わるとユーザー一覧の中身も変わるので、サーバーから取り直す
@@ -3904,8 +3887,6 @@ function profileRow(icon,label,act,right){
 function profileLinks(){
   const themeVal=`<span id="profThemeVal" style="color:var(--mut);font-size:13px;font-weight:700">${currentTheme()==='light'?'ライト':'ダーク'}</span>`;
   return [
-    ME.role==='intern'?['workplace','インターン先','openMyInternshipForm()']:null,
-    canSendRequest()?['workplace','インターン先一覧','openInternshipMaster()']:null,
     canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
     ['key','パスワードを変更','openPasswordChange()'],
     ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
@@ -3924,17 +3905,12 @@ function profileHead(){
 /* ---------- 見るだけの画面 ---------- */
 function openMyProfile(){
   PROF_COLOR=null;
-  // 部署はスタッフだけのものなので、インターン生にはインターン先を出す
-  const third=ME.role==='intern'
-    ? ['インターン先',(findInternship(getProfile(ME.id).internship_id)||{}).name||'未設定']
-    : ['所属部署',getDepts(ME.id).join('・')||'未設定'];
-
   openSheet(`<h3>プロフィール</h3>
     ${profileHead()}
     <dl class="kv" style="margin:18px 0">
       <dt>名前</dt><dd>${esc(ME.nickname||'—')}</dd>
       <dt>所属支部</dt><dd>${esc(branchName(ME.branch_id))}</dd>
-      <dt>${third[0]}</dt><dd>${esc(third[1])}</dd>
+      ${ME.role==='intern'?'':`<dt>所属部署</dt><dd>${esc(getDepts(ME.id).join('・')||'未設定')}</dd>`}
     </dl>
     <button class="btn pri block" onclick="openMyProfileEdit()">${ic('edit')}プロフィールを編集</button>
 
@@ -3953,7 +3929,7 @@ function openMyProfileEdit(){
   const swatches=AVATAR_COLORS.map(c=>`<button type="button" class="swatch ${c.v===cur?'on':''}"
     style="background:${c.c}" title="${c.n}" onclick="pickAvatarColor('${c.v}')"></button>`).join('');
 
-  // 部署はスタッフだけの項目。インターン生には出さず、インターン先の変更へ案内する
+  // 部署はスタッフだけの項目。インターン生には出さない
   const deptBlock=canSendRequest()?`
     <label class="fl">所属部署</label>
     <div class="chklist">${DEPARTMENTS.map(d=>`<label class="chk">
@@ -4040,11 +4016,11 @@ async function saveMyProfile(){
 }
 
 /* =========================================================
-   所属部署・インターン先
+   所属部署
    ---------------------------------------------------------
    ユーザー表はサーバー側の正規テーブルなので、支部やニックネームと違い
-   自由に列を足せない。所属部署とインターン先は「あとから足した付加情報」
-   なので、DB.profiles（ユーザーID→情報）に持たせている。
+   自由に列を足せない。所属部署は「あとから足した付加情報」なので、
+   DB.profiles（ユーザーID→情報）に持たせている。
    DB.availability が同じ形なので、作りを揃えた。
    ========================================================= */
 const DEPARTMENTS=['事務局','プログラム','人財開発','クライアント','コンシューマー',
@@ -4084,116 +4060,6 @@ async function saveMyDepartments(){
   toast(departments.length?'所属部署を保存しました':'所属部署を空にしました');
 }
 
-/* ---------- インターン先マスタ ---------- */
-function branchInternships(){
-  return (DB.internships||[]).filter(p=>p.branch_id===ME.branch_id)
-    .sort((a,b)=>String(a.name).localeCompare(String(b.name),'ja'));
-}
-function findInternship(id){return (DB.internships||[]).find(p=>p.id===id)||null;}
-/* そのインターン先に所属しているインターン生 */
-function internsAt(internshipId){
-  return DB.users.filter(u=>u.role==='intern'&&u.branch_id===ME.branch_id
-    &&getProfile(u.id).internship_id===internshipId);
-}
-
-/* 支部のスタッフ全員が追加・編集できる。同じ名前が増えると宛先選びで迷うため、
-   登録時に既存と突き合わせて注意を出す */
-function openInternshipMaster(){
-  const list=branchInternships();
-  const rows=list.length?list.map(p=>{
-    const n=internsAt(p.id).length;
-    return `<div class="row">
-      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('workplace')}</span>
-      <span class="rmain"><span class="rt">${esc(p.name)}</span>
-      <span class="rs">${n}名が登録 ・ 追加 ${fmtRel(p.created_at)}</span></span>
-      <button class="btn sm" onclick="openInternshipForm('${p.id}')">編集</button></div>`;
-  }).join(''):`<div class="empty" style="padding:26px"><div class="ei">${ic('workplace')}</div>
-      <p>インターン先がまだ登録されていません。</p></div>`;
-  openSheet(`<h3>インターン先一覧</h3>
-    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}のインターン先です。支部のスタッフなら誰でも追加できます。</p>
-    <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>
-    <button class="btn pri block" style="margin-top:16px" onclick="openInternshipForm()">＋ インターン先を追加</button>`);
-}
-function openInternshipForm(id){
-  const p=id?findInternship(id):null;
-  openSheet(`<h3>${p?'インターン先を編集':'インターン先を追加'}</h3>
-    <label class="fl">インターン先の名前<span class="req">*</span></label>
-    <input id="ipName" autocomplete="off" placeholder="例）○○議員事務所" value="${p?esc(p.name):''}">
-    <div class="field-err" id="ipErr"></div>
-    <div class="hint" style="margin-top:12px">${ic('bulb')}<span>支部のみんなで使う一覧です。略さず、正式な名前で登録すると探しやすくなります。</span></div>
-    <button class="btn pri block" style="margin-top:18px" onclick="saveInternship(${p?`'${p.id}'`:'null'})">保存する</button>
-    ${p?`<button class="btn block" style="margin-top:10px" onclick="deleteInternship('${p.id}')">この インターン先を削除</button>`:''}
-    <button class="btn block" style="margin-top:10px" onclick="openInternshipMaster()">${ic('back')}一覧へ戻る</button>`);
-}
-async function saveInternship(id){
-  const name=document.getElementById('ipName').value.trim();
-  const err=document.getElementById('ipErr');
-  err.classList.remove('show');
-  if(!name){err.textContent='インターン先の名前を入力してください';err.classList.add('show');return;}
-  // 同じ名前が二重にできると、宛先を選ぶときにどちらか分からなくなる
-  const dup=branchInternships().find(p=>p.id!==id&&p.name===name);
-  if(dup){err.textContent='同じ名前がすでに登録されています';err.classList.add('show');return;}
-  const ok=await mutate(db=>{
-    db.internships=db.internships||[];
-    if(id){
-      const p=db.internships.find(x=>x.id===id);
-      if(p)p.name=name;
-    }else{
-      db.internships.push({id:'ip_'+uid(),name,branch_id:ME.branch_id,created_by:ME.id,created_at:nowISO()});
-    }
-  });
-  if(!ok)return;
-  openInternshipMaster();render();
-  toast(id?'インターン先を更新しました':'インターン先を追加しました');
-}
-async function deleteInternship(id){
-  const p=findInternship(id);
-  const n=internsAt(id).length;
-  // 誰かが登録したままだと、その人のインターン先が行方不明になる
-  if(n){toast(`${n}名が登録中のため削除できません。先に登録を変えてください`);return;}
-  if(!await confirmSheet('インターン先を削除',`「${p?p.name:''}」を削除します。よろしいですか？`,'削除する'))return;
-  const ok=await mutate(db=>{
-    db.internships=(db.internships||[]).filter(x=>x.id!==id);
-  });
-  if(!ok)return;
-  openInternshipMaster();render();
-  toast('インターン先を削除しました');
-}
-
-/* ---------- 自分のインターン先を選ぶ（インターン生） ---------- */
-function openMyInternshipForm(){
-  const list=branchInternships();
-  if(!list.length){
-    openSheet(`<h3>インターン先</h3>
-      <div class="empty"><div class="ei">${ic('workplace')}</div>
-      <p>あなたの支部には、インターン先がまだ登録されていません。<br>担当スタッフにお知らせください。</p></div>`);
-    return;
-  }
-  const cur=getProfile(ME.id).internship_id||'';
-  const opts=`<option value="">まだ決まっていない</option>`
-    +list.map(p=>`<option value="${p.id}" ${p.id===cur?'selected':''}>${esc(p.name)}</option>`).join('');
-  openSheet(`<h3>インターン先</h3>
-    <p class="page-sub" style="margin-top:0">スタッフがインターン先ごとに連絡を出すときに使われます。いつでも変えられます。</p>
-    <label class="fl">インターン先</label>
-    <select id="myIpSel">${opts}</select>
-    <div class="hint" style="margin-top:12px">${ic('bulb')}<span>一覧に無いときは、担当スタッフに追加をお願いしてください。</span></div>
-    <button class="btn pri block" style="margin-top:18px" onclick="saveMyInternship()">これにする</button>`);
-}
-async function saveMyInternship(){
-  const internship_id=document.getElementById('myIpSel').value||null;
-  const ok=await mutate(db=>{profileOf(db,ME.id).internship_id=internship_id;});
-  if(!ok)return;
-  closeSheet();render();
-  toast('インターン先を保存しました');
-}
-/* スタッフがユーザー管理から、インターン生のインターン先を直す */
-async function setInternshipFor(userId,internshipId){
-  const ok=await mutate(db=>{profileOf(db,userId).internship_id=internshipId||null;});
-  if(!ok)return;
-  render();
-  toast('インターン先を変更しました');
-}
-
 /* =========================================================
    依頼（支部内への連絡）
    ---------------------------------------------------------
@@ -4201,7 +4067,7 @@ async function setInternshipFor(userId,internshipId){
 
    宛先は「デジマ宛」のような条件のまま保存せず、送信した時点の
    ユーザーID一覧に展開して固定する。条件のまま持つと、あとで誰かの
-   部署やインターン先が変わったときに、過去の依頼の宛先まで
+   部署が変わったときに、過去の依頼の宛先まで
    変わってしまい「誰に頼んだか」の記録が崩れるため。
    元の指定は target_label に文字列で残し、画面に併記する。
    ========================================================= */
@@ -4305,7 +4171,7 @@ function attendTally(r){
   });
   return byOpt;
 }
-/* 表の列になる人。あて先の全員を並べ、まだ答えていない人も出す。
+/* 集計の対象になる人。あて先の全員を並べ、まだ答えていない人も出す。
    誰待ちなのかが分からないと催促できないため。
    あて先から外れたあとに答えが残っている人（部署の変更など）も落とさない */
 function attendResponders(r){
@@ -4318,6 +4184,15 @@ function attendAnswered(r){
   const ids=[];
   (r.responses||[]).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
   return ids;
+}
+/* ○がいちばん多い候補。同じ数のものが複数あれば、その全部を返す。
+   誰も答えていないうちは何も返さない。全部が0で並ぶだけの状態で
+   「最有力」と言われても意味がないため */
+function attendBest(r,tally){
+  let top=0;
+  (r.options||[]).forEach(o=>{const t=tally.get(o.id);if(t&&t.ok>top)top=t.ok;});
+  if(!top)return new Set();
+  return new Set((r.options||[]).filter(o=>tally.get(o.id).ok===top).map(o=>o.id));
 }
 /* 出欠確認を開くURL。ログインしていればそのまま回答画面に飛ぶ */
 function attendUrl(id){
@@ -4348,25 +4223,25 @@ function openAttendDetail(id){
   const opts=r.options||[];
   const confirmedOpt=r.confirmed?opts.find(o=>o.id===r.confirmed):null;
 
-  // いちばん○が多い候補。同数なら先に並んでいるほう
-  let best=null;
-  opts.forEach(o=>{const t=tally.get(o.id);if(!best||t.ok>tally.get(best.id).ok)best=o;});
+  const best=attendBest(r,tally);
 
-  const head=`<tr><th class="atd">日程</th>
-    ${responders.map(uid=>`<th class="${answered.has(uid)?'':'nores'}"
-      title="${answered.has(uid)?'':'まだ答えていません'}">${esc((findUser(uid)||{}).nickname||'—')}</th>`).join('')}
-    <th class="atc ok">○</th><th class="atc may">△</th><th class="atc no">×</th>
-    ${isOwner&&!r.confirmed?'<th></th>':''}</tr>`;
-
-  const body=opts.map(o=>{
+  /* 一覧。人を横に並べる表はやめた（十数人いると横に送られて日程と印を同時に見られない）。
+     日程ごとの数だけを出し、誰が何を答えたかは行を押して掘る。
+     確定ボタンは押しても回答状況を開かない（押し間違いで別の画面へ飛ばないように） */
+  const rows=opts.map(o=>{
     const t=tally.get(o.id);
     const isConf=r.confirmed===o.id;
-    return `<tr class="${isConf?'on':''}">
-      <td class="atd"><b>${fmtSlot(o)}</b>${isConf?'<span class="tag ok" style="margin-left:6px">確定</span>':''}</td>
-      ${responders.map(uid=>`<td>${ATT_MARK[t.who.get(uid)]||'・'}</td>`).join('')}
-      <td class="atc ok">${t.ok}</td><td class="atc may">${t.may}</td><td class="atc no">${t.no}</td>
-      ${isOwner&&!r.confirmed?`<td><button class="btn sm pri" onclick="confirmAttend('${r.id}','${o.id}')">この日で確定</button></td>`:''}
-    </tr>`;
+    const isBest=!r.confirmed&&best.has(o.id);
+    const tag=isConf?'<span class="tag ok">確定</span>'
+      :isBest?'<span class="tag ok">最有力</span>':'';
+    return `<div class="atl ${isConf?'on':''} ${isBest?'best':''}"
+      onclick="openAttendOption('${r.id}','${o.id}')">
+      <span class="atl-d">${fmtSlot(o)}${tag}</span>
+      ${['ok','may','no'].map(v=>`<span class="atl-c ${v} ${t[v]?'':'zero'}"
+        >${ATT_MARK[v]}<b>${t[v]}</b></span>`).join('')}
+      ${isOwner&&!r.confirmed?`<button class="btn sm pri"
+        onclick="event.stopPropagation();confirmAttend('${r.id}','${o.id}')">この日で確定</button>`:''}
+    </div>`;
   }).join('');
 
   /* 自分の回答。候補ごとに ○△× を1つ選ぶ。
@@ -4387,8 +4262,12 @@ function openAttendDetail(id){
     <div class="field-err" id="attErr"></div>
     <button class="btn pri block" style="margin-top:14px" id="attBtn" onclick="submitAttend('${r.id}')">回答を送る</button>`:'';
 
+  /* URLは依頼を出した本人と管理者にだけ出す。回答するだけの人には要らない。
+     このリンク自体はログインの力を持たない。開いた人は自分のアカウントでログインし、
+     自動ログインが効いていればログイン画面を飛ばして回答画面へ直行する */
   const urlBlock=isOwner?`
-    <label class="fl" style="margin-top:4px">出欠確認のURL<span class="fl-sub">このリンクを配ると、アプリにログインしている人がそのまま回答できます</span></label>
+    <label class="fl" style="margin-top:14px">出欠URL
+      <span class="fl-sub">このリンクを配ると、支部のスタッフがそのまま回答できます</span></label>
     <div class="urlrow">
       <input id="attUrl" readonly value="${esc(attendUrl(r.id))}" onclick="this.select()">
       <button class="btn sm" onclick="copyAttendUrl('${r.id}')">コピー</button>
@@ -4400,16 +4279,48 @@ function openAttendDetail(id){
     ${r.body?`<div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>`:''}
     ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
       <b>${fmtSlot(confirmedOpt)}</b> で確定しました。カレンダーに予定を追加しています。</span></div>`:''}
-    <div class="statrow" style="margin-top:14px">
-      <div class="statbox a1"><small>回答</small><b>${answered.size}<i>/${responders.length}名</i></b></div>
-      <div class="statbox a3"><small>候補</small><b>${opts.length}<i>件</i></b></div>
-      <div class="statbox a2"><small>最有力（○が最多）</small><b>${best?tally.get(best.id).ok:0}<i>名○</i></b></div>
-    </div>
-    <label class="fl" style="margin-top:16px">出欠集計
-      <span class="fl-sub">${answered.size}名が回答済み${responders.length>answered.size
-        ? ` ／ 未回答 ${responders.length-answered.size}名（薄い名前）`:''}</span></label>
-    <div class="atwrap"><table class="attable"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+    <label class="fl" style="margin-top:18px">出欠集計
+      <span class="fl-sub">日程を押すと、誰が何を答えたかが見られます</span></label>
+    <p class="atsum">${responders.length}名中 <b>${answered.size}名</b>が回答${
+      responders.length>answered.size?` ・ 未回答 ${responders.length-answered.size}名`:''}</p>
+    <div class="atlist">${rows}</div>
     ${answerBlock}`);
+}
+
+/* 日程1件の回答状況。○△× ごとに名前を並べ、まだ答えていない人は下にまとめる。
+   シートを重ねずに中身だけ入れ替える。重ねると閉じたときにどこへ戻るのか分からなくなるため */
+function openAttendOption(reqId,optId){
+  const r=allRequests().find(x=>x.id===reqId);
+  if(!r)return;
+  const o=(r.options||[]).find(x=>x.id===optId);
+  if(!o)return;
+  const who=attendTally(r).get(optId).who;
+  const ids=attendResponders(r);
+  const groups=[
+    ['ok', ATT_MARK.ok,  ids.filter(u=>who.get(u)==='ok')],
+    ['may',ATT_MARK.may, ids.filter(u=>who.get(u)==='may')],
+    ['no', ATT_MARK.no,  ids.filter(u=>who.get(u)==='no')],
+    ['none','まだ回答していない', ids.filter(u=>!who.get(u))],
+  ];
+  // 0人の区分は見出しごと出さない
+  const blocks=groups.filter(g=>g[2].length).map(([v,ttl,list])=>`
+    <div class="atgrp ${v==='none'?'none':''}">
+      <div class="atgh"><span class="atgm ${v}">${ttl}</span><b>${list.length}名</b></div>
+      <div class="atppl">${list.map(attendPerson).join('')}</div>
+    </div>`).join('');
+  openSheet(`<button type="button" class="atback"
+      onclick="openAttendDetail('${r.id}')">${ic('back')}出欠集計へ戻る</button>
+    <h3>${fmtSlot(o)} の回答状況</h3>
+    <p class="page-sub" style="margin-top:0">${esc(r.subject)}</p>
+    ${blocks}`);
+}
+/* 名前の札。Googleの写真を持っている人はそれを出す。
+   丸の色は人ごとに変えず、一覧の行と同じ地の色にそろえた。
+   ここで見たいのは「誰が答えたか」で、色は名前を読む邪魔になるため */
+function attendPerson(uid){
+  const u=findUser(uid);
+  return `<span class="atp"><span class="av">${avatarInner(u)}</span>
+    <span>${esc((u||{}).nickname||'—')}</span></span>`;
 }
 /* 候補1件の見せ方。「9/12(土) 19:00〜21:00」 */
 function fmtSlot(o){
@@ -4554,7 +4465,8 @@ let REQFORM=null; // {mode, picked:Set相当の配列}
    インターン生あての3つ（all_intern / pick_intern / by_place）は外した。
    インターン生はアカウントを持たなくなり、依頼を受け取る手段が無いため。
    受け取れない相手に送れてしまうほうが事故になる。
-   ※ mode を処理する側のコードは、過去の依頼を読むために残してある */
+   by_place（インターン先で選ぶ）は 2026-08-05 に処理ごと取り除いた。
+   ※ 残る2つの mode を処理する側のコードは、過去の依頼を読むために残してある */
 const REQ_MODES=[
   {id:'all_staff',   label:'支部の全スタッフ'},
   {id:'pick_staff',  label:'スタッフを選ぶ'},
@@ -4613,15 +4525,6 @@ function resolveRecipients(){
     });
     return {ids,label:labels.length?labels.join('、')+'（部署）':'（未選択）'};
   }
-  if(m==='by_place'){
-    const ids=[],labels=[];
-    picked.forEach(pid=>{
-      const p=findInternship(pid);
-      labels.push(p?p.name:'—');
-      internsAt(pid).forEach(u=>{if(!ids.includes(u.id))ids.push(u.id);});
-    });
-    return {ids,label:labels.length?labels.join('、')+'（インターン先）':'（未選択）'};
-  }
   return {ids:[],label:'（未選択）'};
 }
 
@@ -4648,25 +4551,13 @@ function reqPickerHTML(){
   if(m==='pick_intern'){
     const list=branchInterns();
     if(!list.length)return `<div class="empty" style="padding:20px"><p>インターン生がいません。</p></div>`;
-    return `<div class="picklist">${list.map(u=>{
-      const p=findInternship(getProfile(u.id).internship_id);
-      return chip(u.id,u.nickname,p?p.name:'');
-    }).join('')}</div>`;
+    return `<div class="picklist">${list.map(u=>chip(u.id,u.nickname,'')).join('')}</div>`;
   }
   if(m==='by_dept'){
     return `<div class="picklist">${DEPARTMENTS.map(d=>{
       const n=branchStaff().filter(u=>u.id!==ME.id&&getDepts(u.id).includes(d)).length;
       return chip(d,d,`${n}名`);
     }).join('')}</div>`;
-  }
-  if(m==='by_place'){
-    const list=branchInternships();
-    if(!list.length){
-      return `<div class="empty" style="padding:20px"><div class="ei">${ic('workplace')}</div>
-        <p>インターン先がまだ登録されていません。</p>
-        <button class="btn sm" style="margin-top:10px" onclick="openInternshipMaster()">インターン先を登録する</button></div>`;
-    }
-    return `<div class="picklist">${list.map(p=>chip(p.id,p.name,`${internsAt(p.id).length}名`)).join('')}</div>`;
   }
   return '';
 }

@@ -1062,10 +1062,11 @@ function scopeDBForUser(obj, user, users) {
       : av;
   }
 
-  // インターン先マスタは支部ごとの持ち物
+  /* インターン先マスタは支部ごとの持ち物。
+     2026-08-05に画面と操作は取り除いたが、中身は消していないので読み出しは残す */
   const internships = (obj.internships || []).filter((p) => p.branch_id === branchId);
 
-  // プロフィール（所属部署・インターン先）は自支部のメンバーの分だけ
+  // プロフィール（所属部署）は自支部のメンバーの分だけ
   const profiles = {};
   for (const [id, p] of Object.entries(obj.profiles || {})) {
     if (id === user.id || inBranch(id)) profiles[id] = p;
@@ -1105,9 +1106,9 @@ function mergeScoped(oldDB, clientDB, user, users) {
   if (isAdmin) return merged;
 
   /* インターン先マスタ。見えていなかった他支部の分を戻したうえで、
-     送られてきた分をそのまま採用する。他支部あての不正な追加をここで黙って捨てず、
-     validateDiff に届けて403で知らせるため（黙って捨てると、
-     登録できたつもりで消えている状態になり、今回直した不具合と同じことが起きる） */
+     送られてきた分をそのまま採用する。ここで黙って捨てず validateDiff へ届けるのは、
+     403で「機能は終了しました」と伝えるため。黙って捨てると、
+     登録できたつもりで消えている状態になり、以前直した不具合と同じことが起きる */
   {
     const visibleIds = new Set((visible.internships || []).map((p) => p.id));
     const hidden = (oldDB.internships || []).filter((p) => !visibleIds.has(p.id));
@@ -1115,8 +1116,8 @@ function mergeScoped(oldDB, clientDB, user, users) {
   }
 
   /* プロフィールは、その人に見えていた範囲（自分＋自支部）だけを差し替える。
-     スタッフがインターン生のインターン先を代理設定する運用があるため、
-     自分の分だけに絞ってしまうと代理設定が保存できなくなる。
+     他人の分は validateDiff が403で弾く。ここで黙って捨てないのは、
+     保存できたつもりで消えている状態を作らないため。
      まだ存在しないユーザーの分を新規に作る場合もあるので、
      「元データにあるか」ではなく「その人に見える相手か」で判断する */
   {
@@ -1148,15 +1149,9 @@ const byId = (list) => new Map((list || []).map((x) => [x.id, x]));
 
 /* 変更内容が、その人に許されたものかを1件ずつ確かめる。
    1件でも許されない変更があれば、その保存はまるごと拒否する（一部だけ適用しない） */
-function validateDiff(oldDB, newDB, actor, users) {
+function validateDiff(oldDB, newDB, actor) {
   const errs = [];
-  const userById = new Map(users.map((u) => [u.id, u]));
-  const sameBranch = (id) => {
-    const u = userById.get(id);
-    return !!u && u.branch_id === actor.branch_id;
-  };
   const isAdmin = actor.role === 'admin';
-  const isStaffLike = ['staff', 'branch_admin', 'admin'].includes(actor.role);
 
   // ---- 支部：全体管理者のみ ----
   if (!isAdmin && !sameJSON(oldDB.branches, newDB.branches)) {
@@ -1197,39 +1192,23 @@ function validateDiff(oldDB, newDB, actor, users) {
   /* 依頼・出欠・通知・メール履歴はここでは検証しない。専用テーブルへ移し、
      それぞれの専用APIの中で権限を確かめている */
 
-  /* ---- インターン先マスタ：自支部のものをスタッフ側だけが編集できる ---- */
-  const oldIp = byId(oldDB.internships);
-  const newIp = byId(newDB.internships);
-  for (const [id, ip] of newIp) {
-    const prev = oldIp.get(id);
-    if (prev && sameJSON(prev, ip)) continue;
-    if (!isStaffLike) errs.push('インターン先を登録・変更できるのはスタッフだけです');
-    else if (!isAdmin && ip.branch_id !== actor.branch_id) errs.push('他の支部のインターン先は変更できません');
-    else if (!isAdmin && prev && prev.branch_id !== actor.branch_id) errs.push('他の支部のインターン先は変更できません');
-  }
-  for (const [id, prev] of oldIp) {
-    if (newIp.has(id)) continue;
-    if (!isStaffLike) errs.push('インターン先を削除できるのはスタッフだけです');
-    else if (!isAdmin && prev.branch_id !== actor.branch_id) errs.push('他の支部のインターン先は削除できません');
-    // 登録中の人がいるインターン先は消せない（フロントにも同じ確認があるが、そちらは迂回できる）
-    else if (Object.values(newDB.profiles || {}).some((p) => p && p.internship_id === id)) {
-      errs.push('登録中のインターン生がいるため削除できません');
-    }
+  /* ---- インターン先マスタ：2026-08-05に受け付けをやめた ----
+     インターン生がアカウントを持たなくなり、使われない機能になったため、
+     画面と操作を取り除いた。ここは「古いタブが開いたままの人」からの
+     書き込みを止める役。中身そのものは消していないので、
+     いま入っているものは読み出せるまま残る */
+  if (!sameJSON(oldDB.internships || [], newDB.internships || [])) {
+    errs.push('インターン先の機能は終了しました');
   }
 
-  /* ---- プロフィール：自分の分。スタッフは同支部インターン生のインターン先だけ代理設定できる ---- */
+  /* ---- プロフィール：自分の分だけ。ほかの人の分は誰も代わりに触れない ---- */
   const profKeys = new Set([...Object.keys(oldDB.profiles || {}), ...Object.keys(newDB.profiles || {})]);
   for (const key of profKeys) {
     if (isAdmin || key === actor.id) continue;
     const before = (oldDB.profiles || {})[key];
     const after = (newDB.profiles || {})[key];
     if (sameJSON(before, after)) continue;
-    if (!isStaffLike) { errs.push('他の人のプロフィールは変更できません'); continue; }
-    if (!sameBranch(key)) { errs.push('他の支部の人のプロフィールは変更できません'); continue; }
-    // スタッフでも、代理で触ってよいのはインターン先だけ（所属部署は本人が決めるもの）
-    if (!sameJSON({ ...(before || {}), internship_id: null }, { ...(after || {}), internship_id: null })) {
-      errs.push('他の人のプロフィールで変更できるのはインターン先だけです');
-    }
+    errs.push('他の人のプロフィールは変更できません');
   }
 
   return [...new Set(errs)];
@@ -2078,7 +2057,7 @@ app.put('/api/db', requireAuth, async (req, res) => {
 
       // 送られてきた内容を、その人に見えていなかった分と合成してから権限を確かめる
       const merged = mergeScoped(oldDB, body, req.authUser, users);
-      const errs = validateDiff(oldDB, merged, req.authUser, users);
+      const errs = validateDiff(oldDB, merged, req.authUser);
       if (errs.length) {
         console.warn(`権限のない変更を拒否しました（user ${req.authUser.id} / ${req.authUser.role}）:`, errs);
         return { status: 403, payload: { error: errs[0], code: 'forbidden_change', details: errs } };

@@ -84,6 +84,21 @@
     user('u_staff1', '東 玲奈', 'staff', HOME_BRANCH),
     user('u_staff2', '佐藤 健', 'staff', HOME_BRANCH),
     user('u_staff3', '中村 陽介', 'staff', HOME_BRANCH),
+    /* ここから下は「回答者が多いとき」の見え方を確かめるための人たち。
+       スタッフが3人だと出欠集計が画面に収まってしまい、
+       人数が増えたときに崩れないかを確かめられなかった */
+    user('u_staff4', '山口 千夏', 'staff', HOME_BRANCH),
+    user('u_staff5', '森 大地', 'staff', HOME_BRANCH),
+    user('u_staff6', '井上 かおり', 'staff', HOME_BRANCH),
+    user('u_staff7', '池田 亮', 'staff', HOME_BRANCH),
+    user('u_staff8', '橋本 さくら', 'staff', HOME_BRANCH),
+    user('u_staff9', '石川 直樹', 'staff', HOME_BRANCH),
+    user('u_staff10', '岡田 みなみ', 'staff', HOME_BRANCH),
+    user('u_staff11', '藤井 拓海', 'staff', HOME_BRANCH),
+    user('u_staff12', '長谷川 結衣', 'staff', HOME_BRANCH),
+    user('u_staff13', '青木 涼太', 'staff', HOME_BRANCH),
+    user('u_staff14', '西村 あすか', 'staff', HOME_BRANCH),
+    user('u_staff15', '福田 悠', 'staff', HOME_BRANCH),
     user('u_int1', '田中 悠斗', 'intern', HOME_BRANCH, 'u_staff1'),
     user('u_int2', '鈴木 彩香', 'intern', HOME_BRANCH, 'u_staff1'),
     user('u_int3', '伊藤 大輝', 'intern', HOME_BRANCH, 'u_staff2'),
@@ -190,24 +205,17 @@
     { id: 'nt_4', type: '依頼', msg: '佐藤 健さんから「【デジマ】SNS投稿の担当わけ」が届きました', at: at(0, 11, 30), branch_id: HOME_BRANCH },
   ];
 
-  /* ---------- インターン先マスタ ---------- */
-  var internships = [
-    { id: 'ip_1', name: '髙橋ひろし議員事務所', branch_id: HOME_BRANCH, created_by: 'u_staff1', created_at: at(-40, 14) },
-    { id: 'ip_2', name: '宇都宮市議会 森田事務所', branch_id: HOME_BRANCH, created_by: 'u_staff2', created_at: at(-35, 10) },
-    { id: 'ip_3', name: '足利市議会 大西事務所', branch_id: HOME_BRANCH, created_by: 'u_staff1', created_at: at(-20, 16) },
-  ];
+  /* ---------- インターン先マスタ ----------
+     2026-08-05に画面と機能を取り除いた。DBの器だけ残っているので、
+     ここも空のまま置いて「入っていなくても壊れない」ことを確かめられるようにする */
+  var internships = [];
 
-  /* ---------- 所属部署・インターン先の割り当て ---------- */
+  /* ---------- 所属部署の割り当て ---------- */
   var profiles = {
     u_badmin: { departments: ['事務局', '人財開発'] },
     u_staff1: { departments: ['デジマ', 'プロモーション'] },
     u_staff2: { departments: ['プログラム'] },
     u_staff3: { departments: ['クライアント', 'アライアンス'] },
-    u_int1: { internship_id: 'ip_1' },
-    u_int2: { internship_id: 'ip_1' },
-    u_int3: { internship_id: 'ip_2' },
-    u_int4: { internship_id: 'ip_3' },
-    u_int5: {},   // まだインターン先が決まっていない人
   };
 
   /* ---------- 依頼 ---------- */
@@ -225,7 +233,7 @@
       id: 'rq_2', sender_id: 'u_staff1', branch_id: HOME_BRANCH,
       subject: '中間報告会のリハーサル日程について',
       body: 'お疲れ様です。\n中間報告会に向けたリハーサルを来週おこないます。\n参加できる日をこのあとの面談でお知らせください。',
-      target_label: '髙橋ひろし議員事務所（インターン先）',
+      target_label: '田中 悠斗、鈴木 彩香',
       recipient_ids: ['u_int1', 'u_int2'],
       read_by: [{ user_id: 'u_int2', at: at(-1, 20) }],
       created_at: at(-2, 18, 0),
@@ -244,10 +252,10 @@
   /* ---------- 出欠確認 ----------
      依頼の一種（kind:'attend'）。候補ごとに ○△× を集め、送った人が1つ選んで確定する。
      見え方をひと通り確かめられるよう、4つの状態を用意してある。
-       rq_att1  自分はまだ答えていない（他の人の回答は見えている）
-       rq_att2  自分も含め全員が答えている（未確定）
+       rq_att1  自分はまだ答えていない（他の人の回答は見えている）。あて先15名
+       rq_att2  自分も含め全員が答えている（未確定）。最有力が2つ並ぶ
        rq_att3  日程が確定したあと
-       rq_att4  自分が送った側（URLのコピー欄と「この日で確定」が出る）
+       rq_att4  自分が送った側（出欠URLの欄と「この日で確定」が出る）
      候補はどれも3つ。ans() は3つぶんの回答をまとめて作る道具 */
   function opt(id, d, h, m, endH) {
     return { id: id, start: at(d, h, m), end: at(d, endH, m) };
@@ -259,17 +267,37 @@
       { option_id: 'op2', user_id: userId, response: c },
     ];
   }
+  /* 人数が多いときの回答をまとめて作る。
+     'o'=○ 'm'=△ 'x'=× を候補の順に並べた文字列で書く */
+  var ATT_CODE = { o: 'ok', m: 'may', x: 'no' };
+  function ansPattern(userId, codes) {
+    return codes.split('').map(function (c, i) {
+      return { option_id: 'op' + i, user_id: userId, response: ATT_CODE[c] };
+    });
+  }
+  var BIG_RECIPIENTS = [];
+  for (var bi = 1; bi <= 15; bi++) BIG_RECIPIENTS.push('u_staff' + bi);
+  /* 東さん（既定のログイン相手・u_staff1）と最後の3人はまだ答えていない。
+     未回答の人が「回答状況」の下にまとまって出ることを確かめられる */
+  var BIG_ANSWERS = {
+    u_staff2: 'oxo', u_staff3: 'moo', u_staff4: 'oom', u_staff5: 'xoo',
+    u_staff6: 'ooo', u_staff7: 'xxo', u_staff8: 'omx', u_staff9: 'ooo',
+    u_staff10: 'moo', u_staff11: 'oxx', u_staff12: 'xoo',
+  };
+  var BIG_RESPONSES = Object.keys(BIG_ANSWERS).reduce(function (acc, id) {
+    return acc.concat(ansPattern(id, BIG_ANSWERS[id]));
+  }, []);
   var attendRequests = [
     {
       id: 'rq_att1', sender_id: 'u_badmin', branch_id: HOME_BRANCH, kind: 'attend',
       subject: '9月の支部定例ミーティングの日程',
       body: '9月の定例の日程を決めたいです。\n候補ごとに ○（参加できる）△（たぶん）×（無理） で答えてください。',
       target_label: '支部の全スタッフ',
-      recipient_ids: ['u_staff1', 'u_staff2', 'u_staff3'],
+      recipient_ids: BIG_RECIPIENTS,
       options: [opt('op0', 6, 19, 0, 21), opt('op1', 7, 19, 0, 21), opt('op2', 8, 13, 0, 15)],
       confirmed: null,
-      // 東さん（既定のログイン相手）だけ未回答。答える前から他の人の回答が見える
-      responses: [].concat(ans('u_staff2', 'ok', 'no', 'ok'), ans('u_staff3', 'may', 'ok', 'ok')),
+      // 答える前から他の人の回答が見える。○が最多の3つめが最有力になる
+      responses: BIG_RESPONSES,
       read_by: [{ user_id: 'u_staff2', at: at(-1, 9, 10) }],
       created_at: at(-1, 8, 40),
     },
@@ -281,9 +309,10 @@
       recipient_ids: ['u_staff1', 'u_staff3', 'u_badmin'],
       options: [opt('op0', 4, 18, 0, 19), opt('op1', 5, 18, 0, 19), opt('op2', 5, 20, 0, 21)],
       confirmed: null,
+      // 2つめと3つめが同じ○3。最有力が複数あるとき、その全部に色が付くのを見る
       responses: [].concat(
-        ans('u_staff1', 'ok', 'ok', 'no'),
-        ans('u_staff3', 'no', 'ok', 'may'),
+        ans('u_staff1', 'ok', 'ok', 'ok'),
+        ans('u_staff3', 'no', 'ok', 'ok'),
         ans('u_badmin', 'may', 'ok', 'ok'),
       ),
       read_by: [{ user_id: 'u_staff1', at: at(-2, 13, 5) }],
@@ -314,7 +343,7 @@
       recipient_ids: ['u_staff2', 'u_staff3', 'u_badmin'],
       options: [opt('op0', 9, 17, 0, 18), opt('op1', 10, 17, 0, 18), opt('op2', 11, 10, 0, 11)],
       confirmed: null,
-      // 1人だけ回答済み。残り2人が未回答として薄く並ぶ
+      // 1人だけ回答済み。残り2人は「まだ回答していない」に入る
       responses: ans('u_staff2', 'ok', 'may', 'no'),
       read_by: [],
       created_at: at(0, 9, 0),

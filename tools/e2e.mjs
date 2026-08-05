@@ -543,16 +543,16 @@ async function run() {
   {
     const res = await putDB(TOKENS.staff, (db) => {
       db.profiles = { ...(db.profiles || {}), u_e2e_staff: { departments: ['企画局'] } };
-      db.internships = [...(db.internships || []), {
-        id: 'ip_tokyo', branch_id: 'b1', name: '東京の企業',
-        created_by: 'u_e2e_staff', created_at: new Date().toISOString(),
+      db.events = [...(db.events || []), {
+        id: 'ev_tokyo', creator_id: 'u_e2e_staff', branch_id: 'b1',
+        title: '支部の予定', date: '2026-09-01', visibility: 'branch',
       }];
     });
     check('スタッフの保存が成功する', res.status, 200);
 
     const after = await getDB(TOKENS.staff);
     check('所属部署が保存されている', (after.profiles || {}).u_e2e_staff?.departments, ['企画局']);
-    check('インターン先マスタが保存されている', (after.internships || []).some((p) => p.id === 'ip_tokyo'), true);
+    check('イベントが保存されている', (after.events || []).some((e) => e.id === 'ev_tokyo'), true);
 
     // 見えていないデータを巻き添えで消していないか（保存のたびに他支部が消えると致命的）
     const admin = await getDB(TOKENS.admin);
@@ -642,17 +642,10 @@ async function run() {
     });
     check('インターン生が他人のプロフィールを書き換えられない', res.status, 403);
 
-    res = await putDB(TOKENS.staff2, (db) => {
-      db.internships = [...(db.internships || []), { id: 'ip_hack', branch_id: 'b1', name: '勝手に追加' }];
-    });
-    check('他支部のインターン先マスタは追加できない', res.status, 403);
-
-    /* 他支部のものは絞り込みで既に見えないので「書き換え」は送りようがない。
-       意味のある攻撃は「他支部あてに新しく作る」ほうなので、そちらを試す */
     res = await putDB(TOKENS.staff, (db) => {
-      db.internships = [...(db.internships || []), { id: 'ip_cross', branch_id: 'b2', name: '他支部に勝手に追加' }];
+      db.profiles = { ...(db.profiles || {}), u_e2e_staff3: { departments: ['代理で変更'] } };
     });
-    check('他支部あてにインターン先を追加できない', res.status, 403);
+    check('スタッフでも他人のプロフィールは書き換えられない', res.status, 403);
 
     /* 古い画面を開いたままのタブが、専用テーブルへ移した項目を
        自分の持っている古い一覧で上書きしないこと */
@@ -667,14 +660,24 @@ async function run() {
     check('通知が消えていない', (survived.notifications || []).length > 0, true);
   }
 
-  console.log('\n─────── スタッフによる代理設定（許される変更） ───────');
+  /* インターン先マスタは 2026-08-05 に受け付けをやめた。
+     画面からは消したが、古いタブが開いたままの人が書き込めてしまわないこと。
+     読み出しと、すでに入っている中身が残ることも合わせて見る */
+  console.log('\n─────── インターン先（終了した機能） ───────');
   {
-    const res = await putDB(TOKENS.staff, (db) => {
-      db.profiles = { ...(db.profiles || {}), u_e2e_staff3: { ...(db.profiles?.u_e2e_staff3 || {}), internship_id: 'ip_tokyo' } };
+    let res = await putDB(TOKENS.staff, (db) => {
+      db.internships = [...(db.internships || []), { id: 'ip_new', branch_id: 'b1', name: '追加できないはず' }];
     });
-    check('スタッフが同支部インターン生のインターン先を設定できる', res.status, 200);
-    const after = await getDB(TOKENS.staff3);
-    check('設定した内容が残っている', (after.profiles || {}).u_e2e_staff3?.internship_id, 'ip_tokyo');
+    check('インターン先は追加できない', res.status, 403);
+
+    res = await putDB(TOKENS.admin, (db) => {
+      db.internships = (db.internships || []).filter((p) => p.id !== 'ip_osaka');
+    });
+    check('全体管理者でもインターン先は削除できない', res.status, 403);
+
+    const admin = await getDB(TOKENS.admin);
+    check('もとから入っている中身は消えていない',
+      (admin.internships || []).some((p) => p.id === 'ip_osaka'), true);
   }
 
   console.log('\n─────── 楽観ロック（同時編集の検出） ───────');
@@ -710,14 +713,17 @@ async function run() {
       const b = { ...base };
       delete b.users;
       b._baseUpdatedAt = base.updatedAt;
-      b.internships = [...(base.internships || []), { id: 'ip_race' + n, branch_id: 'b1', name: '競合テスト' + n }];
+      b.events = [...(base.events || []), {
+        id: 'ev_race' + n, creator_id: 'u_e2e_staff', branch_id: 'b1',
+        title: '競合テスト' + n, date: '2026-09-02', visibility: 'branch',
+      }];
       return fetch(BASE + '/api/db', { method: 'PUT', headers: H(TOKENS.staff), body: JSON.stringify(b) });
     };
     const races = await Promise.all([mk(1), mk(2), mk(3)]);
     const codes = races.map((r) => r.status).sort();
     check('同じ版を土台にした3件の同時保存は1件だけ成功する', codes, [200, 409, 409]);
     const afterRace = await getDB(TOKENS.staff);
-    const saved = (afterRace.internships || []).filter((p) => String(p.id).startsWith('ip_race')).length;
+    const saved = (afterRace.events || []).filter((e) => String(e.id).startsWith('ev_race')).length;
     check('成功した1件だけが保存されている', saved, 1);
   }
 
