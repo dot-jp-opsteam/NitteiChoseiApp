@@ -294,6 +294,18 @@ async function api(token, method, pathname, payload) {
 let REQ_ID = null;   // テストの中で作った依頼のID
 let IV_ID = null;    // テストの中で作った面談のID
 
+async function createBrowserAttendanceFixture() {
+  const day = new Date(Date.now() + 7 * 86400000);
+  const at = (hour) => { const d = new Date(day); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
+  const made = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '公開出欠の画面確認', body: 'ブラウザ確認用の使い捨てデータです。',
+    target_label: '誰でも回答OK', recipient_ids: [], kind: 'attend', public_access: true,
+    options: [{ start: at(13), end: at(14) }, { start: at(15), end: at(16) }],
+  });
+  if (made.status !== 200) throw new Error('画面確認用の公開出欠を作成できませんでした');
+  return made.json.request.public_url;
+}
+
 /* フロントの mutate() と同じ流れ：受け取った内容を書き換えて丸ごと送り返す */
 async function putDB(token, mutateFn) {
   const cur = await getDB(token);
@@ -335,6 +347,12 @@ async function testAttendance() {
   check('候補が2件ある', made.json.request?.options?.length, 2);
   check('候補にidが振られる', made.json.request?.options?.[0]?.id, 'op0');
   const attId = made.json.request?.id;
+  check('出欠確認は送った本人もあて先に入る',
+    made.json.request?.recipient_ids?.includes('u_e2e_staff'), true);
+  const senderMailView = await getDB(TOKENS.staff);
+  check('送った本人には自分宛てメール履歴を作らない',
+    (senderMailView.emails || []).some((m) => m.subject === '【出欠確認】チーム懇親会'
+      && m.receiver_id === 'u_e2e_staff'), false);
 
   /* 依頼の一覧を見ていない人がメール画面からでも気づけるよう、
      出欠確認はあて先ひとりずつのメール履歴にも残す */
@@ -374,6 +392,10 @@ async function testAttendance() {
     { answers: [{ option_id: 'op0', response: 'may' }, { option_id: 'op1', response: 'ok' }] });
   check('もう1人も答えられる', ans2.status, 200);
 
+  const senderAnswer = await api(TOKENS.staff, 'PUT', `/api/requests/${attId}/response`,
+    { answers: [{ option_id: 'op0', response: 'ok' }, { option_id: 'op1', response: 'may' }] });
+  check('送った本人も受けた依頼として答えられる', senderAnswer.status, 200);
+
   const again = await api(TOKENS.staff3, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: 'op0', response: 'may' }] });
   check('答え直せる', again.status, 200);
@@ -388,7 +410,7 @@ async function testAttendance() {
 
   const seen = await getDB(TOKENS.staff);
   const row = (seen.requests || []).find((r) => r.id === attId);
-  check('送った本人に回答が見える', row?.responses?.length, 4);
+  check('送った本人に全員の回答が見える', row?.responses?.length, 6);
   check('答え直した結果が上書きされている',
     row?.responses?.find((a) => a.user_id === 'u_e2e_staff3' && a.option_id === 'op0')?.response, 'may');
 
@@ -418,12 +440,100 @@ async function testAttendance() {
     { answers: [{ option_id: 'op0', response: 'no' }] });
   check('確定後はもう答えられない', late.status, 409);
 
+  // ---- アカウント不要の公開出欠 ----
+  const publicMade = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '公開懇親会', body: '公開回答のテストです', target_label: '誰でも回答OK',
+    recipient_ids: [], kind: 'attend', public_access: true,
+    options: [{ start: mk(t1, 10), end: mk(t1, 11) }, { start: mk(t2, 10), end: mk(t2, 11) }],
+  });
+  check('誰でも回答OKの出欠確認を作れる', publicMade.status, 200);
+  check('公開出欠にも送った本人があて先として入る',
+    publicMade.json.request?.recipient_ids, ['u_e2e_staff']);
+  check('公開出欠の共有URLが返る',
+    /^http:\/\/localhost:8123\/a\/[A-Za-z0-9_-]+$/.test(publicMade.json.request?.public_url || ''), true);
+  const publicToken = String(publicMade.json.request?.public_url || '').split('/a/')[1];
+
+  const publicView = await api(null, 'GET', `/api/attendance/${publicToken}`);
+  check('ログインせず公開出欠を見られる', publicView.status, 200);
+  check('公開画面に件名が返る', publicView.json.request?.subject, '公開懇親会');
+  check('回答前でも結果一覧を見られる', publicView.json.respondents, []);
+
+  const appHtml = await (await fetch(BASE + '/')).text();
+  const publicModePos = appHtml.indexOf("{id:'public',label:'誰でも回答OK'}");
+  check('出欠の宛先先頭に「誰でも回答OK」がある',
+    publicModePos >= 0
+      && publicModePos < appHtml.indexOf("{id:'all_staff',   label:'支部の全スタッフ'}"), true);
+  check('出欠確認を開くと公開モードが初期選択される',
+    appHtml.includes("mode:kind==='attend'?'public':'all_staff'"), true);
+  check('公開モードを送信APIへ明示する',
+    appHtml.includes("public_access:attend&&REQFORM.mode==='public'"), true);
+  check('公開出欠の詳細に共有URLを表示する',
+    appHtml.includes('誰でも回答できる共有URL'), true);
+  check('公開出欠は回答人数に分母を表示しない',
+    appHtml.includes("isPublicAttend(r)?`${numAns}人が回答`")
+      && appHtml.includes('回答人数に制限なし'), true);
+  check('回答人数は実際に回答した人だけを数える',
+    appHtml.includes('const numAns=att?attendAnswered(r).length:0;'), true);
+
+  const publicPage = await fetch(BASE + `/a/${publicToken}`);
+  const publicPageHtml = await publicPage.text();
+  check('公開回答ページを配信できる', publicPage.status, 200);
+  check('公開回答ページに名前入力がある', publicPageHtml.includes('id="respondentName"'), true);
+  check('公開回答ページに結果一覧がある', publicPageHtml.includes('id="attendanceResults"'), true);
+
+  const noPublicName = await api(null, 'PUT', `/api/attendance/${publicToken}/response`, {
+    name: '  ', answers: [{ option_id: 'op0', response: 'ok' }],
+  });
+  check('公開回答は名前が必須', noPublicName.status, 400);
+
+  const firstPublicAnswer = await api(null, 'PUT', `/api/attendance/${publicToken}/response`, {
+    name: '公開 太郎',
+    answers: [{ option_id: 'op0', response: 'ok' }, { option_id: 'op1', response: 'no' }],
+  });
+  check('アカウントなしで回答できる', firstPublicAnswer.status, 200);
+  check('初回回答で回答者キーが返る',
+    typeof firstPublicAnswer.json.respondent_key === 'string'
+      && firstPublicAnswer.json.respondent_key.length >= 32, true);
+  const respondentKey = firstPublicAnswer.json.respondent_key;
+
+  const changedPublicAnswer = await api(null, 'PUT', `/api/attendance/${publicToken}/response`, {
+    name: '公開 太郎（変更）', respondent_key: respondentKey,
+    answers: [{ option_id: 'op0', response: 'may' }, { option_id: 'op1', response: 'ok' }],
+  });
+  check('同じブラウザ用キーで回答を変更できる', changedPublicAnswer.status, 200);
+
+  const badPublicKey = await api(null, 'PUT', `/api/attendance/${publicToken}/response`, {
+    name: 'なりすまし', respondent_key: 'invalid-key',
+    answers: [{ option_id: 'op0', response: 'no' }],
+  });
+  check('不正な回答者キーでは変更できない', badPublicKey.status, 403);
+
+  const publicResults = await api(null, 'GET', `/api/attendance/${publicToken}`);
+  const publicPerson = publicResults.json.respondents?.find((x) => x.name === '公開 太郎（変更）');
+  check('URLを知る人は回答者名を見られる', !!publicPerson, true);
+  check('URLを知る人は変更後の回答を見られる',
+    publicPerson?.answers?.find((x) => x.option_id === 'op0')?.response, 'may');
+  const ownerPublicView = await getDB(TOKENS.staff);
+  const ownerPublicRequest = (ownerPublicView.requests || []).find((r) => r.id === publicMade.json.request?.id);
+  check('依頼者の集計にも公開回答者名が返る',
+    ownerPublicRequest?.public_respondents?.find((x) => x.id === publicPerson?.id)?.name, '公開 太郎（変更）');
+
+  const publicDone = await api(TOKENS.staff, 'POST',
+    `/api/requests/${publicMade.json.request?.id}/confirm`, { option_id: 'op0' });
+  check('公開出欠も依頼者が確定できる', publicDone.status, 200);
+  const publicLate = await api(null, 'PUT', `/api/attendance/${publicToken}/response`, {
+    name: '公開 太郎（変更）', respondent_key: respondentKey,
+    answers: [{ option_id: 'op0', response: 'no' }],
+  });
+  check('公開出欠も確定後は変更できない', publicLate.status, 409);
+
   // ---- ふつうの依頼が壊れていないこと ----
   const normal = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: 'ふつうの依頼', body: '本文', target_label: 'x', recipient_ids: ['u_e2e_staff3'],
   });
   check('ふつうの依頼は今までどおり作れる', normal.status, 200);
   check('ふつうの依頼には出欠の印が付かない', normal.json.request?.kind, 'normal');
+  check('ふつうの依頼には公開URLを発行しない', normal.json.request?.public_url, undefined);
   const normalMail = await getDB(TOKENS.staff3);
   check('ふつうの依頼はメール履歴に残さない',
     (normalMail.emails || []).some((m) => String(m.subject || '').includes(normal.json.request?.subject)), false);
@@ -1121,17 +1231,22 @@ const { child, log } = startServer(dbPath);
 let exitCode = 0;
 try {
   if (!await waitForServer()) throw new Error('サーバーが起動しませんでした:\n' + log.join(''));
-  await run();
-  await testAttendance();
-  await testMyCalendar();
-  await testSharedCalFilter();
-  await testLockLogic();
+  if (process.argv.includes('--browser')) {
+    console.log('BROWSER_URL=' + await createBrowserAttendanceFixture());
+    await new Promise((resolve) => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
+  } else {
+    await run();
+    await testAttendance();
+    await testMyCalendar();
+    await testSharedCalFilter();
+    await testLockLogic();
+  }
   console.log(`\n${'─'.repeat(56)}`);
-  if (failures.length) {
+  if (!process.argv.includes('--browser') && failures.length) {
     console.log(`結果: ${pass}件成功 / ${failures.length}件失敗\n\n失敗した項目:`);
     failures.forEach((f) => console.log('  - ' + f));
     exitCode = 1;
-  } else {
+  } else if (!process.argv.includes('--browser')) {
     console.log(`結果: ${pass}件すべて成功`);
   }
 } catch (e) {

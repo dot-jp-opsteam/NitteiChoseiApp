@@ -169,7 +169,7 @@ async function initDB() {
        options    … 候補の日時。JSON配列 [{id,start,end}]
        confirmed  … 確定した候補のid。未確定なら null */
   for (const [col, type] of [['kind', 'TEXT'], ['options', 'TEXT'], ['confirmed', 'TEXT'],
-    ['event_id', 'TEXT']]) {
+    ['event_id', 'TEXT'], ['public_token', 'TEXT']]) {
     try { await client.execute(`ALTER TABLE requests ADD COLUMN ${col} ${type}`); }
     catch (e) { /* 既にある。SQLiteには IF NOT EXISTS が無いのでこれで判定する */ }
   }
@@ -194,6 +194,21 @@ async function initDB() {
       PRIMARY KEY (request_id, option_id, user_id)
     )
   `);
+  /* 公開出欠の回答者。共有URLとは別のキーを持つ人だけが回答を変更できる。
+     キーは漏えい時の影響を小さくするため、平文ではなくSHA-256だけを保存する */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS public_attendance_respondents (
+      request_id TEXT NOT NULL,
+      respondent_id TEXT NOT NULL,
+      key_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (request_id, respondent_id),
+      UNIQUE (request_id, key_hash)
+    )
+  `);
+  await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_public_token ON requests(public_token)');
   await client.execute(`
     CREATE TABLE IF NOT EXISTS event_responses (
       id TEXT PRIMARY KEY,
@@ -474,12 +489,21 @@ async function listRequestsFor(user) {
   /* 出欠の回答も一緒に返す。見える依頼のぶんだけに絞るので、
      他の支部の出欠が混ざることはない */
   const mine = new Set(rows.map((r) => r.id));
-  const answers = await client.execute('SELECT * FROM request_responses');
+  const [answers, publicPeople] = await Promise.all([
+    client.execute('SELECT * FROM request_responses'),
+    client.execute('SELECT request_id, respondent_id, display_name FROM public_attendance_respondents'),
+  ]);
   const respOf = new Map();
   for (const a of answers.rows) {
     if (!mine.has(a.request_id)) continue;
     if (!respOf.has(a.request_id)) respOf.set(a.request_id, []);
     respOf.get(a.request_id).push({ option_id: a.option_id, user_id: a.user_id, response: a.response });
+  }
+  const publicPeopleOf = new Map();
+  for (const p of publicPeople.rows) {
+    if (!mine.has(p.request_id)) continue;
+    if (!publicPeopleOf.has(p.request_id)) publicPeopleOf.set(p.request_id, []);
+    publicPeopleOf.get(p.request_id).push({ id: p.respondent_id, name: p.display_name });
   }
   return rows.map((r) => ({
     id: r.id, sender_id: r.sender_id, branch_id: r.branch_id,
@@ -490,6 +514,8 @@ async function listRequestsFor(user) {
     options: safeJson(r.options, []),
     confirmed: r.confirmed || null,
     event_id: r.event_id || null,
+    public_url: r.public_token ? `/a/${r.public_token}` : undefined,
+    public_respondents: publicPeopleOf.get(r.id) || [],
     responses: respOf.get(r.id) || [],
   }));
 }
@@ -634,7 +660,7 @@ function fmtSlotJP(o) {
    依頼の一覧を見ていない人が、メール画面からでも気づけるようにするため。
    実際の送信はしないので delivered は 0（画面では「アプリ内の記録のみ」と出る） */
 async function recordAttendMails(actor, request) {
-  const url = `${process.env.PUBLIC_BASE_URL || ''}/?req=${encodeURIComponent(request.id)}`;
+  const url = request.public_url || `${process.env.PUBLIC_BASE_URL || ''}/?req=${encodeURIComponent(request.id)}`;
   const lines = [
     `${actor.nickname}さんから出欠確認が届きました。`,
     '',
@@ -650,6 +676,7 @@ async function recordAttendMails(actor, request) {
   /* あて先の数だけ行が増えるが、1人1行にしないと「自分あて」で絞り込めない。
      古い履歴は183日でアーカイブ用テーブルへ移るので、際限なく溜まることはない */
   for (const receiverId of request.recipient_ids) {
+    if (receiverId === actor.id) continue;
     await client.execute({
       sql: 'INSERT INTO emails (id, sender_id, receiver_id, subject, body, sent_at, delivered) VALUES (?,?,?,?,?,?,?)',
       args: ['ml_' + crypto.randomBytes(6).toString('hex'), actor.id, receiverId,
@@ -2126,13 +2153,19 @@ app.post('/api/requests', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '依頼を送れるのはスタッフだけです' });
   }
-  const { subject, body, target_label, recipient_ids, kind, options } = req.body || {};
+  const { subject, body, target_label, recipient_ids, kind, options, public_access } = req.body || {};
   if (!subject || !String(subject).trim()) return res.status(400).json({ error: '件名を入力してください' });
-  const ids = Array.isArray(recipient_ids) ? recipient_ids.filter(Boolean) : [];
-  if (!ids.length) return res.status(400).json({ error: 'あて先を選んでください' });
   /* 出欠確認のときは候補の日時が要る。候補は画面から来た値をそのまま信じず、
      日時として読める形かどうかをここで確かめる */
   const isAttend = kind === 'attend';
+  const isPublic = isAttend && public_access === true;
+  let ids = Array.isArray(recipient_ids) ? recipient_ids.filter(Boolean) : [];
+  /* 出欠確認は送信者自身も回答者になる。公開モードは対象者が決まっていないため、
+     アプリ内の固定あて先は送信者だけにする */
+  ids = isPublic
+    ? [actor.id]
+    : [...new Set(isAttend ? [...ids, actor.id] : ids)];
+  if (!ids.length) return res.status(400).json({ error: 'あて先を選んでください' });
   let opts = [];
   if (isAttend) {
     opts = (Array.isArray(options) ? options : []).map((o, i) => ({
@@ -2161,6 +2194,7 @@ app.post('/api/requests', requireAuth, async (req, res) => {
         return res.status(403).json({ error: '他の支部の方には送れません' });
       }
     }
+    const publicToken = isPublic ? crypto.randomBytes(32).toString('base64url') : null;
     const request = {
       id: 'rq_' + crypto.randomBytes(6).toString('hex'),
       sender_id: actor.id, branch_id: actor.branch_id || null,
@@ -2168,14 +2202,17 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       target_label: target_label || null, recipient_ids: ids,
       created_at: new Date().toISOString(), read_by: [],
       kind: isAttend ? 'attend' : 'normal', options: opts, confirmed: null, event_id: null,
+      public_url: publicToken
+        ? `${process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`}/a/${publicToken}`
+        : undefined,
       responses: [],
     };
     await client.execute({
-      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, kind, options)
-            VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, kind, options, public_token)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       args: [request.id, request.sender_id, request.branch_id, request.subject,
         request.body, request.target_label, JSON.stringify(ids), request.created_at,
-        request.kind, JSON.stringify(opts)],
+        request.kind, JSON.stringify(opts), publicToken],
     });
     /* 出欠確認は、あて先ひとりずつのメール履歴にも残す。
        依頼の一覧を見ていない人でも、メール画面から気づけるようにするため。
@@ -2192,6 +2229,122 @@ app.post('/api/requests', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('依頼の送信に失敗しました', e);
     res.status(500).json({ error: '送信に失敗しました' });
+  }
+});
+
+/* 公開出欠の共有URLを知っている人へ、回答に必要な最小限だけを返す。
+   メールアドレス・支部のメンバー一覧など、出欠と無関係な情報は含めない */
+app.get('/api/attendance/:token', async (req, res) => {
+  try {
+    const rs = await client.execute({
+      sql: `SELECT r.*, u.nickname AS sender_name
+              FROM requests r LEFT JOIN users u ON u.id = r.sender_id
+             WHERE r.public_token = ? AND r.kind = 'attend'`,
+      args: [String(req.params.token || '')],
+    });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '出欠確認が見つかりません' });
+
+    const [guestRows, answerRows, users] = await Promise.all([
+      client.execute({
+        sql: 'SELECT respondent_id, display_name FROM public_attendance_respondents WHERE request_id = ?',
+        args: [row.id],
+      }),
+      client.execute({ sql: 'SELECT option_id, user_id, response FROM request_responses WHERE request_id = ?', args: [row.id] }),
+      listActiveUsers(),
+    ]);
+    const names = new Map(users.map((u) => [u.id, u.nickname]));
+    for (const g of guestRows.rows) names.set(g.respondent_id, g.display_name);
+    const grouped = new Map();
+    for (const a of answerRows.rows) {
+      if (!names.has(a.user_id)) continue;
+      if (!grouped.has(a.user_id)) grouped.set(a.user_id, []);
+      grouped.get(a.user_id).push({ option_id: a.option_id, response: a.response });
+    }
+    const respondents = [...grouped.entries()].map(([id, answers]) => ({
+      id, name: names.get(id), answers,
+    }));
+    res.json({
+      request: {
+        id: row.id, subject: row.subject, body: row.body || '', sender_name: row.sender_name || '',
+        options: safeJson(row.options, []), confirmed: row.confirmed || null,
+        created_at: row.created_at,
+      },
+      respondents,
+    });
+  } catch (e) {
+    console.error('公開出欠の取得に失敗しました', e);
+    res.status(500).json({ error: '出欠確認を取得できませんでした' });
+  }
+});
+
+/* アカウントを持たない人の公開回答。初回だけ回答者キーを発行し、
+   2回目以降はそのキーのハッシュが一致したときだけ同じ回答を更新する */
+app.put('/api/attendance/:token/response', async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+  const suppliedKey = String(req.body?.respondent_key || '');
+  if (!name) return res.status(400).json({ error: 'お名前を入力してください' });
+  if (name.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
+  try {
+    const rs = await client.execute({
+      sql: `SELECT * FROM requests WHERE public_token = ? AND kind = 'attend'`,
+      args: [String(req.params.token || '')],
+    });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '出欠確認が見つかりません' });
+    if (row.confirmed) return res.status(409).json({ error: 'すでに日程が確定しています' });
+
+    const options = safeJson(row.options, []);
+    const optionIds = new Set(options.map((o) => o.id));
+    const cleanAnswers = answers.filter((a) => a && optionIds.has(a.option_id)
+      && ['ok', 'may', 'no'].includes(a.response));
+    if (!cleanAnswers.length) return res.status(400).json({ error: '回答を選択してください' });
+
+    let respondentId;
+    let respondentKey = suppliedKey;
+    const at = new Date().toISOString();
+    if (suppliedKey) {
+      const found = await client.execute({
+        sql: `SELECT respondent_id FROM public_attendance_respondents
+               WHERE request_id = ? AND key_hash = ?`,
+        args: [row.id, auth.hashToken(suppliedKey)],
+      });
+      if (!found.rows[0]) return res.status(403).json({ error: '回答者キーが正しくありません' });
+      respondentId = found.rows[0].respondent_id;
+      await client.execute({
+        sql: 'UPDATE public_attendance_respondents SET display_name = ?, updated_at = ? WHERE request_id = ? AND respondent_id = ?',
+        args: [name, at, row.id, respondentId],
+      });
+    } else {
+      respondentKey = crypto.randomBytes(24).toString('base64url');
+      respondentId = 'guest_' + crypto.randomBytes(12).toString('base64url');
+      await client.execute({
+        sql: `INSERT INTO public_attendance_respondents
+                (request_id, respondent_id, key_hash, display_name, created_at, updated_at)
+              VALUES (?,?,?,?,?,?)`,
+        args: [row.id, respondentId, auth.hashToken(respondentKey), name, at, at],
+      });
+    }
+
+    const saved = [];
+    for (const a of cleanAnswers) {
+      await client.execute({
+        sql: `INSERT INTO request_responses (request_id, option_id, user_id, response, updated_at)
+              VALUES (?,?,?,?,?)
+              ON CONFLICT(request_id, option_id, user_id)
+              DO UPDATE SET response = excluded.response, updated_at = excluded.updated_at`,
+        args: [row.id, a.option_id, respondentId, a.response, at],
+      });
+      saved.push({ option_id: a.option_id, response: a.response });
+    }
+    res.json({
+      ok: true, respondent_key: respondentKey,
+      respondent: { id: respondentId, name }, saved,
+    });
+  } catch (e) {
+    console.error('公開出欠の回答保存に失敗しました', e);
+    res.status(500).json({ error: '回答を保存できませんでした' });
   }
 });
 
@@ -2974,6 +3127,7 @@ const PUBLIC_FILES = {
   '/staff': 'index.html',
   // アカウント無しの面談申請ページ。ログイン処理を一切通らないよう別ファイルにしてある
   '/apply.html': 'apply.html',
+  '/attendance.html': 'attendance.html',
   // Google Search Console のサイト所有権確認用。確認状態を保つため削除しないこと
   '/googlee6411894890471cb.html': 'googlee6411894890471cb.html',
 };
@@ -2986,6 +3140,9 @@ app.get('*', (req, res) => {
      APIで確かめる。ここで弾くと、正しいかどうかがURLを叩くだけで分かってしまう */
   if (/^\/i\/[A-Za-z0-9_-]+\/?$/.test(p)) {
     return res.sendFile(path.join(PUBLIC_ROOT, 'apply.html'));
+  }
+  if (/^\/a\/[A-Za-z0-9_-]+\/?$/.test(p)) {
+    return res.sendFile(path.join(PUBLIC_ROOT, 'attendance.html'));
   }
   const file = PUBLIC_FILES[p];
   if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');

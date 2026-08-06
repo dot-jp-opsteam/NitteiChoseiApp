@@ -4072,11 +4072,11 @@ function requestList(list,kind){
     const att=isAttend(r);
     // 出欠確認は「確認したか」ではなく「答えたか」「決まったか」で状態を出す
     const answered=att?(r.responses||[]).some(a=>a.user_id===ME.id):false;
-    const numAns=att?attendResponders(r).length:0;
+    const numAns=att?attendAnswered(r).length:0;
     const sub=att
       ? (kind==='inbox'
         ? `${esc(sender?sender.nickname:'—')}さん ・ 候補${(r.options||[]).length}件 ・ ${fmtRel(r.created_at)}`
-        : `${esc(r.target_label||'')} ・ ${numAns}/${total}人が回答 ・ ${fmtRel(r.created_at)}`)
+        : `${esc(r.target_label||'')} ・ ${isPublicAttend(r)?`${numAns}人が回答`:`${numAns}/${total}人が回答`} ・ ${fmtRel(r.created_at)}`)
       : (kind==='inbox'
         ? `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`
         : `${esc(r.target_label||'')} ・ ${done}/${total}人が確認 ・ ${fmtRel(r.created_at)}`);
@@ -4101,6 +4101,7 @@ function requestList(list,kind){
    ========================================================= */
 const ATT_MARK={ok:'○',may:'△',no:'×'};
 function isAttend(r){return r&&r.kind==='attend';}
+function isPublicAttend(r){return isAttend(r)&&!!r.public_url;}
 /* 候補ごとの集計。誰が何を答えたかも引ける形にして返す */
 function attendTally(r){
   const byOpt=new Map();
@@ -4140,8 +4141,13 @@ function attendBest(r,tally){
 function attendUrl(id){
   return `${location.origin}${location.pathname}?req=${encodeURIComponent(id)}`;
 }
+function attendShareUrl(r){
+  if(!r.public_url)return attendUrl(r.id);
+  try{return new URL(r.public_url,location.origin).href;}catch(e){return r.public_url;}
+}
 async function copyAttendUrl(id){
-  const url=attendUrl(id);
+  const r=allRequests().find(x=>x.id===id);
+  const url=r?attendShareUrl(r):attendUrl(id);
   try{
     await navigator.clipboard.writeText(url);
     toast('URLをコピーしました');
@@ -4208,23 +4214,22 @@ function openAttendDetail(id){
      このリンク自体はログインの力を持たない。開いた人は自分のアカウントでログインし、
      自動ログインが効いていればログイン画面を飛ばして回答画面へ直行する */
   const urlBlock=isOwner?`
-    <label class="fl" style="margin-top:14px">出欠URL
-      <span class="fl-sub">このリンクを配ると、支部のスタッフがそのまま回答できます</span></label>
+    <label class="fl" style="margin-top:14px">${r.public_url?'誰でも回答できる共有URL':'出欠URL'}
+      <span class="fl-sub">${r.public_url?'このURLを知っている人は、ログインせず回答と結果閲覧ができます':'このリンクを配ると、支部のスタッフがそのまま回答できます'}</span></label>
     <div class="urlrow">
-      <input id="attUrl" readonly value="${esc(attendUrl(r.id))}" onclick="this.select()">
+      <input id="attUrl" readonly value="${esc(attendShareUrl(r))}" onclick="this.select()">
       <button class="btn sm" onclick="copyAttendUrl('${r.id}')">コピー</button>
     </div>`:'';
 
   openSheet(`<h3>${esc(r.subject)} <span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">出欠</span></h3>
-    <p class="page-sub" style="margin-top:0">${esc(sender?sender.nickname:'—')}さん ・ ${esc(r.target_label||'')}（${(r.recipient_ids||[]).length}名）</p>
+    <p class="page-sub" style="margin-top:0">${esc(sender?sender.nickname:'—')}さん ・ ${esc(r.target_label||'')}${isPublicAttend(r)?'（回答人数に制限なし）':`（${(r.recipient_ids||[]).length}名）`}</p>
     ${urlBlock}
     ${r.body?`<div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>`:''}
     ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
       <b>${fmtSlot(confirmedOpt)}</b> で確定しました。カレンダーに予定を追加しています。</span></div>`:''}
     <label class="fl" style="margin-top:18px">出欠集計
       <span class="fl-sub">日程を押すと、誰が何を答えたかが見られます</span></label>
-    <p class="atsum">${responders.length}名中 <b>${answered.size}名</b>が回答${
-      responders.length>answered.size?` ・ 未回答 ${responders.length-answered.size}名`:''}</p>
+    <p class="atsum">${isPublicAttend(r)?`<b>${answered.size}名</b>が回答`:`${responders.length}名中 <b>${answered.size}名</b>が回答${responders.length>answered.size?` ・ 未回答 ${responders.length-answered.size}名`:''}`}</p>
     <div class="atlist">${rows}</div>
     ${answerBlock}`);
 }
@@ -4242,13 +4247,13 @@ function openAttendOption(reqId,optId){
     ['ok', ATT_MARK.ok,  ids.filter(u=>who.get(u)==='ok')],
     ['may',ATT_MARK.may, ids.filter(u=>who.get(u)==='may')],
     ['no', ATT_MARK.no,  ids.filter(u=>who.get(u)==='no')],
-    ['none','まだ回答していない', ids.filter(u=>!who.get(u))],
   ];
+  if(!isPublicAttend(r))groups.push(['none','まだ回答していない',ids.filter(u=>!who.get(u))]);
   // 0人の区分は見出しごと出さない
   const blocks=groups.filter(g=>g[2].length).map(([v,ttl,list])=>`
     <div class="atgrp ${v==='none'?'none':''}">
       <div class="atgh"><span class="atgm ${v}">${ttl}</span><b>${list.length}名</b></div>
-      <div class="atppl">${list.map(attendPerson).join('')}</div>
+      <div class="atppl">${list.map(uid=>attendPerson(uid,r)).join('')}</div>
     </div>`).join('');
   openSheet(`<button type="button" class="atback"
       onclick="openAttendDetail('${r.id}')">${ic('back')}出欠集計へ戻る</button>
@@ -4259,10 +4264,11 @@ function openAttendOption(reqId,optId){
 /* 名前の札。Googleの写真を持っている人はそれを出す。
    丸の色は人ごとに変えず、一覧の行と同じ地の色にそろえた。
    ここで見たいのは「誰が答えたか」で、色は名前を読む邪魔になるため */
-function attendPerson(uid){
+function attendPerson(uid,r){
   const u=findUser(uid);
+  const publicPerson=(r.public_respondents||[]).find(x=>x.id===uid);
   return `<span class="atp"><span class="av">${avatarInner(u)}</span>
-    <span>${esc((u||{}).nickname||'—')}</span></span>`;
+    <span>${esc((u||{}).nickname||publicPerson?.name||'—')}</span></span>`;
 }
 /* 候補1件の見せ方。「9/12(土) 19:00〜21:00」 */
 function fmtSlot(o){
@@ -4410,13 +4416,14 @@ let REQFORM=null; // {mode, picked:Set相当の配列}
    by_place（インターン先で選ぶ）は 2026-08-05 に処理ごと取り除いた。
    ※ 残る2つの mode を処理する側のコードは、過去の依頼を読むために残してある */
 const REQ_MODES=[
+  {id:'public',label:'誰でも回答OK'},
   {id:'all_staff',   label:'支部の全スタッフ'},
   {id:'pick_staff',  label:'スタッフを選ぶ'},
   {id:'by_dept',     label:'部署で選ぶ'},
 ];
 
 function openRequestForm(kind){
-  REQFORM={mode:'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[]};
+  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[]};
   if(REQFORM.kind==='attend')addReqOption();   // 中で描き直すのでここでは呼ばない
   else renderRequestForm();
 }
@@ -4444,6 +4451,7 @@ function branchInterns(){
 /* 選ばれている条件を、実際の宛先（ユーザーIDの配列）と表示名に変える */
 function resolveRecipients(){
   const m=REQFORM.mode, picked=REQFORM.picked;
+  if(m==='public')return {ids:[ME.id],label:'誰でも回答OK'};
   if(m==='all_staff'){
     const list=branchStaff().filter(u=>u.id!==ME.id);  // 自分あては含めない
     return {ids:list.map(u=>u.id),label:'支部の全スタッフ'};
@@ -4478,6 +4486,9 @@ function reqPickerHTML(){
       onclick="toggleReqPick('${value}')">
       <span>${esc(label)}</span>${sub?`<span class="picksub">${esc(sub)}</span>`:''}</button>`;
 
+  if(m==='public'){
+    return `<div class="hint">${ic('link')}<span>共有URLを知っている人なら、アカウントなしで回答できます。回答者数は事前に決まりません。</span></div>`;
+  }
   if(m==='all_staff'){
     const n=branchStaff().filter(u=>u.id!==ME.id).length;
     return `<div class="hint">${ic('users')}<span>自分を除いた <b>${n}名</b> のスタッフに届きます。</span></div>`;
@@ -4507,6 +4518,8 @@ function reqPickerHTML(){
 /* ふつうの依頼と出欠確認の切り替え。候補の日時は REQFORM.opts に貯める */
 function setReqKind(kind){
   REQFORM.kind=kind;
+  if(kind==='attend'&&REQFORM.mode!=='public')REQFORM.mode='public';
+  if(kind!=='attend'&&REQFORM.mode==='public')REQFORM.mode='all_staff';
   if(kind==='attend'&&!REQFORM.opts.length)addReqOption();
   renderRequestForm(true);
 }
@@ -4563,7 +4576,8 @@ function renderRequestForm(keepText){
   const {ids,label}=resolveRecipients();
   const attend=REQFORM.kind==='attend';
 
-  const modeBtns=REQ_MODES.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
+  const modes=attend?REQ_MODES:REQ_MODES.filter(o=>o.id!=='public');
+  const modeBtns=modes.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
     onclick="setReqMode('${o.id}')">${o.label}</button>`).join('');
 
   openSheet(`<h3>${attend?'出欠を確認する':'依頼を出す'}</h3>
@@ -4579,7 +4593,7 @@ function renderRequestForm(keepText){
     <div class="modechips">${modeBtns}</div>
     <div style="margin-top:12px">${reqPickerHTML()}</div>
 
-    <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>（${ids.length}名）</span></div>
+    <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>${REQFORM.mode==='public'?'（人数の制限なし）':`（${ids.length}名）`}</span></div>
 
     <label class="fl" style="margin-top:16px">件名<span class="req">*</span></label>
     <input id="reqSubj" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
@@ -4630,7 +4644,8 @@ async function submitRequest(){
   try{
     const res=await api('/api/requests',{method:'POST',
       body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids,
-        kind:attend?'attend':'normal',options})});
+        kind:attend?'attend':'normal',options,
+        public_access:attend&&REQFORM.mode==='public'})});
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
       err.textContent=d.error||'送信できませんでした';err.classList.add('show');
@@ -4651,7 +4666,7 @@ async function submitRequest(){
   }
   REQFORM=null;REQTAB='sent';
   closeSheet();updateBell();render();
-  toast(`${ids.length}名に送りました`);
+  toast(attend&&request.public_url?'共有URLを発行しました':`${request.recipient_ids.length}名に送りました`);
 }
 
 /* =========================================================
