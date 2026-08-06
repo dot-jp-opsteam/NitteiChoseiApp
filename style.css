@@ -359,20 +359,17 @@
   .kv dd{margin:0;font-weight:600}
 
   .choice-list{display:flex;flex-direction:column;gap:8px}
-  .choice{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:10px}
   /* 順位の札。「第1希望」と書くので幅は中身なり。第1〜第3だけ色を変える。
      申請画面の .selsummary .sr .cn と同じ値にしてあり、
      インターン生が申請時に見た色と、スタッフが確定時に見る色が揃う */
-  .choice .cn,.cgroup .chead .cn{height:22px;padding:0 8px;border-radius:6px;
+  .cgroup .chead .cn{height:22px;padding:0 8px;border-radius:6px;
     background:var(--warn-soft);color:var(--warn);display:grid;place-items:center;
     font-size:12px;font-weight:800;flex:none;white-space:nowrap}
-  .choice .cn.r1,.cgroup .chead .cn.r1{background:var(--bad-soft);color:var(--rank1)}
-  .choice .cn.r2,.cgroup .chead .cn.r2{background:var(--rank2-soft);color:var(--rank2)}
-  .choice .cn.r3,.cgroup .chead .cn.r3{background:var(--ok-soft);color:var(--rank3)}
-  .choice.sel{border-color:var(--ok);background:var(--ok-soft)}
-  .choice .pick{margin-left:auto}
-  /* 幅のある希望。見出しを押すと、下に30分刻みのボタンが開く。
-     最初から全部並べると、希望が3件あるだけで画面がボタンで埋まっていた */
+  .cgroup .chead .cn.r1{background:var(--bad-soft);color:var(--rank1)}
+  .cgroup .chead .cn.r2{background:var(--rank2-soft);color:var(--rank2)}
+  .cgroup .chead .cn.r3{background:var(--ok-soft);color:var(--rank3)}
+  /* 希望の一件。見出しを押すと、下に開始時刻の入力欄が開く。
+     最初から時刻ボタンを並べると、希望が3件あるだけで画面がボタンで埋まっていた */
   .cgroup{border:1px solid var(--line);border-radius:10px;padding:11px 12px}
   .cgroup.sel{border-color:var(--ok);background:var(--ok-soft)}
   .cgroup .chead{display:flex;align-items:center;gap:10px;font-weight:700;cursor:pointer}
@@ -380,13 +377,26 @@
     transition:transform .15s ease}
   .cgroup .chead .cchev .ic{width:16px;height:16px}
   .cgroup.open .chead .cchev{transform:rotate(90deg)}
-  /* 閉じているあいだは中身ごと隠す。
-     高さのアニメーションは付けない。中身の量で速さが変わって落ち着かないため */
-  .cgroup:not(.open) .cslots,.cgroup:not(.open) .cnote{display:none}
-  .cgroup .cslots{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  /* 開くときの動き。grid-template-rows を 0fr→1fr に動かすと、
+     中身の高さを JS で測らなくてもするりと開く。
+     内側の .cbody に overflow:hidden を持たせるのが要（min-height:0 も必須） */
+  .cgroup .cwrap{display:grid;grid-template-rows:0fr;opacity:0;
+    transition:grid-template-rows .24s var(--ease),opacity .18s var(--ease)}
+  .cgroup.open .cwrap{grid-template-rows:1fr;opacity:1}
+  /* 上の余白は .cbody の padding ではなく中身の margin で取る。
+     padding だと閉じたとき（高さ0）に潰しきれず、線が一本残って見える */
+  .cgroup .cwrap>.cbody{overflow:hidden;min-height:0}
+  .cgroup .cwrap>.cbody>:first-child{margin-top:10px}
+  .cgroup .cslots{display:flex;flex-wrap:wrap;gap:6px}
   .cgroup .cslot{padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--sub)}
   .cgroup .cslot.on{border-color:var(--ok);background:var(--ok-soft);color:var(--ok);font-weight:700}
-  .cgroup .cnote{margin-top:8px;font-size:12px;color:var(--mut)}
+  /* 開始時刻の入力。時刻の欄と「開始」の文字を横に並べる */
+  .cgroup .cpick{display:flex;align-items:center;gap:10px}
+  .cgroup .cpick .tin{width:auto;min-width:120px;margin:0;font-size:16px;font-weight:700;
+    font-variant-numeric:tabular-nums}
+  .cgroup .cpick .tlab{font-size:14px;font-weight:700;color:var(--sub)}
+  .cgroup .cbody .field-err{margin-top:6px}
+  .cgroup .cbody .btn{margin-top:10px}
 
   .empty{text-align:center;color:var(--mut);padding:40px 16px}
   .empty .ei{font-size:34px;opacity:.5}
@@ -394,6 +404,17 @@
   .divider{height:1px;background:var(--line2);margin:16px 0}
   .hint{background:var(--brand-soft);border:1px solid var(--hint-line);color:var(--brand-ink);border-radius:10px;padding:10px 12px;font-size:13px;display:flex;gap:8px}
   .hint.mock{background:var(--mock-bg);border-color:var(--mock-line);color:var(--mock-ink)}
+  /* 読ませたい案内文。.hint と違って色も囲みも付けず、本文と同じ字色で出す */
+  .guide{margin-top:14px;color:var(--ink);font-size:14px;font-weight:600;line-height:1.7}
+
+  /* 面談を確定できたときの知らせ。ここで手が止まるよう、丸印を大きめに置く */
+  .okdone{text-align:center;padding:6px 0 16px}
+  .okdone .okmark{width:56px;height:56px;margin:0 auto 12px;border-radius:50%;
+    background:var(--ok-soft);color:var(--ok);display:grid;place-items:center}
+  .okdone .okmark .ic{width:28px;height:28px}
+  .okdone h3{margin:0 0 6px}
+  .okdone .okdt{margin:0;font-size:15px;color:var(--sub);line-height:1.7}
+  .okdone .okdt b{color:var(--ink);font-size:17px}
 
   /* event vote bars */
   .votebar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--chip);margin:8px 0}
@@ -743,6 +764,11 @@
     padding:8px 4px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
     touch-action:none;cursor:grab}
   .selsummary .sr:active{cursor:grabbing}
+  /* 日付と時間を横に並べる。時間は日付のすぐ右に置き、
+     順位の札・日付・時間の順で左から読めるようにする */
+  .selsummary .sr .st{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
+  .selsummary .sr .sday{font-weight:700}
+  .selsummary .sr .stime{color:var(--sub);white-space:nowrap}
   /* 持ち上げた行の複製。指に付いてくるので、一覧が長くても常に見えている */
   .selsummary .sr.ghost{position:fixed;z-index:80;margin:0;pointer-events:none;cursor:grabbing;
     border-color:var(--brand);background:var(--brand-soft);
@@ -1531,6 +1557,7 @@
     .calcell:not(.out):hover .dn,.calcell .chip:hover,
     .cal .navbtn:hover,.bell:hover,.agenda .ag:hover .agbar{transform:none}
     .agenda .ag:hover{padding-left:4px}
+    .cgroup .cwrap{transition:none}
     .btn.pri:hover::after{animation:none}
     .hex:hover,.hex:focus-visible{transform:none}
     .sb-item:hover,.rowlist .row:hover{padding-left:inherit}

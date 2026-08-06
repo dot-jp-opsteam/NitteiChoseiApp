@@ -84,5 +84,26 @@ console.log('\n[ スタッフ画面 index.html の fmtGroupRange ]');
   check('枠なし → —', I.fmtGroupRange({ slots: [] }), '—');
 }
 
+/* 打ち込まれた開始時刻を、希望に含まれる30分枠に突き合わせる部分。
+   ここが緩むと、学生が出していない時刻で面談が確定してしまう */
+console.log('\n[ スタッフ画面 index.html の開始時刻チェック ]');
+{
+  const I = load('index.html', ['pad', 'hm', 'runEnd', 'fmtGroupRange', 'ivTimeVal', 'ivSlotFor', 'ivTimeErr'],
+    'var SLOT_MS=30*60*1000; var IV_TIME={}; function fmtDate(){return "8/7(金)";}');
+  const g = { slots: [iso(17, 0), iso(17, 30), iso(18, 0)] };   // 17:00〜18:00 の希望
+  check('範囲の先頭は通る', I.ivSlotFor(g, '17:00'), g.slots[0]);
+  check('範囲の途中も通る', I.ivSlotFor(g, '17:30'), g.slots[1]);
+  check('範囲の最後も通る', I.ivSlotFor(g, '18:00'), g.slots[2]);
+  check('範囲より前は弾く', I.ivSlotFor(g, '16:30'), null);
+  check('範囲より後は弾く', I.ivSlotFor(g, '18:30'), null);
+  check('30分刻みでなければ弾く', I.ivSlotFor(g, '17:15'), null);
+  check('空欄は弾く', I.ivSlotFor(g, ''), null);
+  check('希望が無ければ弾く', I.ivSlotFor(null, '17:00'), null);
+  check('初期値は先頭の枠', I.ivTimeVal(g, 1), '17:00');
+  check('空欄のときの注意書き', I.ivTimeErr(g, ''), '開始時刻を入力してください');
+  check('範囲外のときの注意書き', I.ivTimeErr(g, '19:00'),
+    '8/7(金) 17:00〜18:00 の範囲内で入力してください（17:00・17:30・18:00）');
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

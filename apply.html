@@ -45,13 +45,11 @@
   .booktable .bt-c.ok.sel.r2 .bt-num{color:var(--rank2)}
   .booktable .bt-c.ok.sel.r3 .bt-num{color:var(--rank3)}
 
-  /* 希望一覧は「日付＋終日の印」と「時間」の2行にする。
-     終日OKの日は時間が2つ以上に割れることがあり、1行では読みにくいため */
-  .selsummary .sr .st{display:flex;flex-direction:column;gap:2px;line-height:1.35;min-width:0}
-  .selsummary .sr .st .sday{font-weight:700}
+  /* 希望一覧は「日付」と「時間」を横に並べる（並びは style.css 側で決めている）。
+     終日OKの日は時間が2つ以上に割れるので、入りきらないときだけ折り返す */
   .selsummary .sr .st .stag{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;
     padding:1px 6px;border-radius:5px;background:var(--brand-soft);color:var(--brand-d)}
-  .selsummary .sr .st .stime{font-size:12.5px;color:var(--sub)}
+  .selsummary .sr .st .stime{font-size:13px}
 </style>
 </head>
 <body>
@@ -271,21 +269,22 @@ function viewApply(){
       +'（なぞれるのは同じ日の中だけです）。続けて選んだ時間はひとつの希望にまとまります。'
       +'担当スタッフが日程を確定します。</p>'
     +'<div class="card"><div class="cb">'
-      +'<label class="fl">お名前</label>'
+      /* 必須の赤い＊は、まだ入っていないあいだだけ出す。
+         入れ終わった欄からは消えるので、残りどこを埋めればよいかがひと目で分かる */
+      +'<label class="fl">お名前<span class="req" id="reqname"'+(reqHidden(APPLY.name))+'>*</span></label>'
       +'<input type="text" id="applyname" autocomplete="name" maxlength="50" placeholder="例：山田 太郎"'
-        +' value="'+esc(APPLY.name)+'" oninput="APPLY.name=this.value">'
+        +' value="'+esc(APPLY.name)+'" oninput="APPLY.name=this.value;syncReq()">'
       +'<p class="fine" style="margin-top:6px">担当スタッフが本人を確かめるために使います。本名でご記入ください。</p>'
       +'<div class="divider"></div>'
-      +'<label class="fl">担当スタッフ</label>'
+      +'<label class="fl">担当スタッフ<span class="req" id="reqstaff"'+(reqHidden(APPLY.staff))+'>*</span></label>'
       +'<select onchange="setApplyStaff(this.value)">'+staffOptions+'</select>'
       +'<p class="fine" style="margin-top:6px">'+esc(BRANCH_NAME)+'のスタッフから選べます。</p>'
       /* 選び方の案内。担当スタッフを選ぶ前から出しておく。
-         インターン生はこの画面に初めて来るので、表が出てから読むのでは遅い */
-      +'<div class="hint" style="margin-top:14px"><span>'
-        +'<b>○が付いているマスが、担当スタッフの面談できる空き時間です。</b><br>'
-        +'その中から、あなたの都合がつく時間を選んでください。上下になぞると続けて選べます。'
-        +'選べる時間が多いほど日程が決まりやすくなります。'
-      +'</span></div>'
+         インターン生はこの画面に初めて来るので、表が出てから読むのでは遅い。
+         色を付けた囲み（.hint）ではなく本文と同じ黒字にしてある。
+         囲みにすると「補足」に見えて読み飛ばされるため */
+      +'<div class="guide">下のカレンダーから、面談可能な時間帯を選択してください。<br>'
+        +'選べる時間が多いほど日程が決まりやすくなります。</div>'
       +weekBlock(groups)
       +'<div class="divider"></div>'
       +'<label class="fl">その他（任意）</label>'
@@ -432,8 +431,19 @@ function selSummaryBlock(groups){
     +'<div class="selsummary" id="selsummary">'+selSummaryRows()+'</div></div>';
 }
 
+/* 必須の赤い＊。入っていれば hidden を付けて消す */
+function reqHidden(v){return (v&&String(v).trim())?' hidden':'';}
+/* 名前を打っている最中と担当スタッフを選んだ瞬間に＊を出し入れする。
+   ここで render() を呼ぶと入力中のカーソルが飛ぶので、＊だけを直接いじる */
+function syncReq(){
+  var n=document.getElementById('reqname');
+  if(n)n.hidden=!!(APPLY.name&&APPLY.name.trim());
+  var s=document.getElementById('reqstaff');
+  if(s)s.hidden=!!APPLY.staff;
+}
 function setApplyStaff(id){
   APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];APPLY.grid=null;
+  syncReq();
   loadGrid();
 }
 function setApplyWeek(delta){

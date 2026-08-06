@@ -2132,15 +2132,68 @@ function clearIvFilter(){IVFILTER={status:'all',branch:'all',q:''};render();}
    開閉の状態は画面の外に置く必要がある。
    別の面談を開いたら作り直す（IV_OPEN_FOR がその見分け）*/
 let IV_OPEN=new Set(),IV_OPEN_FOR=null;
+/* 希望ごとに打ち込まれた開始時刻（"17:30" 形式）。
+   シートを組み立て直しても打った値が消えないよう、IV_OPEN と同じく画面の外に置く */
+let IV_TIME={};
 function toggleChoiceGroup(id,n){
-  if(IV_OPEN.has(n))IV_OPEN.delete(n); else IV_OPEN.add(n);
-  // openInterview は openSheet でシートの中身を丸ごと差し替えるため scrollTop が0に戻る。
-  // .sheet は max-height:88vh;overflow:auto なので、そのままだと開閉するたびに先頭へ飛ぶ。
-  // 差し替え前の位置を控えておき、差し替え後に戻す
+  const willOpen=!IV_OPEN.has(n);
+  if(willOpen)IV_OPEN.add(n); else IV_OPEN.delete(n);
+  /* シートごと作り直すと、できたてのDOMが最初から開いた姿で現れるので動きが出ない。
+     開閉は .open の付け外しだけで済むため、その場のDOMを触る。
+     ついでに打ちかけの時刻や表示位置もそのまま残る */
+  const el=document.getElementById('cg'+n);
+  if(el){
+    el.classList.toggle('open',willOpen);
+    const head=el.querySelector('.chead');
+    if(head)head.setAttribute('aria-expanded',willOpen?'true':'false');
+    return;
+  }
+  // 念のための逃げ道。DOMが見つからないときだけ作り直し、表示位置を戻す
   const sheet=document.getElementById('sheet');
   const scrollTop=sheet?sheet.scrollTop:0;
   openInterview(id);
   if(sheet)sheet.scrollTop=scrollTop;
+}
+/* ---- 開始時刻の入力まわり ----
+   面談は30分なので、決めるのは「開始時刻」ひとつ。
+   打ち込める時刻は、その希望に含まれる30分枠の開始時刻だけに絞る。
+   学生が出していない時刻で勝手に確定してしまう事故を防ぐため。
+   範囲外の日時で決めたいときは「別日時で確定」から入る */
+function ivTimeVal(g,n){return IV_TIME[n]!==undefined?IV_TIME[n]:hm(g.slots[0]);}
+/* 打ち込まれた "17:30" が、その希望のどの枠に当たるかを返す。当たらなければ null */
+function ivSlotFor(g,hhmm){
+  if(!g||!hhmm)return null;
+  const hit=g.slots.filter(v=>hm(v)===hhmm);
+  return hit.length?hit[0]:null;
+}
+function ivTimeErr(g,hhmm){
+  if(!hhmm)return '開始時刻を入力してください';
+  return `${fmtGroupRange(g)} の範囲内で入力してください（${g.slots.map(hm).join('・')}）`;
+}
+function ivGroupAt(id,n){
+  const iv=(DB.interviews||[]).find(x=>x.id===id);
+  if(!iv)return null;
+  return ivGroups(iv)[n-1]||null;
+}
+/* 1文字打つたびに、確定ボタンの可否と注意書きを切り替える。
+   ここで openInterview を呼び直すと入力中のカーソルが飛ぶので、該当箇所だけ書き換える */
+function ivTimeChange(id,n,val){
+  IV_TIME[n]=val;
+  const g=ivGroupAt(id,n);
+  const slot=ivSlotFor(g,val);
+  const btn=document.getElementById('ivok'+n);
+  if(btn)btn.disabled=!slot;
+  const err=document.getElementById('iverr'+n);
+  if(!err)return;
+  if(slot){err.textContent='';err.classList.remove('show');}
+  else{err.textContent=ivTimeErr(g,val);err.classList.add('show');}
+}
+function confirmInterviewAt(id,n){
+  const g=ivGroupAt(id,n);
+  if(!g)return;
+  const slot=ivSlotFor(g,ivTimeVal(g,n));
+  if(!slot){toast('開始時刻を確かめてください');return;}
+  confirmInterview(id,slot);
 }
 function openInterview(id){
   const iv=(DB.interviews||[]).find(x=>x.id===id);const intern=ivIntern(iv);const s=STATUS[iv.status];
@@ -2157,33 +2210,41 @@ function openInterview(id){
   if(IV_OPEN_FOR!==id){
     IV_OPEN_FOR=id;
     IV_OPEN=new Set();
+    IV_TIME={};
   }
   /* 順位の札。第1〜第3だけ色を変える。申請画面の一覧とまったく同じ色にしてあり、
      インターン生が申請時に見た色と、スタッフが確定時に見る色が揃う */
   const rankCls=n=>'cn r'+Math.min(n,4);
   const rankLabel=n=>`第${n}希望`;
-  const choiceRow=(n,val)=>`<div class="choice ${iv.confirmed_datetime===val?'sel':''}">
-      <span class="${rankCls(n)}">${rankLabel(n)}</span><span>${fmtDT(val)}</span>
-      ${iv.status==='applied'?`<button class="btn pri sm pick" onclick="confirmInterview('${id}','${val}')">これで確定</button>`:
-        (iv.confirmed_datetime===val?'<span class="pick pill st-fixed">確定</span>':'')}
-    </div>`;
-  /* 幅のある希望は、押して開いてから中の30分枠を選んでもらう。
-     面談そのものは30分なので、範囲まるごとではなく開始時刻を決める。
+  /* どの希望も同じ見た目にする。押して開くと開始時刻の欄が出てくるので、
+     枠が1つしかない希望と幅のある希望とで操作を覚え直さずに済む。
 
      最初から時刻ボタンを並べていたが、希望が3件もあると画面が
      ボタンで埋まって、どの希望を見ているのか分からなくなっていた */
-  const choiceGroup=(n,g)=>(g.slots.length===1&&!g.allDay)?choiceRow(n,g.slots[0]):`<div class="cgroup ${IV_OPEN.has(n)?'open':''} ${g.slots.includes(iv.confirmed_datetime)?'sel':''}">
+  const choiceGroup=(n,g)=>{
+    const val=ivTimeVal(g,n);
+    const hit=ivSlotFor(g,val);
+    const open=IV_OPEN.has(n);
+    return `<div class="cgroup ${open?'open':''} ${g.slots.includes(iv.confirmed_datetime)?'sel':''}" id="cg${n}">
       <div class="chead" onclick="toggleChoiceGroup('${id}',${n})" role="button" tabindex="0"
-        aria-expanded="${IV_OPEN.has(n)?'true':'false'}"
+        aria-expanded="${open?'true':'false'}"
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleChoiceGroup('${id}',${n})}">
         <span class="${rankCls(n)}">${rankLabel(n)}</span><span>${fmtGroupRange(g)}</span>
         ${g.allDay?'<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">終日OK</span>':''}
         <span class="cchev">${ic('chevron')}</span></div>
-      <div class="cslots">${g.slots.map(val=>iv.status==='applied'
-        ? `<button class="btn sm" onclick="confirmInterview('${id}','${val}')">${hm(val)}〜</button>`
-        : `<span class="cslot ${iv.confirmed_datetime===val?'on':''}">${hm(val)}〜</span>`).join('')}</div>
-      ${iv.status==='applied'?'<div class="cnote">この中から開始時刻を選んで確定します</div>':''}
+      <div class="cwrap"><div class="cbody">${iv.status==='applied'
+        ? `<div class="cpick">
+            <input type="time" class="tin" id="ivt${n}" step="1800" value="${esc(val)}"
+              oninput="ivTimeChange('${id}',${n},this.value)"><span class="tlab">開始</span>
+          </div>
+          <div class="field-err${hit?'':' show'}" id="iverr${n}">${hit?'':esc(ivTimeErr(g,val))}</div>
+          <button class="btn pri block" id="ivok${n}"${hit?'':' disabled'}
+            onclick="confirmInterviewAt('${id}',${n})">これで確定</button>`
+        : `<div class="cslots">${g.slots.map(v=>
+            `<span class="cslot ${iv.confirmed_datetime===v?'on':''}">${hm(v)}〜</span>`).join('')}</div>`
+      }</div></div>
     </div>`;
+  };
   let actions='';
   if(iv.status==='applied'){
     actions=`<div class="choice-list">
@@ -2226,15 +2287,21 @@ async function confirmInterview(id,dt){
   if(!next)return;
   applyInterview(next);
   updateBell();
-  closeSheet();
-  // アカウントの無い申請は宛先が無いので、メール作成画面へは進まない
-  if(ivIsGuest(iv)){
-    toast('面談を確定しました。日時は直接お伝えください');
-    return;
-  }
-  toast('面談を確定しました（カレンダー登録・通知済み）');
-  openSendMail(iv.intern_id,'面談確定のお知らせ',
-    `お疲れ様です。\n面談日程が下記のとおり確定しましたのでお知らせします。\n\n日時：${fmtDT(dt)}\n\nよろしくお願いいたします。`,'fixed');
+  ivConfirmedSheet(iv,dt);
+}
+/* 確定できたことを、その場ではっきり知らせる画面。
+   以前はトーストを出してメール作成画面へ自動で進んでいたが、
+   進んだ先で下書きを閉じると「連絡したつもり」で終わってしまう。
+   ここでいったん止めて、学生への連絡がまだ残っていることを必ず読ませる */
+function ivConfirmedSheet(iv,dt){
+  openSheet(`<div class="okdone">
+      <div class="okmark">${ic('check')}</div>
+      <h3>面談日程を確定しました</h3>
+      <p class="okdt">${esc(ivInternName(iv))} さん<br><b>${fmtDT(dt)}</b></p>
+    </div>
+    <div class="hint mock">${ic('alert')}<span><b>まだ終わりではありません。</b><br>
+      必ず学生に確定した日程を連絡してください。</span></div>
+    <button class="btn pri block" style="margin-top:16px" onclick="closeSheet()">閉じる</button>`);
 }
 function openCustomConfirm(id){
   openSheet(`<h3>別日時で確定</h3>

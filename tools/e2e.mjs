@@ -814,14 +814,34 @@ async function run() {
 
     /* 申請画面に、選び方の説明が出ていること。
        インターン生は説明なしにこの画面へ来るので、
-       「○のマスが空き時間」だと分かる一文が要る（設計書 2節） */
+       どこで何を選ぶのかが分かる一文が要る（設計書 2節） */
     {
       const applyHtml = fs.readFileSync(path.join(ROOT, 'apply.html'), 'utf8');
-      check('申請画面に空き時間の説明がある',
-        applyHtml.includes('○が付いているマスが、担当スタッフの面談できる空き時間です。'), true);
+      const GUIDE = '下のカレンダーから、面談可能な時間帯を選択してください。';
+      check('申請画面にカレンダーで選ぶ旨の説明がある', applyHtml.includes(GUIDE), true);
       check('説明は担当スタッフ欄とカレンダーの間にある',
-        applyHtml.indexOf('のスタッフから選べます') < applyHtml.indexOf('○が付いているマスが')
-        && applyHtml.indexOf('○が付いているマスが') < applyHtml.indexOf('weekBlock(groups)'), true);
+        applyHtml.indexOf('のスタッフから選べます') < applyHtml.indexOf(GUIDE)
+        && applyHtml.indexOf(GUIDE) < applyHtml.indexOf('weekBlock(groups)'), true);
+      /* 色付きの囲み（.hint）ではなく、本文と同じ字色で出すこと */
+      check('説明は色付きの囲みにしない', applyHtml.includes('<div class="guide">'), true);
+      /* 未入力のあいだだけ赤い＊を出す */
+      check('お名前に必須の＊がある', applyHtml.includes('id="reqname"'), true);
+      check('担当スタッフに必須の＊がある', applyHtml.includes('id="reqstaff"'), true);
+    }
+
+    /* スタッフの確定は、30分ボタンの一覧ではなく開始時刻の入力にする。
+       打てるのは希望に含まれる枠の開始時刻だけ（設計どおり範囲外は弾く） */
+    {
+      const appHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+      check('確定は時刻入力欄で行う', appHtml.includes('type="time" class="tin"'), true);
+      check('時刻欄の右に「開始」と出る', appHtml.includes('<span class="tlab">開始</span>'), true);
+      check('30分刻みに限定している', appHtml.includes('step="1800"'), true);
+      check('確定後に「面談日程を確定しました」を出す',
+        appHtml.includes('面談日程を確定しました'), true);
+      check('確定後に学生への連絡を促す',
+        appHtml.includes('まだ終わりではありません。') && appHtml.includes('必ず学生に確定した日程を連絡してください。'), true);
+      check('確定後にメール作成画面へ自動で進まない',
+        appHtml.includes("openSendMail(iv.intern_id,'面談確定のお知らせ'"), false);
     }
 
     const firstOpen = await firstOpenSlot(token1, 'u_e2e_staff');
