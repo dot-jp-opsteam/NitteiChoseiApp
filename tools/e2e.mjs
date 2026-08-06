@@ -402,6 +402,19 @@ async function testAttendance() {
   check('日付だけの候補はアプリ内予定になる', !!dateOnlyDone.json.event, true);
   check('日付だけのアプリ内予定は時刻非表示になる', dateOnlyDone.json.event?.has_time, false);
 
+  const doubleConfirmMade = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '二重確定防止', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'attend',
+    options: [{ date: dateKey, has_date: true, has_time: false }],
+  });
+  const doubleConfirmResults = await Promise.all([
+    api(TOKENS.staff, 'POST', `/api/requests/${doubleConfirmMade.json.request?.id}/confirm`, { option_id: 'op0' }),
+    api(TOKENS.staff, 'POST', `/api/requests/${doubleConfirmMade.json.request?.id}/confirm`, { option_id: 'op0' }),
+  ]);
+  check('同じ出欠を同時確定しても成功は1件だけ',
+    doubleConfirmResults.filter((x) => x.status === 200).length, 1);
+  check('重複する確定要求は409で拒否する',
+    doubleConfirmResults.filter((x) => x.status === 409).length, 1);
+
   const timeOnlyMade = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '時間だけの候補', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'attend',
     options: [{ start_time: '20:00', end_time: '22:00', has_date: false, has_time: true }],
@@ -495,6 +508,7 @@ async function testAttendance() {
   check('回答前でも結果一覧を見られる', publicView.json.respondents, []);
 
   const appHtml = await (await fetch(BASE + '/')).text();
+  const serverSource = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
   const publicModePos = appHtml.indexOf("{id:'public',label:'誰でも回答OK'}");
   check('出欠の宛先先頭に「誰でも回答OK」がある',
     publicModePos >= 0
@@ -515,6 +529,10 @@ async function testAttendance() {
     appHtml.includes("if(o?.has_time===false)return fmtDate(o.start)"), true);
   check('カレンダーも日付だけの内部時刻を表示しない',
     appHtml.includes("if(ev?.has_time===false)return ''"), true);
+  check('日付だけの予定編集でも内部時刻を表示しない',
+    appHtml.includes('const dateOnly=ev?.has_time===false'), true);
+  check('Google通知OFFは日付だけの予定に限定する',
+    serverSource.includes("picked.has_time === false ? { reminders: { useDefault: false } } : {}"), true);
   check('スタッフ画面は時間だけを日程未定と表示する',
     appHtml.includes("if(o?.has_date===false)return `${o.start_time}"), true);
   check('公開送信後は公開回答ページへ移動する',

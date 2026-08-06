@@ -2892,6 +2892,7 @@ async function saveVisibilityCleanup(){
    カレンダーの日付を直接クリックしたときに使う */
 function openEventForm(id,dateKey){
   const ev=id?DB.events.find(e=>e.id===id):null;
+  const dateOnly=ev?.has_time===false;
   const bopts=DB.branches.map(b=>`<option value="${b.id}" ${ev?.branch_id===b.id||(!ev&&b.id===ME.branch_id)?'selected':''}>${esc(b.name)}</option>`).join('');
   // 新規は「自分だけ」を既定にする。古い予定は visibility が無いので支部共有として扱う
   const vis=ev?(ev.visibility==='private'?'private':'branch'):'private';
@@ -2910,12 +2911,14 @@ function openEventForm(id,dateKey){
     <textarea id="evDesc">${esc(ev?.description||'')}</textarea>
     <label class="fl">日付<span class="req">*</span></label>
     <input type="date" id="evDate" value="${dateVal}"><div class="field-err" id="evStartE"></div>
-    <label class="fl">時間<span class="req">*</span></label>
-    <div class="timerange">
-      <select id="evT1" onchange="syncEvEnd()">${timeOpts(t1)}</select>
-      <span class="tr-sep">〜</span>
-      <select id="evT2">${timeOpts(t2)}</select>
-    </div>
+    ${dateOnly?`<div class="hint" style="margin-top:12px">${ic('calendar')}<span>この予定には時間を設定していません。</span></div>
+      <input type="hidden" id="evT1" value="${t1}"><input type="hidden" id="evT2" value="${t2}">`:`
+      <label class="fl">時間<span class="req">*</span></label>
+      <div class="timerange">
+        <select id="evT1" onchange="syncEvEnd()">${timeOpts(t1)}</select>
+        <span class="tr-sep">〜</span>
+        <select id="evT2">${timeOpts(t2)}</select>
+      </div>`}
     <div class="field-err" id="evTimeE"></div>
     <label class="fl">この予定を見られる人</label>
     ${canShare?`<select id="evVis" onchange="toggleEvBranch()">
@@ -2977,6 +2980,7 @@ async function saveEvent(id){
   const data={title,description:document.getElementById('evDesc').value.trim(),
     start_datetime:new Date(`${date}T${t1}`).toISOString(),
     end_datetime:new Date(`${date}T${t2}`).toISOString(),
+    has_time:old?.has_time===false?false:undefined,
     location:old?.location||'',
     branch_id:document.getElementById('evBranch').value,
     visibility,

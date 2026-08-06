@@ -778,6 +778,15 @@ async function writeDB(obj) {
 const { withDBLock } = require('./dblock');
 const stream = require('./stream');
 
+/* 同じ出欠確認を二重クリック・再送で同時確定しても、副作用を1回だけにする。
+   Renderの単一Nodeプロセス内で確定処理を順番に通し、列に入った後でconfirmedを読み直す。 */
+let attendanceConfirmChain = Promise.resolve();
+function withAttendanceConfirmLock(fn) {
+  const run = attendanceConfirmChain.then(fn, fn);
+  attendanceConfirmChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 /* ---------- users テーブル操作 ---------- */
 function toPublicUser(row) {
   if (!row) return null;
@@ -2456,7 +2465,7 @@ app.put('/api/requests/:id/response', requireAuth, async (req, res) => {
 
 /* 日程を確定する。送った本人だけ。確定した日時で予定を1件作り、
    答えてくれた人へ通知を出す */
-app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => {
+app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => withAttendanceConfirmLock(async () => {
   const actor = req.authUser;
   const optionId = req.body?.option_id;
   try {
@@ -2467,6 +2476,7 @@ app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => {
     if (row.sender_id !== actor.id && actor.role !== 'admin') {
       return res.status(403).json({ error: '確定できるのは送った本人だけです' });
     }
+    if (row.confirmed) return res.status(409).json({ error: 'すでに日程が確定しています' });
     let opts = [];
     try { opts = JSON.parse(row.options || '[]'); } catch (e) { opts = []; }
     const picked = opts.find((o) => o.id === optionId);
@@ -2505,7 +2515,7 @@ app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => {
               summary: row.subject,
               start: { dateTime: picked.start, timeZone: 'Asia/Tokyo' },
               end: { dateTime: picked.end, timeZone: 'Asia/Tokyo' },
-              reminders: { useDefault: false },
+              ...(picked.has_time === false ? { reminders: { useDefault: false } } : {}),
             });
           }
         } catch (e) {
@@ -2526,7 +2536,7 @@ app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => {
     console.error('日程の確定に失敗しました', e);
     res.status(500).json({ error: '確定できませんでした' });
   }
-});
+}));
 
 /* 通知を積む。面談の申請・確定やイベント作成に付随して呼ばれる。
    支部は本人の所属で固定する（他支部あてに流し込めないようにするため） */
