@@ -2097,13 +2097,17 @@ function openInterview(id){
   const iv=(DB.interviews||[]).find(x=>x.id===id);const intern=ivIntern(iv);const s=STATUS[iv.status];
   const internName=ivInternName(iv);const guest=ivIsGuest(iv);
   const groups=ivGroups(iv);
-  /* 別の面談を開いたら開閉をやり直す。
-     このとき、確定済みの日時を含む希望だけ最初から開いておく。
-     どれで確定したのかを探さなくて済むように */
+  /* 別の面談を開いたら開閉をやり直す（持ち越し防止）。
+     以前は確定済みの日時を含む希望を最初から開く案があったが、取りやめた。
+     ・fixed（確定済み）のときは actions がこの希望一覧（choiceGroup）自体を描かず、
+       確定日時を出す別の分岐に入るため、IV_OPEN に番号を入れても反映される画面がない
+     ・applied（申請中）のときはサーバー側が status!=='fixed' なら confirmed_datetime を
+       必ず null にする（新規申請時も null）ので、「申請中なのに確定日時が入っている」
+       状態はそもそも起こらない
+     つまりこの分岐は現行の作りでは成立しないため、常に空の状態から開き直す */
   if(IV_OPEN_FOR!==id){
     IV_OPEN_FOR=id;
     IV_OPEN=new Set();
-    groups.forEach((g,i)=>{if(g.slots.includes(iv.confirmed_datetime))IV_OPEN.add(i+1);});
   }
   /* 順位の札。第1〜第3だけ色を変える。申請画面の一覧とまったく同じ色にしてあり、
      インターン生が申請時に見た色と、スタッフが確定時に見る色が揃う */
