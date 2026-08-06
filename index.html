@@ -308,6 +308,12 @@ async function api(path,opts={}){
   if(token)headers['Authorization']='Bearer '+token;
   if(opts.body&&!headers['Content-Type'])headers['Content-Type']='application/json';
   const res=await fetch(path,{...opts,headers});
+  // 自分の操作が成功した直後は、その操作が発生させた通知のSSE押し出しを受けても
+  // 「新しい通知が届きました」を出さない（3秒ほど）。GET以外＝画面から何かを保存する
+  // 操作に限る。confirmInterview() 等が出す成功メッセージを、直後に届く自分宛のSSEで
+  // 上書きしないための印（applyRemoteUpdate 側で見る）
+  const method=(opts.method||'GET').toUpperCase();
+  if(res.ok&&method!=='GET')SUPPRESS_SSE_TOAST_UNTIL=Date.now()+3000;
   if(res.status===401&&token){
     // パスワード違いなど、業務上の401と区別するためサーバーの code を見る
     try{
@@ -317,6 +323,7 @@ async function api(path,opts={}){
   }
   return res;
 }
+let SUPPRESS_SSE_TOAST_UNTIL=0;
 
 // 初期マスタデータ（支部のみ）。ユーザー・面談等は運用開始時点では空。
 function seed(){
@@ -486,6 +493,10 @@ document.addEventListener('focusout',()=>setTimeout(flushPendingRefresh,0));
    ブラウザ標準の EventSource は Authorization ヘッダを付けられず、
    このアプリは Cookie を使わない（auth.js 冒頭）ので、fetch のストリームを自分で読む。
    切れたら自分でつなぎ直す（1秒→2秒→…最大30秒）*/
+/* 呼び出しは限られた場所だけ（enterAppWith と、下の visibilitychange ハンドラ）。
+   増やすときは、古い接続の後始末（STREAM_CTRL.abort()）が新しい接続を壊さないか
+   必ず確かめること。startStream() は自分で古い接続を閉じてから張り直す作りだが、
+   呼び出し側で非同期処理を挟むと「閉じる前に次を張る」順序になりかねない */
 let STREAM_CTRL=null,STREAM_WAIT=1000,STREAM_STOP=false;
 function startStream(){
   // 二重に呼ばれても接続が2本残らないよう、張りっぱなしの接続があれば先に止めてから張り直す
@@ -496,6 +507,31 @@ function stopStream(){
   STREAM_STOP=true;
   if(STREAM_CTRL){try{STREAM_CTRL.abort();}catch(e){}STREAM_CTRL=null;}
 }
+/* タブを隠している間はSSEを切る（無料枠の保護）。
+   SSEが張られている間 Render のインスタンスはスリープしない。無料プランは750時間/月で、
+   31日フル稼働すると約730時間になり余白が20時間しかないため、誰かがタブを開きっぱなしに
+   すると月末に止まる恐れがある（設計書 3.5節）。
+   画面が隠れた状態が STREAM_HIDE_MS 続いたら切り、表示に戻ったらつなぎ直して取り直す。
+   確認のときだけこの値を短くしてよいが、確認後は必ず10分へ戻すこと */
+const STREAM_HIDE_MS=10*60*1000;
+let STREAM_HIDE_TIMER=null;
+function onStreamVisibilityChange(){
+  if(!getToken())return; // ログイン前は無関係
+  if(document.hidden){
+    if(STREAM_HIDE_TIMER)return; // 既に待っている
+    // 他のタブを一瞬見ただけで切れると、つなぎ直しが増えて無駄なのですぐには切らない
+    STREAM_HIDE_TIMER=setTimeout(()=>{STREAM_HIDE_TIMER=null;stopStream();},STREAM_HIDE_MS);
+  }else if(STREAM_HIDE_TIMER){
+    // 10分経つ前に戻ってきたので、切る前に待ちを取り消すだけでよい（接続は張られたままのため）
+    clearTimeout(STREAM_HIDE_TIMER);STREAM_HIDE_TIMER=null;
+  }else{
+    // 実際に10分以上隠れていて切れていたので、つなぎ直して取り直す。
+    // 見落としを防ぐため、切れていた間に届いていたかもしれない通知を取りに行く
+    startStream();
+    if(ME)onServerRefresh();
+  }
+}
+document.addEventListener('visibilitychange',onStreamVisibilityChange);
 async function connectStream(){
   if(STREAM_STOP||!getToken())return;
   const ctrl=new AbortController();STREAM_CTRL=ctrl;
@@ -546,10 +582,15 @@ async function onServerRefresh(){
 
 /* 取り込んだ内容を画面へ。
    画面全体を覆うものは出さない。知らせるのはベルの数字とトーストだけ。
-   操作の最中は描き直さず印だけ立てて、手が空いてから反映する（設計書 4節）*/
+   操作の最中は描き直さず印だけ立てて、手が空いてから反映する（設計書 4節）。
+   ベルの更新と描き直しは、自分の操作かどうかにかかわらず必ず行う。
+   止めるのはトーストだけ（次の行）。自分の操作（confirmInterview 等）が出した
+   成功メッセージを、直後に届く自分宛のSSEの「新しい通知が届きました」で
+   上書きしないため（api() が立てる SUPPRESS_SSE_TOAST_UNTIL を見る） */
 function applyRemoteUpdate(added){
   updateBell();
-  if(added>0)toast(added===1?'新しい通知が届きました':`新しい通知が${added}件届きました`);
+  if(added>0&&Date.now()>=SUPPRESS_SSE_TOAST_UNTIL)
+    toast(added===1?'新しい通知が届きました':`新しい通知が${added}件届きました`);
   if(uiBusy()){REFRESH_PENDING=true;return;}
   if(ME)renderQuiet();
 }
@@ -561,12 +602,13 @@ function applyRemoteUpdate(added){
    ここを見ていなかったために「再読み込みするまで面談申請に気づけない」状態だった。
    面談の確定や不成立は通知が積まれるので件数で気づけるが、面談を「申請中に戻す」操作は
    通知を作らない（server/server.js の該当処理は status が fixed・failed のときだけ通知する）ため、
-   このスタンプでは変化を検知できない。取消し操作はSSEでもポーリングでも届かない既知の
-   範囲外事項であり、今回は対応しない */
+   件数だけでは変化を検知できない。そのため面談は件数に加えて各件の status と
+   confirmed_datetime も畳み込む。中身だけ変わる更新（申請中に戻す等）もこれで拾える */
 function dbStamp(db){
   if(!db)return '';
   const n=k=>((db[k]||[]).length);
-  return [db.updatedAt||'',n('interviews'),n('notifications'),n('requests'),n('emails')].join('|');
+  const ivs=(db.interviews||[]).map(x=>`${x.status||''}:${x.confirmed_datetime||''}`).join(',');
+  return [db.updatedAt||'',n('interviews'),ivs,n('notifications'),n('requests'),n('emails')].join('|');
 }
 
 /* 他端末・他ブラウザでの変更をゆるやかに反映する定期ポーリング（30秒間隔）。
@@ -1290,6 +1332,7 @@ function openDeepLink(){
 }
 async function logout(){
   stopStream();
+  if(STREAM_HIDE_TIMER){clearTimeout(STREAM_HIDE_TIMER);STREAM_HIDE_TIMER=null;}
   try{await api('/api/auth/logout',{method:'POST'});}catch(e){}
   clearToken();
   location.reload();
@@ -2091,7 +2134,13 @@ function clearIvFilter(){IVFILTER={status:'all',branch:'all',q:''};render();}
 let IV_OPEN=new Set(),IV_OPEN_FOR=null;
 function toggleChoiceGroup(id,n){
   if(IV_OPEN.has(n))IV_OPEN.delete(n); else IV_OPEN.add(n);
+  // openInterview は openSheet でシートの中身を丸ごと差し替えるため scrollTop が0に戻る。
+  // .sheet は max-height:88vh;overflow:auto なので、そのままだと開閉するたびに先頭へ飛ぶ。
+  // 差し替え前の位置を控えておき、差し替え後に戻す
+  const sheet=document.getElementById('sheet');
+  const scrollTop=sheet?sheet.scrollTop:0;
   openInterview(id);
+  if(sheet)sheet.scrollTop=scrollTop;
 }
 function openInterview(id){
   const iv=(DB.interviews||[]).find(x=>x.id===id);const intern=ivIntern(iv);const s=STATUS[iv.status];
