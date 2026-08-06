@@ -13,8 +13,17 @@ services:
     # ※ このサービスはBlueprint管理ではないため、下の buildFilter は
     #   実際には効いていない（envVars が反映されないのと同じ理由）。
     #   実際に効いているのは、Renderダッシュボードの
-    #   Settings → Build Filters → Included Paths に登録した同じ内容
-    #   （2026-07-29に設定済み）。ここは設定内容の控えとして残している。
+    #   Settings → Build Filters → Included Paths に登録した内容のほう。
+    #   ここは設定内容の控えとして残している。
+    #
+    # ※ 2026-08-06に確認したところ、ダッシュボードのIncluded Pathsは
+    #   **空だった**。2026-07-29に設定したつもりが保存されていなかったらしい。
+    #   つまり実際に効いていたのは rootDir だけで、index.html・style.css・
+    #   apply.html だけを直したpushは、どれもビルドされていなかった。
+    #   同日、下の6件をダッシュボードへ登録し直して一致させた。
+    #
+    # ※ ここを直したときは、必ずダッシュボードも同じ内容に直すこと。
+    #   このファイルだけ直しても本番には何も起きない。
     buildFilter:
       paths:
         - server/**
@@ -22,9 +31,7 @@ services:
         - style.css
         - privacy.html
         - terms.html
-        # 2026-08-05に追加。アカウント無しの面談申請ページ。
-        # これが抜けていたため、apply.html だけを直したpushがビルドされず、
-        # 「pushしたのに本番が変わらない」状態になった
+        # アカウント無しの面談申請ページ
         - apply.html
     envVars:
       - key: TURSO_DATABASE_URL
