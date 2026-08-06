@@ -488,6 +488,8 @@ document.addEventListener('focusout',()=>setTimeout(flushPendingRefresh,0));
    切れたら自分でつなぎ直す（1秒→2秒→…最大30秒）*/
 let STREAM_CTRL=null,STREAM_WAIT=1000,STREAM_STOP=false;
 function startStream(){
+  // 二重に呼ばれても接続が2本残らないよう、張りっぱなしの接続があれば先に止めてから張り直す
+  if(STREAM_CTRL){try{STREAM_CTRL.abort();}catch(e){}STREAM_CTRL=null;}
   STREAM_STOP=false;STREAM_WAIT=1000;connectStream();
 }
 function stopStream(){
@@ -511,6 +513,7 @@ async function connectStream(){
       if(done)break;
       buf+=dec.decode(value,{stream:true});
       let i;
+      // 区切りはLF2つ固定。server/stream.js がLFだけで書き出す前提に依存している（CRLFには対応していない）
       while((i=buf.indexOf('\n\n'))>=0){
         const block=buf.slice(0,i);buf=buf.slice(i+2);
         // 生きている合図（: ping）は読み飛ばす
@@ -556,7 +559,10 @@ function applyRemoteUpdate(added){
    updatedAt は store（1行JSON）が書き換わったときしか変わらない。
    面談・通知・依頼は 2026-08-02 に専用テーブルへ移したので updatedAt が動かず、
    ここを見ていなかったために「再読み込みするまで面談申請に気づけない」状態だった。
-   面談の確定や不成立でも通知は必ず積まれるので、件数を見れば取りこぼさない */
+   面談の確定や不成立は通知が積まれるので件数で気づけるが、面談を「申請中に戻す」操作は
+   通知を作らない（server/server.js の該当処理は status が fixed・failed のときだけ通知する）ため、
+   このスタンプでは変化を検知できない。取消し操作はSSEでもポーリングでも届かない既知の
+   範囲外事項であり、今回は対応しない */
 function dbStamp(db){
   if(!db)return '';
   const n=k=>((db[k]||[]).length);
@@ -565,8 +571,10 @@ function dbStamp(db){
 
 /* 他端末・他ブラウザでの変更をゆるやかに反映する定期ポーリング（30秒間隔）。
    本命は startStream() の押し出しで、これはつながらないときの保険 */
+let POLL_TIMER=null;
 function startPolling(){
-  setInterval(async()=>{
+  if(POLL_TIMER)return; // 既にタイマーが動いていれば何もしない（二重起動でタイマーが2本になるのを防ぐ）
+  POLL_TIMER=setInterval(async()=>{
     if(SYNCING)return;
     SYNCING=true;
     try{
@@ -1251,6 +1259,10 @@ async function enterAppWith(user,preloadedDB){
   }
   // 支部の一覧は初回設定画面のプルダウンで使うため、DB取得後に反映しておく
   LOGIN_BRANCHES=DB.branches||LOGIN_BRANCHES;
+  // ログイン経路（起動時・ログインフォーム・Googleログイン）を問わず必ずここを通るので、
+  // 押し出し（SSE）とポーリングの起動はここにまとめる。両方とも二重起動を自分で防ぐ
+  startPolling();
+  startStream();
   if(ME.needs_profile){renderProfileSetup();return;}
   enterApp();
 }
@@ -4652,8 +4664,6 @@ function consumeTokenFromHash(){
 
     if(boot.user){
       await enterAppWith(boot.user,boot.db);
-      startPolling();
-      startStream();
     }else{
       // 期限切れのトークンが残っていたら消しておく（次の起動で無駄に問い合わせないため）
       clearToken();
