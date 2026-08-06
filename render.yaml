@@ -33,6 +33,8 @@ services:
         - terms.html
         # アカウント無しの面談申請ページ
         - apply.html
+        # アカウント無しの公開出欠回答ページ
+        - attendance.html
     envVars:
       - key: TURSO_DATABASE_URL
         sync: false
