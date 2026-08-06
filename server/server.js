@@ -648,12 +648,62 @@ async function listEmailsFor(user) {
 /* 候補の日時を「9/12(土) 19:00〜21:00」の形にする。
    利用者は全員日本にいるので、サーバーの時間帯に関係なく日本時間で出す */
 function fmtSlotJP(o) {
+  if (o?.has_date === false) {
+    return `${o.start_time || ''}${o.end_time ? '〜' + o.end_time : ''}（日程未定）`;
+  }
   const f = (iso, opts) => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', ...opts })
     .format(new Date(iso));
   const day = f(o.start, { month: 'numeric', day: 'numeric', weekday: 'short' });
+  if (o?.has_time === false) return day;
   const from = f(o.start, { hour: '2-digit', minute: '2-digit', hour12: false });
   const to = o.end ? f(o.end, { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
   return `${day} ${from}${to ? '〜' + to : ''}`;
+}
+
+function validAttendDate(value) {
+  const hit = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!hit) return false;
+  const utc = Date.UTC(Number(hit[1]), Number(hit[2]) - 1, Number(hit[3]));
+  const d = new Date(utc);
+  return d.getUTCFullYear() === Number(hit[1])
+    && d.getUTCMonth() + 1 === Number(hit[2])
+    && d.getUTCDate() === Number(hit[3]);
+}
+
+function validAttendTime(value) {
+  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(value || ''));
+}
+
+function normalizeAttendOption(raw, id) {
+  const o = raw || {};
+  const isLegacy = o.has_date == null && o.has_time == null && o.start;
+  if (isLegacy) {
+    const start = new Date(o.start);
+    const end = o.end ? new Date(o.end) : new Date(start.getTime() + 60 * 60 * 1000);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return null;
+    return { id, start: start.toISOString(), end: end.toISOString(), has_date: true, has_time: true };
+  }
+
+  const hasDate = o.has_date !== false;
+  const hasTime = o.has_time === true;
+  if (!hasDate && !hasTime) return null;
+  const date = String(o.date || '');
+  const startTime = String(o.start_time || '');
+  const endTime = String(o.end_time || '');
+  if (hasDate && !validAttendDate(date)) return null;
+  if (hasTime && (!validAttendTime(startTime) || !validAttendTime(endTime) || endTime <= startTime)) return null;
+
+  const normalized = { id, has_date: hasDate, has_time: hasTime };
+  if (hasDate) normalized.date = date;
+  if (hasTime) {
+    normalized.start_time = startTime;
+    normalized.end_time = endTime;
+  }
+  if (hasDate) {
+    normalized.start = new Date(`${date}T${hasTime ? startTime : '01:00'}:00+09:00`).toISOString();
+    normalized.end = new Date(`${date}T${hasTime ? endTime : '01:30'}:00+09:00`).toISOString();
+  }
+  return normalized;
 }
 
 /* 出欠確認を、あて先ひとりずつのメール履歴にも残す。
@@ -2168,22 +2218,13 @@ app.post('/api/requests', requireAuth, async (req, res) => {
   if (!ids.length) return res.status(400).json({ error: 'あて先を選んでください' });
   let opts = [];
   if (isAttend) {
-    opts = (Array.isArray(options) ? options : []).map((o, i) => ({
-      id: 'op' + i,
-      start: o && o.start ? new Date(o.start) : null,
-      end: o && o.end ? new Date(o.end) : null,
-    }));
+    opts = (Array.isArray(options) ? options : [])
+      .map((o, i) => normalizeAttendOption(o, 'op' + i));
     if (!opts.length) return res.status(400).json({ error: '候補の日時を1件以上追加してください' });
     if (opts.length > 30) return res.status(400).json({ error: '候補は30件までです' });
-    if (opts.some((o) => !o.start || Number.isNaN(o.start.getTime()))) {
+    if (opts.some((o) => !o)) {
       return res.status(400).json({ error: '候補の日時が正しくありません' });
     }
-    opts = opts.map((o) => ({
-      id: o.id,
-      start: o.start.toISOString(),
-      end: o.end && !Number.isNaN(o.end.getTime()) && o.end > o.start
-        ? o.end.toISOString() : new Date(o.start.getTime() + 60 * 60 * 1000).toISOString(),
-    }));
   }
   try {
     // あて先は自分の支部の人だけ（全体管理者は制限なし）
@@ -2431,26 +2472,49 @@ app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => {
     const picked = opts.find((o) => o.id === optionId);
     if (!picked) return res.status(400).json({ error: '候補が見つかりません' });
 
-    /* 予定はstore側（1行JSON）に持っているので、読む→足す→書くを鍵で囲む。
-       囲まないと、同時に別の予定が作られたときにどちらかが消える */
-    const event = {
-      id: 'ev_' + crypto.randomBytes(6).toString('hex'),
-      title: row.subject,
-      description: row.body || '',
-      start_datetime: picked.start,
-      end_datetime: picked.end,
-      location: '', branch_id: row.branch_id, visibility: 'branch',
-      color: '#56b8ac', creator_id: actor.id, meet_url: '', zoom_url: '',
-      created_at: new Date().toISOString(),
-    };
-    await withDBLock(async () => {
-      const db = await readDBForWrite();
-      db.events = [...(db.events || []), event];
-      await writeDB(db);
-    });
+    /* 日付がない候補は、時刻の希望だけを決めるものなので予定にはしない。 */
+    let event = null;
+    if (picked.has_date !== false) {
+      /* 予定はstore側（1行JSON）に持っているので、読む→足す→書くを鍵で囲む。
+         囲まないと、同時に別の予定が作られたときにどちらかが消える */
+      event = {
+        id: 'ev_' + crypto.randomBytes(6).toString('hex'),
+        title: row.subject,
+        description: picked.has_time === false ? '' : (row.body || ''),
+        start_datetime: picked.start,
+        end_datetime: picked.end,
+        location: '', branch_id: row.branch_id, visibility: 'branch',
+        color: '#56b8ac', creator_id: actor.id, meet_url: '', zoom_url: '',
+        created_at: new Date().toISOString(),
+      };
+      await withDBLock(async () => {
+        const db = await readDBForWrite();
+        db.events = [...(db.events || []), event];
+        await writeDB(db);
+      });
+
+      /* 出欠を送った本人がGoogle連携済みなら、同じ予定を本人のカレンダーにも作る。
+         Google側の失敗でアプリ内の確定まで取り消さない。 */
+      if (GOOGLE_ENABLED) {
+        try {
+          const tokenRow = await getTokenRow(actor.id);
+          if (tokenRow) {
+            const accessToken = await accessTokenFor(tokenRow);
+            await google.createEvent(accessToken, tokenRow.calendar_id || 'primary', {
+              summary: row.subject,
+              start: { dateTime: picked.start, timeZone: 'Asia/Tokyo' },
+              end: { dateTime: picked.end, timeZone: 'Asia/Tokyo' },
+              reminders: { useDefault: false },
+            });
+          }
+        } catch (e) {
+          console.warn(`出欠確定のGoogleカレンダー登録に失敗しました（request ${row.id}）`, e.message || e);
+        }
+      }
+    }
     await client.execute({
       sql: 'UPDATE requests SET confirmed = ?, event_id = ? WHERE id = ?',
-      args: [optionId, event.id, req.params.id],
+      args: [optionId, event?.id || null, req.params.id],
     });
     const notification = await insertNotification({
       type: '出欠確認', branch_id: row.branch_id || null,

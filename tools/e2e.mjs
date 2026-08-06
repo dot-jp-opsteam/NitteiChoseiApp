@@ -382,6 +382,39 @@ async function testAttendance() {
   });
   check('日時として読めない候補ははじかれる', badDate.status, 400);
 
+  // ---- 日付のみ・時間のみの候補 ----
+  const dateKey = `${t1.getFullYear()}-${String(t1.getMonth() + 1).padStart(2, '0')}-${String(t1.getDate()).padStart(2, '0')}`;
+  const dateOnlyMade = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '日付だけの候補', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'attend',
+    options: [{ date: dateKey, has_date: true, has_time: false }],
+  });
+  check('日付だけの候補を作れる', dateOnlyMade.status, 200);
+  check('日付だけの印が保存される', dateOnlyMade.json.request?.options?.[0]?.has_time, false);
+  check('日付だけの内部開始は01:00になる', dateOnlyMade.json.request?.options?.[0]?.start,
+    new Date(`${dateKey}T01:00:00+09:00`).toISOString());
+  check('日付だけの内部終了は01:30になる', dateOnlyMade.json.request?.options?.[0]?.end,
+    new Date(`${dateKey}T01:30:00+09:00`).toISOString());
+  const dateOnlyDone = await api(TOKENS.staff, 'POST',
+    `/api/requests/${dateOnlyMade.json.request?.id}/confirm`, { option_id: 'op0' });
+  check('日付だけの候補は確定できる', dateOnlyDone.status, 200);
+  check('日付だけの候補はアプリ内予定になる', !!dateOnlyDone.json.event, true);
+
+  const timeOnlyMade = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '時間だけの候補', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'attend',
+    options: [{ start_time: '20:00', end_time: '22:00', has_date: false, has_time: true }],
+  });
+  check('時間だけの候補を作れる', timeOnlyMade.status, 200);
+  check('時間だけの開始時刻が保存される', timeOnlyMade.json.request?.options?.[0]?.start_time, '20:00');
+  check('時間だけの終了時刻が保存される', timeOnlyMade.json.request?.options?.[0]?.end_time, '22:00');
+  check('時間だけの候補には日付を保存しない', timeOnlyMade.json.request?.options?.[0]?.has_date, false);
+  const timeOnlyDone = await api(TOKENS.staff, 'POST',
+    `/api/requests/${timeOnlyMade.json.request?.id}/confirm`, { option_id: 'op0' });
+  check('時間だけの候補は確定できる', timeOnlyDone.status, 200);
+  check('時間だけの候補はカレンダー予定を作らない', timeOnlyDone.json.event, null);
+  const afterTimeOnly = await getDB(TOKENS.staff);
+  check('時間だけの確定候補が記録される',
+    (afterTimeOnly.requests || []).find((r) => r.id === timeOnlyMade.json.request?.id)?.confirmed, 'op0');
+
   // ---- 回答 ----
   const ans = await api(TOKENS.staff3, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: 'op0', response: 'ok' }, { option_id: 'op1', response: 'no' }] });
