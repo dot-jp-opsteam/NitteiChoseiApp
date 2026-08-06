@@ -279,6 +279,13 @@ function viewApply(){
       +'<label class="fl">担当スタッフ</label>'
       +'<select onchange="setApplyStaff(this.value)">'+staffOptions+'</select>'
       +'<p class="fine" style="margin-top:6px">'+esc(BRANCH_NAME)+'のスタッフから選べます。</p>'
+      /* 選び方の案内。担当スタッフを選ぶ前から出しておく。
+         インターン生はこの画面に初めて来るので、表が出てから読むのでは遅い */
+      +'<div class="hint" style="margin-top:14px"><span>'
+        +'<b>○が付いているマスが、担当スタッフの面談できる空き時間です。</b><br>'
+        +'その中から、あなたの都合がつく時間を選んでください。上下になぞると続けて選べます。'
+        +'選べる時間が多いほど日程が決まりやすくなります。'
+      +'</span></div>'
       +weekBlock(groups)
       +'<div class="divider"></div>'
       +'<label class="fl">その他（任意）</label>'

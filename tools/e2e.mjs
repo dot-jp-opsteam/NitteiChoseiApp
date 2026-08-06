@@ -773,6 +773,18 @@ async function run() {
     check('先の週は上限で止まる', capped.json.week, 2);
     check('上限の週では次へ進めない', capped.json.hasNext, false);
 
+    /* 申請画面に、選び方の説明が出ていること。
+       インターン生は説明なしにこの画面へ来るので、
+       「○のマスが空き時間」だと分かる一文が要る（設計書 2節） */
+    {
+      const applyHtml = fs.readFileSync(path.join(ROOT, 'apply.html'), 'utf8');
+      check('申請画面に空き時間の説明がある',
+        applyHtml.includes('○が付いているマスが、担当スタッフの面談できる空き時間です。'), true);
+      check('説明は担当スタッフ欄とカレンダーの間にある',
+        applyHtml.indexOf('のスタッフから選べます') < applyHtml.indexOf('○が付いているマスが')
+        && applyHtml.indexOf('○が付いているマスが') < applyHtml.indexOf('weekBlock(groups)'), true);
+    }
+
     const firstOpen = await firstOpenSlot(token1, 'u_e2e_staff');
     check('選べる枠がある', !!firstOpen, true);
 
