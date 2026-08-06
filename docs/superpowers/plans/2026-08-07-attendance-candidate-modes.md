@@ -198,4 +198,3 @@ git push origin main
 - [ ] **Step 5: 本番を確認する**
 
 `https://ops-nittyou-app.onrender.com/` と `/attendance.html` のHTTP 200、新しい識別子、無効公開トークンのJSON 404を読み取り確認する。本番データを使った書き込みテストは行わない。
-
