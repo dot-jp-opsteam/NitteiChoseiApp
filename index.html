@@ -2085,19 +2085,47 @@ function viewStaffInterviews(){
 }
 function setIvFilter(key,val){IVFILTER[key]=val;render();}
 function clearIvFilter(){IVFILTER={status:'all',branch:'all',q:''};render();}
+/* 開いている希望の番号。openInterview はシートを組み立て直す作りなので、
+   開閉の状態は画面の外に置く必要がある。
+   別の面談を開いたら作り直す（IV_OPEN_FOR がその見分け）*/
+let IV_OPEN=new Set(),IV_OPEN_FOR=null;
+function toggleChoiceGroup(id,n){
+  if(IV_OPEN.has(n))IV_OPEN.delete(n); else IV_OPEN.add(n);
+  openInterview(id);
+}
 function openInterview(id){
   const iv=(DB.interviews||[]).find(x=>x.id===id);const intern=ivIntern(iv);const s=STATUS[iv.status];
   const internName=ivInternName(iv);const guest=ivIsGuest(iv);
+  const groups=ivGroups(iv);
+  /* 別の面談を開いたら開閉をやり直す。
+     このとき、確定済みの日時を含む希望だけ最初から開いておく。
+     どれで確定したのかを探さなくて済むように */
+  if(IV_OPEN_FOR!==id){
+    IV_OPEN_FOR=id;
+    IV_OPEN=new Set();
+    groups.forEach((g,i)=>{if(g.slots.includes(iv.confirmed_datetime))IV_OPEN.add(i+1);});
+  }
+  /* 順位の札。第1〜第3だけ色を変える。申請画面の一覧とまったく同じ色にしてあり、
+     インターン生が申請時に見た色と、スタッフが確定時に見る色が揃う */
+  const rankCls=n=>'cn r'+Math.min(n,4);
+  const rankLabel=n=>`第${n}希望`;
   const choiceRow=(n,val)=>`<div class="choice ${iv.confirmed_datetime===val?'sel':''}">
-      <span class="cn">${n}</span><span>${fmtDT(val)}</span>
+      <span class="${rankCls(n)}">${rankLabel(n)}</span><span>${fmtDT(val)}</span>
       ${iv.status==='applied'?`<button class="btn pri sm pick" onclick="confirmInterview('${id}','${val}')">これで確定</button>`:
         (iv.confirmed_datetime===val?'<span class="pick pill st-fixed">確定</span>':'')}
     </div>`;
-  /* 幅のある希望は、中の30分枠を並べて選んでもらう。
-     面談そのものは30分なので、範囲まるごとではなく開始時刻を決める */
-  const choiceGroup=(n,g)=>(g.slots.length===1&&!g.allDay)?choiceRow(n,g.slots[0]):`<div class="cgroup ${g.slots.includes(iv.confirmed_datetime)?'sel':''}">
-      <div class="chead"><span class="cn">${n}</span><span>${fmtGroupRange(g)}</span>
-        ${g.allDay?'<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">終日OK</span>':''}</div>
+  /* 幅のある希望は、押して開いてから中の30分枠を選んでもらう。
+     面談そのものは30分なので、範囲まるごとではなく開始時刻を決める。
+
+     最初から時刻ボタンを並べていたが、希望が3件もあると画面が
+     ボタンで埋まって、どの希望を見ているのか分からなくなっていた */
+  const choiceGroup=(n,g)=>(g.slots.length===1&&!g.allDay)?choiceRow(n,g.slots[0]):`<div class="cgroup ${IV_OPEN.has(n)?'open':''} ${g.slots.includes(iv.confirmed_datetime)?'sel':''}">
+      <div class="chead" onclick="toggleChoiceGroup('${id}',${n})" role="button" tabindex="0"
+        aria-expanded="${IV_OPEN.has(n)?'true':'false'}"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleChoiceGroup('${id}',${n})}">
+        <span class="${rankCls(n)}">${rankLabel(n)}</span><span>${fmtGroupRange(g)}</span>
+        ${g.allDay?'<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">終日OK</span>':''}
+        <span class="cchev">${ic('chevron')}</span></div>
       <div class="cslots">${g.slots.map(val=>iv.status==='applied'
         ? `<button class="btn sm" onclick="confirmInterview('${id}','${val}')">${hm(val)}〜</button>`
         : `<span class="cslot ${iv.confirmed_datetime===val?'on':''}">${hm(val)}〜</span>`).join('')}</div>
@@ -2106,7 +2134,7 @@ function openInterview(id){
   let actions='';
   if(iv.status==='applied'){
     actions=`<div class="choice-list">
-        ${ivGroups(iv).map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
+        ${groups.map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
       <div class="btn-row" style="margin-top:14px">
         <button class="btn" style="flex:1" onclick="openCustomConfirm('${id}')">別日時で確定</button>
         <button class="btn bad" style="flex:1" onclick="failInterview('${id}')">不成立にする</button>

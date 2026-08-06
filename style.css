@@ -363,12 +363,21 @@
   .choice .cn{width:22px;height:22px;border-radius:6px;background:var(--brand-soft);color:var(--brand-d);display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
   .choice.sel{border-color:var(--ok);background:var(--ok-soft)}
   .choice .pick{margin-left:auto}
-  /* 幅のある希望（例：12:00〜13:30）。見出しの下に30分刻みのボタンを並べる */
+  /* 幅のある希望。見出しを押すと、下に30分刻みのボタンが開く。
+     最初から全部並べると、希望が3件あるだけで画面がボタンで埋まっていた */
   .cgroup{border:1px solid var(--line);border-radius:10px;padding:11px 12px}
   .cgroup.sel{border-color:var(--ok);background:var(--ok-soft)}
-  .cgroup .chead{display:flex;align-items:center;gap:10px;font-weight:700}
+  .cgroup .chead{display:flex;align-items:center;gap:10px;font-weight:700;cursor:pointer}
+  .cgroup .chead .cchev{margin-left:auto;display:flex;color:var(--mut);
+    transition:transform .15s ease}
+  .cgroup .chead .cchev .ic{width:16px;height:16px}
+  .cgroup.open .chead .cchev{transform:rotate(90deg)}
+  /* ↓この2行は Task 7 で「第N希望」の札に作り替える。ここでは触らない */
   .cgroup .chead .cn{width:22px;height:22px;border-radius:6px;background:var(--brand-soft);color:var(--brand-d);
     display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
+  /* 閉じているあいだは中身ごと隠す。
+     高さのアニメーションは付けない。中身の量で速さが変わって落ち着かないため */
+  .cgroup:not(.open) .cslots,.cgroup:not(.open) .cnote{display:none}
   .cgroup .cslots{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
   .cgroup .cslot{padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--sub)}
   .cgroup .cslot.on{border-color:var(--ok);background:var(--ok-soft);color:var(--ok);font-weight:700}
