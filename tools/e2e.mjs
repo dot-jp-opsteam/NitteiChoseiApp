@@ -525,6 +525,12 @@ async function testAttendance() {
   const publicPage = await fetch(BASE + `/a/${publicToken}`);
   const publicPageHtml = await publicPage.text();
   check('公開回答ページを配信できる', publicPage.status, 200);
+  check('公開回答ページ上部に共有URL欄がある', publicPageHtml.includes('id="shareUrl"'), true);
+  check('公開回答ページにURLコピーボタンがある', publicPageHtml.includes('copyShareUrl()'), true);
+  check('公開回答ページは日付だけの内部時刻を表示しない',
+    publicPageHtml.includes('o.has_time===false'), true);
+  check('公開回答ページは時間だけを日程未定と表示する',
+    publicPageHtml.includes('o.has_date===false'), true);
   check('公開回答ページに名前入力がある', publicPageHtml.includes('id="respondentName"'), true);
   check('公開回答ページに結果一覧がある', publicPageHtml.includes('id="attendanceResults"'), true);
 

@@ -7,7 +7,7 @@
 <title>出欠確認 | OPS日調</title>
 <style>
 :root{color-scheme:light dark;--bg:#f5f7fb;--card:#fff;--ink:#172033;--sub:#647084;--line:#dce2ec;--brand:#176b87;--brand2:#0f536b;--soft:#e7f4f8;--ok:#17845b;--may:#b26a00;--no:#bf3f4d;--shadow:0 12px 34px rgba(31,48,72,.10)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;line-height:1.6}.wrap{width:min(760px,calc(100% - 28px));margin:0 auto;padding:28px 0 60px}.brand{font-weight:900;letter-spacing:.06em;color:var(--brand);margin-bottom:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow);margin-bottom:16px}h1,h2{line-height:1.35;margin:0}h1{font-size:clamp(22px,5vw,30px)}h2{font-size:18px;margin-bottom:12px}.meta,.sub{color:var(--sub);font-size:14px}.body{white-space:pre-wrap;margin-top:16px}.fixed{background:#e8f7ef;color:#126a4a;border-radius:12px;padding:12px 14px;margin-top:16px;font-weight:700}.notice{background:var(--soft);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:14px}.field{margin:16px 0}.field label,.slot-title{display:block;font-weight:800;margin-bottom:7px}.req{color:var(--no);margin-left:4px}input[type=text]{width:100%;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.slot{border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:10px}.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.choice input{position:absolute;opacity:0;pointer-events:none}.choice span{display:block;text-align:center;border:1px solid var(--line);border-radius:10px;padding:9px 6px;font-weight:900;cursor:pointer}.choice input:focus-visible+span{outline:3px solid color-mix(in srgb,var(--brand) 35%,transparent)}.choice input:checked+span{color:#fff;border-color:transparent}.choice.ok input:checked+span{background:var(--ok)}.choice.may input:checked+span{background:var(--may)}.choice.no input:checked+span{background:var(--no)}button{width:100%;border:0;border-radius:11px;padding:13px 16px;background:var(--brand);color:#fff;font:inherit;font-weight:900;cursor:pointer;margin-top:18px}button:hover{background:var(--brand2)}button:disabled{opacity:.55;cursor:not-allowed}.error{color:var(--no);font-weight:700;margin-top:10px}.result-slot{border-top:1px solid var(--line);padding:14px 0}.result-slot:first-of-type{border-top:0}.counts{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.count{padding:4px 9px;border-radius:999px;background:var(--soft);font-weight:800}.people{display:grid;gap:6px}.person{display:flex;justify-content:space-between;gap:12px;font-size:14px}.mark{font-weight:900}.mark.ok{color:var(--ok)}.mark.may{color:var(--may)}.mark.no{color:var(--no)}.empty{color:var(--sub);font-size:14px}.loading{text-align:center;padding:70px 10px;color:var(--sub)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;line-height:1.6}.wrap{width:min(760px,calc(100% - 28px));margin:0 auto;padding:28px 0 60px}.brand{font-weight:900;letter-spacing:.06em;color:var(--brand);margin-bottom:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow);margin-bottom:16px}h1,h2{line-height:1.35;margin:0}h1{font-size:clamp(22px,5vw,30px)}h2{font-size:18px;margin-bottom:12px}.meta,.sub{color:var(--sub);font-size:14px}.body{white-space:pre-wrap;margin-top:16px}.fixed{background:#e8f7ef;color:#126a4a;border-radius:12px;padding:12px 14px;margin-top:16px;font-weight:700}.notice{background:var(--soft);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:14px}.field{margin:16px 0}.field label,.slot-title{display:block;font-weight:800;margin-bottom:7px}.req{color:var(--no);margin-left:4px}input[type=text]{width:100%;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.share-row{display:flex;gap:8px;align-items:stretch}.share-row input{min-width:0}.share-row button{width:auto;flex:0 0 auto;margin:0;padding:10px 18px}.share-status{min-height:1.5em;margin-top:5px}.slot{border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:10px}.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.choice input{position:absolute;opacity:0;pointer-events:none}.choice span{display:block;text-align:center;border:1px solid var(--line);border-radius:10px;padding:9px 6px;font-weight:900;cursor:pointer}.choice input:focus-visible+span{outline:3px solid color-mix(in srgb,var(--brand) 35%,transparent)}.choice input:checked+span{color:#fff;border-color:transparent}.choice.ok input:checked+span{background:var(--ok)}.choice.may input:checked+span{background:var(--may)}.choice.no input:checked+span{background:var(--no)}button{width:100%;border:0;border-radius:11px;padding:13px 16px;background:var(--brand);color:#fff;font:inherit;font-weight:900;cursor:pointer;margin-top:18px}button:hover{background:var(--brand2)}button:disabled{opacity:.55;cursor:not-allowed}.error{color:var(--no);font-weight:700;margin-top:10px}.result-slot{border-top:1px solid var(--line);padding:14px 0}.result-slot:first-of-type{border-top:0}.counts{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.count{padding:4px 9px;border-radius:999px;background:var(--soft);font-weight:800}.people{display:grid;gap:6px}.person{display:flex;justify-content:space-between;gap:12px;font-size:14px}.mark{font-weight:900}.mark.ok{color:var(--ok)}.mark.may{color:var(--may)}.mark.no{color:var(--no)}.empty{color:var(--sub);font-size:14px}.loading{text-align:center;padding:70px 10px;color:var(--sub)}
 @media(prefers-color-scheme:dark){:root{--bg:#10151e;--card:#19212d;--ink:#f4f7fb;--sub:#aab5c5;--line:#344052;--brand:#6bc7df;--brand2:#4eabc5;--soft:#243642;--shadow:none}.fixed{background:#17372b;color:#8de0b8}button{color:#07151b}}
 </style>
 </head>
@@ -24,7 +24,12 @@ let DATA=null;
 let SAVED=null;
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(iso)=>new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'long',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(iso));
-const slotText=(o)=>`${fmt(o.start)}〜${new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'}).format(new Date(o.end))}`;
+const fmtDay=(iso)=>new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'long',day:'numeric',weekday:'short'}).format(new Date(iso));
+const slotText=(o)=>{
+  if(o.has_date===false)return `${o.start_time}${o.end_time?'〜'+o.end_time:''}（日程未定）`;
+  if(o.has_time===false)return fmtDay(o.start);
+  return `${fmt(o.start)}〜${new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'}).format(new Date(o.end))}`;
+};
 async function call(path,opt){
   const res=await fetch(path,opt);
   const json=await res.json().catch(()=>({}));
@@ -37,6 +42,16 @@ function loadSaved(){
 }
 function answerOf(optionId){
   return (SAVED&&Array.isArray(SAVED.answers)?SAVED.answers:[]).find(a=>a.option_id===optionId)?.response||'';
+}
+async function copyShareUrl(){
+  const input=document.getElementById('shareUrl'),status=document.getElementById('shareStatus');
+  try{
+    await navigator.clipboard.writeText(input.value);
+    status.textContent='URLをコピーしました。';
+  }catch(e){
+    input.focus();input.select();
+    status.textContent='URLを選択しました。コピー操作をしてください。';
+  }
 }
 function renderResults(){
   const r=DATA.request,people=DATA.respondents||[];
@@ -58,7 +73,8 @@ function render(){
     <div>${(r.options||[]).map(o=>`<fieldset class="slot"><legend class="slot-title">${esc(slotText(o))}</legend><div class="choices">${['ok','may','no'].map(v=>`<label class="choice ${v}"><input type="radio" name="answer_${esc(o.id)}" value="${v}" ${answerOf(o.id)===v?'checked':''}><span>${MARK[v]} ${v==='ok'?'参加できる':v==='may'?'未定':'参加できない'}</span></label>`).join('')}</div></fieldset>`).join('')}</div>
     <div id="formError" class="error" role="alert"></div><button id="answerButton" onclick="submitAnswer()">${SAVED?'回答を更新する':'回答を送る'}</button></div>`;
   app.className='';
-  app.innerHTML=`<div class="card"><div class="meta">${esc(r.sender_name)}さんからの出欠確認</div><h1>${esc(r.subject)}</h1><div class="meta">${esc(fmt(r.created_at))}</div>${r.body?`<div class="body">${esc(r.body)}</div>`:''}${fixed?`<div class="fixed">${esc(slotText(fixed))} で確定しました</div>`:''}</div>${form}${renderResults()}`;
+  const share=`<div class="card"><h2>共有URL</h2><p class="sub">このURLを知っている人は、ログインせず回答と結果の確認ができます。</p><div class="share-row"><input type="text" id="shareUrl" readonly value="${esc(location.href)}" onclick="this.select()"><button type="button" onclick="copyShareUrl()">コピー</button></div><div class="sub share-status" id="shareStatus" aria-live="polite"></div></div>`;
+  app.innerHTML=`${share}<div class="card"><div class="meta">${esc(r.sender_name)}さんからの出欠確認</div><h1>${esc(r.subject)}</h1><div class="meta">${esc(fmt(r.created_at))}</div>${r.body?`<div class="body">${esc(r.body)}</div>`:''}${fixed?`<div class="fixed">${esc(slotText(fixed))} で確定しました${fixed.has_date===false?'（カレンダーには登録していません）':''}</div>`:''}</div>${form}${renderResults()}`;
 }
 async function submitAnswer(){
   const name=document.getElementById('respondentName').value.trim();
