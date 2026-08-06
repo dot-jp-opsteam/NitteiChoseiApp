@@ -1311,7 +1311,6 @@ async function doChangePassword(){
 const NAV={
   intern:[
     {id:'home',label:'ホーム',ic:'home'},
-    {id:'apply',label:'面談申請',ic:'edit'},
     {id:'my',label:'面談状況',ic:'list'},
     // インターン生は受け取るだけなので、スタッフ側の「依頼」と呼び分ける
     {id:'requests',label:'受けた依頼',ic:'megaphone'},
@@ -1337,7 +1336,6 @@ const NAV={
   ],
 };
 let currentTab='home';
-let APPLY=null;              // 面談申請の一時状態
 let calYM=null, calSel=null; // イベントカレンダーの表示月・選択日
 let calMode='month';         // 'month' | 'list'（表示切替）
 let calFull=false;           // カレンダーだけを画面いっぱいに出しているか
@@ -1458,7 +1456,6 @@ async function copyInviteLink(url){
 }
 function go(tab){
   currentTab=tab;
-  if(tab==='apply')APPLY=null;      // 申請画面は毎回リセット
   if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
   if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
   // ほかの画面へ移るときは全画面を解除する。解除し忘れるとサイドバーが隠れたままになる
@@ -1470,7 +1467,7 @@ function go(tab){
 }
 /* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
    そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
-const TAB_ACC={home:'a1',apply:'a1',my:'a3',interviews:'a3',requests:'a4',
+const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',
   myinterns:'a2',avset:'a2',branches:'a4',users:'a3'};
 /* ホーム以外の画面の右上に置く「ホームへ戻る」。
    スマホでは左メニューが隠れていて、行った先から戻れなくなるため */
@@ -1485,7 +1482,6 @@ function render(){
   // 全画面のときは、ホームの挨拶・入口タイルを出さずカレンダーだけにする
   if(t==='home'&&calFull)html=eventsSection();
   else if(t==='home')html=viewHome();
-  else if(t==='apply')html=viewApply();
   else if(t==='my')html=viewMyInterviews();
   else if(t==='interviews')html=viewStaffInterviews();
   else if(t==='requests')html=viewRequests();
@@ -1505,7 +1501,7 @@ function render(){
    HOME
    ========================================================= */
 /* ホームの入口タイル。参考サイトのポートフォリオに合わせて六角形で並べる。
-   act には onclick にそのまま入るJSを渡す（go('apply') でも openXxx() でもよい）。
+   act には onclick にそのまま入るJSを渡す（go('my') でも openXxx() でもよい）。
    icon は ICON の名前（引数名を ic にすると同名の関数を隠してしまうので避けている）。
    badge は右上に出す件数（0や未指定なら出さない） */
 function hex(act,icon,t,d,badge){
@@ -1546,20 +1542,15 @@ function viewHome(){
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
   if(ME.role==='intern'){
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
-    /* 面談の申請だけは横長の大きな入口にする。置き場所は六角形の下。
-       同じ入口が2つあると迷うので、六角形の側からは外してある */
-    const cta=`<button class="cta" onclick="go('apply')">
-      <span class="inner">
-        <span class="cta-ic">${ic('edit')}</span>
-        <span class="cta-tx"><b>面談を申請</b><small>空いている枠を選んで担当スタッフに送ります</small></span>
-        <span class="cta-go">${ic('chevron')}</span>
-      </span></button>`;
+    /* 面談を申請する入口はここに無い。アカウントの要らない apply.html へ
+       移したため（2026-08-06）。詳しくは
+       _archive/2026-08-06-インターン生の面談申請画面/README.md */
     /* ここは「これからやること」だけに絞る。
        受信メール・カレンダー連携は左メニューへ移した */
     return hi+hexgrid([
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
       hex("go('requests')",'megaphone','受けた依頼','スタッフからの連絡',unread),
-    ])+cta+eventsSection();
+    ])+eventsSection();
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
   if(ME.role==='staff'||ME.role==='branch_admin'){
@@ -1861,361 +1852,14 @@ async function disconnectGoogleCalendar(){
 }
 
 /* =========================================================
-   面談申請（インターン生）
-   ========================================================= */
-// 週表示グリッド用データ生成：月曜始まり7日 × 30分刻みの時間帯
-function genApplyGrid(staffId,weekOffset){
-  const weekly=getWeekly(staffId);
-  const blocks=((DB.availability[staffId]||{}).blocks||[]).map(b=>[new Date(b.start).getTime(),new Date(b.end).getTime()]);
-  const taken=(DB.interviews||[]).filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
-    .map(i=>new Date(i.confirmed_datetime).getTime());
-  const now=Date.now();
-  const today=new Date();today.setHours(0,0,0,0);
-  const dow=today.getDay();
-  const diffToMon=(dow===0?-6:1-dow);
-  const monday=new Date(today);monday.setDate(today.getDate()+diffToMon+weekOffset*7);
-  const days=[];
-  for(let i=0;i<7;i++){const d=new Date(monday);d.setDate(monday.getDate()+i);days.push(d);}
-  let minM=Infinity,maxM=-Infinity;
-  days.forEach(d=>{const conf=weekly[d.getDay()];if(conf&&conf.on){
-    const [sh,sm]=conf.s.split(':').map(Number);const [eh,em]=conf.e.split(':').map(Number);
-    minM=Math.min(minM,sh*60+sm);maxM=Math.max(maxM,eh*60+em);}});
-  if(minM===Infinity){minM=9*60;maxM=19*60;}
-  const times=[];for(let t=minM;t+30<=maxM;t+=30)times.push(t);
-  const grid=days.map(day=>{
-    const conf=weekly[day.getDay()];
-    return times.map(t=>{
-      const dt=new Date(day);dt.setHours(Math.floor(t/60),t%60,0,0);
-      const st=dt.getTime(),en=st+30*60000;
-      const iso=dt.toISOString();
-      if(!conf||!conf.on)return{state:'off',iso};
-      const [sh,sm]=conf.s.split(':').map(Number);const [eh,em]=conf.e.split(':').map(Number);
-      if(t<sh*60+sm||t+30>eh*60+em)return{state:'off',iso};
-      if(st<now)return{state:'off',iso};
-      const takenHit=taken.some(x=>Math.abs(x-st)<30*60000-1);
-      if(takenHit)return{state:'off',iso};
-      const blocked=blocks.some(([bs,be])=>st<be&&en>bs);
-      if(blocked)return{state:'off',iso};
-      return{state:'ok',iso};
-    });
-  });
-  return{days,times,grid};
-}
-function viewApply(){
-  // 支部管理者も面談を担当するため、面談相手の候補に含める
-  const staffs=DB.users.filter(u=>(u.role==='staff'||u.role==='branch_admin')&&u.branch_id===ME.branch_id);
-  // 担当スタッフが決まっていれば、その人を初めから選んでおく
-  const preferred=staffs.find(s=>s.id===ME.staff_id)?.id||staffs[0]?.id||'';
-  if(!APPLY)APPLY={staff:preferred,weekOffset:0,sel:[],note:''};
-  if(!staffs.length)return `<h1 class="page">面談を申請</h1>
-    <div class="empty"><div class="ei">${ic('briefcase')}</div><p>あなたの支部に担当できるスタッフがいません。</p></div>`;
-
-  /* 担当スタッフが決まっている人には選ばせない。決まっていない人だけ、
-     申請そのものができなくならないように支部のスタッフから選べるようにする */
-  const fixedStaff=staffs.find(s=>s.id===ME.staff_id)||null;
-  // 途中で担当が設定された場合に、前に選んだ相手が残らないようにする
-  if(fixedStaff&&APPLY.staff!==fixedStaff.id){APPLY.staff=fixedStaff.id;APPLY.sel=[];}
-  const staffField=fixedStaff
-    ? `<div class="fixedfield">${ic('staff')}<b>${esc(fixedStaff.nickname)}</b></div>
-       <p class="fine" style="margin-top:6px">担当スタッフの変更はスタッフ側で行います。</p>`
-    : `<select onchange="setApplyStaff(this.value)">${
-        staffs.map(s=>`<option value="${s.id}" ${s.id===APPLY.staff?'selected':''}>${esc(s.nickname)}</option>`).join('')
-      }</select>
-       <p class="fine" style="margin-top:6px">まだ担当スタッフが決まっていません。相談したいスタッフを選んでください。</p>`;
-  const{days,times,grid}=genApplyGrid(APPLY.staff,APPLY.weekOffset);
-  const todayKey=ymd(new Date());
-  const monthLabel=`${days[0].getFullYear()}年${days[0].getMonth()+1}月`;
-
-  const headCells=days.map((d,i)=>{
-    const w=d.getDay();const key=ymd(d);const hol=holidayName(d.getFullYear(),d.getMonth(),d.getDate());
-    const cls=['bt-h',w===0||hol?'sun':'',w===6?'sat':'',key===todayKey?'today':''].join(' ');
-    return `<th class="${cls}">${d.getDate()}<small>${WD_JP[w]}</small></th>`;}).join('');
-
-  // まとまりごとの希望順。同じ固まりの枠にはすべて同じ番号が付く
-  const groups=groupSlots(APPLY.sel);
-  const rank=new Map();
-  groups.forEach((g,i)=>g.forEach(iso=>rank.set(iso,i+1)));
-
-  const bodyRows=times.map((t,ti)=>{
-    const label=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
-    const cells=grid.map(dayCol=>{
-      const c=dayCol[ti];
-      if(c.state==='off')return `<td class="bt-c off">×</td>`;
-      const n=rank.get(c.iso);
-      return `<td class="bt-c ok ${n?'sel':''}" data-iso="${c.iso}" onpointerdown="applyPointerDown(event,'${c.iso}')" title="タップ、または同じ日の中で上下になぞって選択">${n?`<span class="bt-num">${n}</span>`:'○'}</td>`;
-    }).join('');
-    return `<tr><th class="bt-t">${label}</th>${cells}</tr>`;
-  }).join('');
-
-  const table=times.length?`<div class="booktable-wrap">
-    <table class="booktable"><thead><tr><th class="bt-corner"></th>${headCells}</tr></thead>
-    <tbody>${bodyRows}</tbody></table></div>`
-    :`<div class="empty" style="padding:28px"><div class="ei">${ic('slot-empty')}</div><p>この週は面談可能な空き枠がありません。</p></div>`;
-
-  /* 選択サマリー。並びがそのまま希望順なので、ここを入れ替えれば順位が変わる。
-     なぞっている最中もここを書き換えるため、0件のときも枠だけ置いて隠しておく */
-  const summary=`<div id="selwrap" ${groups.length?'':'hidden'}><div class="divider"></div>
-    <label class="fl"><span id="sellabel">選んだ希望日時（${groups.length}件）</span><span class="fl-sub">上から第1希望です。ドラッグで並べ替えられます</span></label>
-    <div class="selsummary" id="selsummary">${selSummaryRows()}</div></div>`;
-
-  return `<h1 class="page">面談を申請</h1>
-    <p class="page-sub">空いている枠を上下になぞって選び、下の一覧で希望順に並べ替えてください（なぞれるのは同じ日の中だけです）。続けて選んだ時間はひとつの希望にまとまります。担当スタッフが日程を確定します。</p>
-    <div class="card"><div class="cb">
-      <label class="fl">担当スタッフ</label>
-      ${staffField}
-      <div class="weekpager">
-        <button class="pg" onclick="setApplyWeek(-1)" ${APPLY.weekOffset<=0?'disabled':''}>${ic('chevron-l')}前の1週間</button>
-        <span class="wm">${monthLabel}</span>
-        <button class="pg" onclick="setApplyWeek(1)">次の1週間${ic('chevron')}</button>
-      </div>
-      <label class="fl" id="slotlabel">日時を選ぶ（${groups.length}件選択中）</label>
-      ${table}
-      ${summary}
-      <div class="divider"></div>
-      <label class="fl">その他（任意）</label>
-      <textarea placeholder="担当スタッフへのメッセージがあれば記入してください（例：この日程は難しくなったら相談したいです）" style="min-height:90px" oninput="APPLY.note=this.value">${esc(APPLY.note||'')}</textarea>
-      <button class="btn pri block" style="margin-top:20px" id="applybtn" ${groups.length?'':'disabled'} onclick="submitApply()">
-        ${groups.length?`この${groups.length}件で申請する`:'枠を選んでください'}</button>
-      <!-- スマホでは左メニューが隠れているため、ここから戻れないと行き止まりになる -->
-      <div class="backhome"><button class="btn ghost sm" onclick="go('home')">${ic('home')}ホームへ戻る</button></div>
-    </div></div>`;
-}
-function setApplyStaff(id){APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];render();}
-function setApplyWeek(delta){APPLY.weekOffset=Math.max(0,(APPLY.weekOffset||0)+delta);render();}
-/* 一覧の「×」。まとまりごと外すので、含まれる枠をすべて落とす。
-   ここで render() を呼ぶと画面ごと作り直しになり、カードの登場アニメが
-   もう一度再生されて一瞬暗く沈む。枠を選ぶ操作では画面の骨格は変わらないので、
-   中身だけを書き換える refreshApplyLive() で済ませる */
-function removeSlots(csv){
-  const gone=new Set(csv.split(','));
-  APPLY.sel=APPLY.sel.filter(iso=>!gone.has(iso));
-  refreshApplyLive();
-}
-
-/* ---- カレンダーをなぞって複数の枠を選ぶ ----
-   スタッフの「面談できない時間を登録」（avPointerDown 以下）と同じ方式。
-   押し始めた枠が未選択なら追加、選択済みなら解除で固定し、
-   往復してもモードが入れ替わらないようにしている。
-   追加は配列の末尾に積むので、なぞった順がそのまま希望順になる。
-   なぞれるのは縦（押し始めた日の列）だけ。列は td の並び順で見分ける。
-   iso の日付部分はUTC基準で列の途中で変わりうるため、判定には使えない */
-let APDRAG=null;
-function applyPointerDown(e,iso){
-  if(e.button!==undefined&&e.button!==0)return;
-  e.preventDefault();
-  APDRAG={mode:APPLY.sel.includes(iso)?'remove':'add',touched:new Set(),col:dragColOf(e.currentTarget)};
-  document.body.classList.add('noselect');
-  applyDragApply(e.currentTarget,iso);
-  document.addEventListener('pointermove',applyDragMove);
-  document.addEventListener('pointerup',applyDragEnd);
-  document.addEventListener('pointercancel',applyDragEnd);
-}
-function applyDragMove(e){
-  if(!APDRAG)return;
-  const el=dragCellAt(e,APDRAG.col);
-  if(el)applyDragApply(el,el.dataset.iso);
-}
-/* なぞり選択の列を見分ける道具。面談申請とスタッフの不可時間登録で共用する。
-   col は「表の中で何番目の列か」。表そのものが違えば別物として扱う */
-function dragColOf(cell){
-  return cell&&cell.cellIndex!==undefined
-    ? {table:cell.closest('table'),index:cell.cellIndex} : null;
-}
-/* 指の位置にある枠を返す。押し始めた列から外れていたら null（＝その行は選ばれない） */
-function dragCellAt(e,col){
-  const el=document.elementFromPoint(e.clientX,e.clientY);
-  if(!el||!el.classList||!el.classList.contains('bt-c')||!el.dataset.iso)return null;
-  if(col&&(el.cellIndex!==col.index||el.closest('table')!==col.table))return null;
-  return el;
-}
-function applyDragApply(cell,iso){
-  if(!APDRAG||APDRAG.touched.has(iso))return;
-  const i=APPLY.sel.indexOf(iso);
-  if(APDRAG.mode==='add'){
-    if(i>=0)return;
-    APPLY.sel.push(iso);
-  }else{
-    if(i<0)return;
-    APPLY.sel.splice(i,1);
-  }
-  APDRAG.touched.add(iso);
-  refreshApplyLive();
-}
-/* なぞっている間の表示更新。枠がつながると番号が繰り上がるので、
-   画面全体を描き直さずに済む範囲（番号・一覧・見出し）だけを書き換える */
-function refreshApplyLive(){
-  const groups=groupSlots(APPLY.sel);
-  const rank=new Map();
-  groups.forEach((g,i)=>g.forEach(iso=>rank.set(iso,i+1)));
-  document.querySelectorAll('.booktable .bt-c.ok').forEach(td=>{
-    const n=rank.get(td.dataset.iso);
-    if(n){td.classList.add('sel');td.innerHTML=`<span class="bt-num">${n}</span>`;}
-    else if(td.classList.contains('sel')){td.classList.remove('sel');td.textContent='○';}
-  });
-  const wrap=document.getElementById('selwrap');
-  if(wrap)wrap.hidden=!groups.length;
-  const box=document.getElementById('selsummary');
-  if(box)box.innerHTML=selSummaryRows();
-  const lab=document.getElementById('sellabel');
-  if(lab)lab.textContent=`選んだ希望日時（${groups.length}件）`;
-  const slab=document.getElementById('slotlabel');
-  if(slab)slab.textContent=`日時を選ぶ（${groups.length}件選択中）`;
-  const btn=document.getElementById('applybtn');
-  if(btn){btn.disabled=!groups.length;
-    btn.textContent=groups.length?`この${groups.length}件で申請する`:'枠を選んでください';}
-}
-function applyDragEnd(){
-  document.removeEventListener('pointermove',applyDragMove);
-  document.removeEventListener('pointerup',applyDragEnd);
-  document.removeEventListener('pointercancel',applyDragEnd);
-  document.body.classList.remove('noselect');
-  if(!APDRAG)return;
-  APDRAG=null;
-  refreshApplyLive();   // 画面ごと作り直すと登場アニメが再生されてちらつく
-}
-
-/* ---- 選んだ日時の一覧（並びがそのまま希望順） ---- */
-/* 順位の札。第1〜第3は色を変えるので、順位そのものをクラスに持たせる。
-   第4以降はまとめて r4 にして、もとの色のままにする */
-const rankCls=n=>'cn r'+Math.min(n,4);
-function selSummaryRows(){
-  return groupSlots(APPLY.sel).map((g,i)=>{
-    const csv=g.join(',');
-    return `<div class="sr" data-slots="${csv}" onpointerdown="selDragStart(event,this)">
-      <span class="${rankCls(i+1)}">第${i+1}希望</span><span class="st">${fmtSlotRange(g)}</span>
-      <span class="x" onpointerdown="event.stopPropagation()" onclick="removeSlots('${csv}')">×</span>
-    </div>`;
-  }).join('');
-}
-/* ---- 一覧をドラッグして希望順を入れ替える ----
-   持ち上げた行は複製して指に付いてくるようにし、元の行は薄いまま列に残して
-   入れ替え先を示す。長押しを待たずに始める方式なので、行には CSS で
-   touch-action:none を当ててブラウザ既定の縦スクロールに指を取られないようにしている */
-let SELDRAG=null;
-function selDragStart(e,row){
-  if(e.button!==undefined&&e.button!==0)return;
-  const box=row.parentElement;
-  if(!box||box.querySelectorAll('.sr').length<2)return;   // 1件なら並べ替えようがない
-  e.preventDefault();
-  const r=row.getBoundingClientRect();
-  const ghost=row.cloneNode(true);
-  ghost.classList.add('ghost');
-  ghost.removeAttribute('onpointerdown');
-  ghost.style.width=r.width+'px';
-  ghost.style.left=r.left+'px';
-  box.appendChild(ghost);   // 一覧の中に入れておかないと .selsummary の見た目が当たらない
-  SELDRAG={row,ghost,box,grab:e.clientY-r.top,h:r.height,y:e.clientY};
-  selMoveGhost();
-  row.classList.add('placeholder');
-  document.body.classList.add('noselect');
-  // 指を端で止めたままでも送れるよう、スクロールは時計で回す
-  SELDRAG.timer=setInterval(selEdgeScroll,16);
-  document.addEventListener('pointermove',selDragMove);
-  document.addEventListener('pointerup',selDragEnd);
-  document.addEventListener('pointercancel',selDragEnd);
-}
-function selMoveGhost(){
-  const d=SELDRAG;
-  d.ghost.style.top=Math.max(4,Math.min(window.innerHeight-d.h-4,d.y-d.grab))+'px';
-}
-// 画面の上下の端まで持っていったら、そのままページを送る
-function selEdgeScroll(){
-  const d=SELDRAG;if(!d)return;
-  const m=70;
-  const v=d.y<m?-10:d.y>window.innerHeight-m?10:0;
-  if(!v)return;
-  window.scrollBy(0,v);
-  selReorder();
-}
-function selDragMove(e){
-  if(!SELDRAG)return;
-  SELDRAG.y=e.clientY;
-  selMoveGhost();
-  selReorder();
-}
-/* 指の高さがどの行の真ん中を越えたかで差し込み先を決める。
-   入れ替えは DOM を動かすだけにして、動く前の位置から滑らせる（FLIP） */
-function selReorder(){
-  const d=SELDRAG;if(!d)return;
-  const rows=[...d.box.querySelectorAll('.sr:not(.ghost)')];
-  let anchor=null;
-  for(const r of rows){
-    if(r===d.row)continue;
-    const b=r.getBoundingClientRect();
-    if(d.y<b.top+b.height/2){anchor=r;break;}
-  }
-  if(anchor===d.row.nextElementSibling)return;   // すでにその位置にいる
-  const before=rows.map(r=>[r,r.getBoundingClientRect().top]);
-  if(anchor)d.box.insertBefore(d.row,anchor);
-  else d.box.insertBefore(d.row,d.ghost);        // 末尾へ。複製は常に最後に置いてある
-  for(const[r,top]of before){
-    const dy=top-r.getBoundingClientRect().top;
-    if(!dy)continue;
-    r.style.transition='none';
-    r.style.transform=`translateY(${dy}px)`;
-  }
-  void d.box.offsetHeight;   // ここで一度反映させないと、続く指定がアニメにならない
-  for(const[r]of before){r.style.transition='transform .16s ease';r.style.transform='';}
-  selRenumber();
-}
-// 番号を振り直す。持ち上げている行とカレンダー側の番号も合わせる
-function selRenumber(){
-  const d=SELDRAG;if(!d)return;
-  const rows=[...d.box.querySelectorAll('.sr:not(.ghost)')];
-  const rank=new Map();
-  rows.forEach((r,i)=>{
-    const c=r.querySelector('.cn');
-    if(c){c.textContent=`第${i+1}希望`;c.className=rankCls(i+1);}
-    r.dataset.slots.split(',').forEach(iso=>rank.set(iso,i+1));
-  });
-  const gc=d.ghost.querySelector('.cn');
-  if(gc){const n=rows.indexOf(d.row)+1;gc.textContent=`第${n}希望`;gc.className=rankCls(n);}
-  document.querySelectorAll('.booktable .bt-c.sel').forEach(td=>{
-    const n=rank.get(td.dataset.iso);
-    if(n)td.innerHTML=`<span class="bt-num">${n}</span>`;
-  });
-}
-function selDragEnd(){
-  document.removeEventListener('pointermove',selDragMove);
-  document.removeEventListener('pointerup',selDragEnd);
-  document.removeEventListener('pointercancel',selDragEnd);
-  document.body.classList.remove('noselect');
-  const d=SELDRAG;if(!d)return;
-  SELDRAG=null;
-  clearInterval(d.timer);
-  d.ghost.remove();
-  d.row.classList.remove('placeholder');
-  // 画面に並んでいるとおりを希望順として取り込む
-  APPLY.sel=[...d.box.querySelectorAll('.sr')].flatMap(r=>r.dataset.slots.split(','));
-  refreshApplyLive();   // 画面ごと作り直すと登場アニメが再生されてちらつく
-}
-async function submitApply(){
-  if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
-  /* 続いた枠をまとめた順がそのまま第1希望・第2希望…になる。
-     まとめ直したものを送ることで、重複や並びの乱れが残らないようにする */
-  const choices=groupSlots(APPLY.sel).flat();
-  /* 申請は専用APIで送る。締切前は全員がここに集中するため、
-     DB全体を保存し直す方式では大半が保存できなくなる */
-  const iv=await apiCreate('/api/interviews',{
-    staff_id:APPLY.staff||null,
-    choices,note:(APPLY.note||'').trim(),
-  },'interview');
-  if(!iv)return;   // 保存できていないので「申請しました」とは言わない
-  DB.interviews=[...(DB.interviews||[]),iv];
-  sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
-  updateBell();
-  toast('面談を申請しました');
-  go('my');
-}
-
-/* =========================================================
    面談状況（インターン生）
    ========================================================= */
 function viewMyInterviews(){
   const mine=(DB.interviews||[]).filter(i=>i.intern_id===ME.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  /* 「面談を申請する」ボタンはもう置かない。申請はアカウントの要らない
+     apply.html へ移したため（2026-08-06） */
   if(!mine.length)return `<h1 class="page">面談状況</h1>
-    <div class="empty"><div class="ei">${ic('list')}</div><p>まだ面談の申請がありません。</p>
-    <button class="btn pri" onclick="go('apply')">面談を申請する</button></div>`;
+    <div class="empty"><div class="ei">${ic('list')}</div><p>まだ面談の申請がありません。</p></div>`;
   const rows=mine.map(iv=>{const s=STATUS[iv.status];const staff=findUser(iv.staff_id);
     return `<div class="card"><div class="cb">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -2227,8 +1871,7 @@ function viewMyInterviews(){
         ? `<div class="hint" style="margin-top:8px">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>面談のリンクはメールで届きます。</span></div>
            <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（ホーム画面から連携できます）'}</span></div>`
         : iv.status==='failed'
-        ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>
-           <button class="btn pri block sm" style="margin-top:10px" onclick="go('apply')">再申請する</button>`
+        ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>`
         : `<dl class="kv" style="margin-top:8px">
              ${groupSlots(ivChoices(iv)).map((g,i)=>`<dt>第${i+1}希望</dt><dd>${fmtSlotRange(g)}</dd>`).join('')}</dl>`}
       ${iv.note?`<div class="hint" style="margin-top:8px">${ic('message')}<span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
