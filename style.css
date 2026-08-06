@@ -360,7 +360,15 @@
 
   .choice-list{display:flex;flex-direction:column;gap:8px}
   .choice{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:10px}
-  .choice .cn{width:22px;height:22px;border-radius:6px;background:var(--brand-soft);color:var(--brand-d);display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
+  /* 順位の札。「第1希望」と書くので幅は中身なり。第1〜第3だけ色を変える。
+     申請画面の .selsummary .sr .cn と同じ値にしてあり、
+     インターン生が申請時に見た色と、スタッフが確定時に見る色が揃う */
+  .choice .cn,.cgroup .chead .cn{height:22px;padding:0 8px;border-radius:6px;
+    background:var(--warn-soft);color:var(--warn);display:grid;place-items:center;
+    font-size:12px;font-weight:800;flex:none;white-space:nowrap}
+  .choice .cn.r1,.cgroup .chead .cn.r1{background:var(--bad-soft);color:var(--rank1)}
+  .choice .cn.r2,.cgroup .chead .cn.r2{background:var(--rank2-soft);color:var(--rank2)}
+  .choice .cn.r3,.cgroup .chead .cn.r3{background:var(--ok-soft);color:var(--rank3)}
   .choice.sel{border-color:var(--ok);background:var(--ok-soft)}
   .choice .pick{margin-left:auto}
   /* 幅のある希望。見出しを押すと、下に30分刻みのボタンが開く。
@@ -372,9 +380,6 @@
     transition:transform .15s ease}
   .cgroup .chead .cchev .ic{width:16px;height:16px}
   .cgroup.open .chead .cchev{transform:rotate(90deg)}
-  /* ↓この2行は Task 7 で「第N希望」の札に作り替える。ここでは触らない */
-  .cgroup .chead .cn{width:22px;height:22px;border-radius:6px;background:var(--brand-soft);color:var(--brand-d);
-    display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
   /* 閉じているあいだは中身ごと隠す。
      高さのアニメーションは付けない。中身の量で速さが変わって落ち着かないため */
   .cgroup:not(.open) .cslots,.cgroup:not(.open) .cnote{display:none}
