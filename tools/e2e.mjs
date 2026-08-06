@@ -400,6 +400,7 @@ async function testAttendance() {
     `/api/requests/${dateOnlyMade.json.request?.id}/confirm`, { option_id: 'op0' });
   check('日付だけの候補は確定できる', dateOnlyDone.status, 200);
   check('日付だけの候補はアプリ内予定になる', !!dateOnlyDone.json.event, true);
+  check('日付だけのアプリ内予定は時刻非表示になる', dateOnlyDone.json.event?.has_time, false);
 
   const timeOnlyMade = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '時間だけの候補', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'attend',
@@ -512,6 +513,8 @@ async function testAttendance() {
     appHtml.includes('shiftReqTimeRange(last.t1,last.t2)'), true);
   check('スタッフ画面は日付だけの内部時刻を表示しない',
     appHtml.includes("if(o?.has_time===false)return fmtDate(o.start)"), true);
+  check('カレンダーも日付だけの内部時刻を表示しない',
+    appHtml.includes("if(ev?.has_time===false)return ''"), true);
   check('スタッフ画面は時間だけを日程未定と表示する',
     appHtml.includes("if(o?.has_date===false)return `${o.start_time}"), true);
   check('公開送信後は公開回答ページへ移動する',

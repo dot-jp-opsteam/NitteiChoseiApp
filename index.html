@@ -2401,6 +2401,10 @@ async function sendMail(receiverId,kind){
 /* =========================================================
    イベント（一覧・回答・作成）
    ========================================================= */
+function eventClock(ev){
+  if(ev?.has_time===false)return '';
+  return hm(ev.start_datetime);
+}
 function eventCard(ev){
   const resp=DB.event_responses.filter(r=>r.event_id===ev.id);
   const c={ok:0,may:0,no:0};resp.forEach(r=>c[r.response]++);
@@ -2417,7 +2421,7 @@ function eventCard(ev){
         <span class="tag" style="margin-left:auto">${isPrivate?ic('lock')+'自分だけ':branchName(ev.branch_id)}</span>
       </div>
       <div class="meta" style="margin-top:6px">
-        <span>${ic('calendar')}<b>${fmtDT(ev.start_datetime)}</b> 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}</span>
+        <span>${ic('calendar')}<b>${ev.has_time===false?fmtDate(ev.start_datetime):fmtDT(ev.start_datetime)}</b>${ev.has_time===false?'':` 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}`}</span>
       </div>
       <div class="meta"><span>${ic('pin')}${esc(ev.location||'—')}</span></div>
       ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
@@ -2613,7 +2617,7 @@ function openDaySheet(key){
     ...ivs.map(iv=>({t:new Date(iv.confirmed_datetime),html:row('var(--iv)',ivLabel(iv),
       `${hm(iv.confirmed_datetime)} ・ 確定した面談`)})),
     ...list.map(e=>({t:new Date(e.start_datetime),html:row(e.color||EVENT_COLORS[0].v,e.title,
-      `${hm(e.start_datetime)}${e.location?' ・ '+e.location:''}`)})),
+      `${eventClock(e)}${e.location?(eventClock(e)?' ・ ':'')+e.location:''}`)})),
   ].sort((a,b)=>a.t-b.t);
 
   const body=items.length?`<div class="daylist">${items.map(i=>i.html).join('')}</div>`
@@ -2653,7 +2657,7 @@ function eventsSection(){
       const items=[
         // 全体予定表は組織全体の予定なので、その日の先頭に出す
         ...shs.map(e=>({t:sharedDate(e),color:e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR,label:sharedLabel(e)})),
-        ...evs.map(e=>({t:new Date(e.start_datetime),color:e.color||EVENT_COLORS[0].v,label:`${hm(e.start_datetime)} ${e.title}`})),
+        ...evs.map(e=>({t:new Date(e.start_datetime),color:e.color||EVENT_COLORS[0].v,label:`${eventClock(e)}${eventClock(e)?' ':''}${e.title}`})),
         ...dvs.map(iv=>({t:new Date(iv.confirmed_datetime),color:'var(--iv)',label:`${hm(iv.confirmed_datetime)} ${ivLabel(iv)}`})),
       ].sort((a,b)=>a.t-b.t);
       const has=items.length;const hol=holidayName(y,m,d);
@@ -2773,8 +2777,8 @@ function agendaView(list,ivs,shared,y,m){
     if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,
       sub:`${e.allDay?'終日':hm(e.start)}・${e.mine?'あなたのGoogleカレンダー':'全体予定表'}`,
       key:ymd(dt),color:e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR});});
-  list.forEach(e=>{const dt=new Date(e.start_datetime);
-    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:`${hm(e.start_datetime)}・${e.location||'—'}`,key:ymd(dt),color:e.color||EVENT_COLORS[0].v});});
+  list.forEach(e=>{const dt=new Date(e.start_datetime);const clock=eventClock(e);
+    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:clock?`${clock}${e.location?'・'+e.location:''}`:(e.location||''),key:ymd(dt),color:e.color||EVENT_COLORS[0].v});});
   ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
     if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'iv',title:ivLabel(iv),sub:hm(iv.confirmed_datetime),key:ymd(dt)});});
   items.sort((a,b)=>a.dt-b.dt);

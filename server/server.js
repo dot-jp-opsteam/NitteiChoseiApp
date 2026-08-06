@@ -2481,6 +2481,7 @@ app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => {
         id: 'ev_' + crypto.randomBytes(6).toString('hex'),
         title: row.subject,
         description: picked.has_time === false ? '' : (row.body || ''),
+        has_time: picked.has_time !== false,
         start_datetime: picked.start,
         end_datetime: picked.end,
         location: '', branch_id: row.branch_id, visibility: 'branch',
