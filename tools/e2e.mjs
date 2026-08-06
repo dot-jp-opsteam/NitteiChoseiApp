@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // server/ 側にインストールされている @libsql/client を借りる（tools用の依存は増やさない）
 const { createClient } = createRequire(path.join(ROOT, 'server', 'package.json'))('@libsql/client');
+const { hashPassword } = createRequire(path.join(ROOT, 'server', 'package.json'))('./auth');
 const PORT = 8123;
 const BASE = `http://localhost:${PORT}`;
 
@@ -68,6 +69,7 @@ async function setupDB(dbPath) {
   }
   const c = createClient({ url: 'file:' + dbPath });
   const now = new Date().toISOString();
+  const testPasswordHash = await hashPassword('e2e-browser-pass');
   const exp = new Date(Date.now() + 3600e3).toISOString();
   const oneYearAgo = new Date(Date.now() - 365 * 24 * 3600e3).toISOString();
 
@@ -84,7 +86,7 @@ async function setupDB(dbPath) {
   for (const [id, email, role, branch] of USERS) {
     await c.execute({
       sql: 'INSERT OR REPLACE INTO users (id,email,password_hash,nickname,role,branch_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)',
-      args: [id, email, 'dummy:dummy', 'E2E-' + role, role, branch, 'active', now],
+      args: [id, email, testPasswordHash, 'E2E-' + role, role, branch, 'active', now],
     });
   }
   for (const [key, token] of Object.entries(TOKENS)) {
