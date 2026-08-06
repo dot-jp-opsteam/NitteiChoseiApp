@@ -478,6 +478,10 @@ async function retrySave(){
   toast(msg);
 }
 
+/* 入力欄から離れたら、見送っていた更新を反映する。
+   次にどこへ移ったかが決まってから見たいので、一拍おいてから確かめる */
+document.addEventListener('focusout',()=>setTimeout(flushPendingRefresh,0));
+
 // 他端末・他ブラウザでの変更をゆるやかに反映する定期ポーリング（30秒間隔）
 function startPolling(){
   setInterval(async()=>{
@@ -770,6 +774,8 @@ function closeSheet(){
   document.getElementById('scrim').classList.remove('open');
   // 確認ダイアログを背景タップで閉じた場合は「キャンセル」として扱う
   if(_confirmResolve){const r=_confirmResolve;_confirmResolve=null;r(false);}
+  // シートを開いている間に見送った更新を、ここで反映する
+  flushPendingRefresh();
 }
 
 /* 確認ダイアログ。ブラウザ標準の confirm() はスマホで見た目が浮いてしまうため、
@@ -1483,26 +1489,63 @@ function homeBackBtn(){
   if(currentTab==='home')return '';
   return `<div class="viewback"><button class="btn ghost sm" onclick="go('home')">${ic('back')}ホームへ戻る</button></div>`;
 }
+/* 画面の中身。render と renderQuiet が同じものを描くように、ここ1か所にまとめている */
+function viewFor(t){
+  // 全画面のときは、ホームの挨拶・入口タイルを出さずカレンダーだけにする
+  if(t==='home'&&calFull)return eventsSection();
+  if(t==='home')return viewHome();
+  if(t==='my')return viewMyInterviews();
+  if(t==='interviews')return viewStaffInterviews();
+  if(t==='requests')return viewRequests();
+  if(t==='myinterns')return viewMyInterns();
+  if(t==='avset')return viewAvailSet();
+  if(t==='branches')return viewBranches();
+  if(t==='users')return viewUsers();
+  return '<div class="empty">画面が見つかりません</div>';
+}
 function render(){
   const m=document.getElementById('main');
   const t=currentTab;
-  let html='';
-  // 全画面のときは、ホームの挨拶・入口タイルを出さずカレンダーだけにする
-  if(t==='home'&&calFull)html=eventsSection();
-  else if(t==='home')html=viewHome();
-  else if(t==='my')html=viewMyInterviews();
-  else if(t==='interviews')html=viewStaffInterviews();
-  else if(t==='requests')html=viewRequests();
-  else if(t==='myinterns')html=viewMyInterns();
-  else if(t==='avset')html=viewAvailSet();
-  else if(t==='branches')html=viewBranches();
-  else if(t==='users')html=viewUsers();
-  else html='<div class="empty">画面が見つかりません</div>';
   /* 画面ごとに差し色を変える。カードの上辺の帯や見出しのアイコンがこの色になるので、
      今どこにいるかが色でも分かる。並びは TAB_ACC の順（ライトのときだけ見える） */
-  m.innerHTML=`<div class="view ${TAB_ACC[t]||'a1'}">${homeBackBtn()}${html}</div>`;
+  m.innerHTML=`<div class="view ${TAB_ACC[t]||'a1'}">${homeBackBtn()}${viewFor(t)}</div>`;
   bindReveal(m);
   updateBell();
+}
+
+/* 中身は render() と同じだが、現れる演出を通さずそのまま出す。
+
+   render() は bindReveal() で全カードを「透明＋下にずらす」状態へ戻すため、
+   背景の更新で呼ぶと画面がいったん消えてフェードで戻る＝暗転して見える。
+   人が押した操作は render()、サーバーからの更新は renderQuiet() を使うこと。
+
+   読んでいた位置がずれると結局じゃまになるので、縦の位置も戻す */
+function renderQuiet(){
+  const m=document.getElementById('main');
+  const t=currentTab;
+  const y=window.scrollY;
+  m.innerHTML=`<div class="view ${TAB_ACC[t]||'a1'}">${homeBackBtn()}${viewFor(t)}</div>`;
+  // .in まで最初から付けるので、透明の状態を一度も通らない
+  m.querySelectorAll('.card,.hex').forEach(el=>el.classList.add('reveal','in'));
+  window.scrollTo(0,y);
+  updateBell();
+}
+
+/* いま描き直すと困る状態か。
+   シートを開いていれば操作の最中だし、入力中なら打ちかけが消える */
+function uiBusy(){
+  const scrim=document.getElementById('scrim');
+  if(scrim&&scrim.classList.contains('open'))return true;
+  const a=document.activeElement;
+  if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return true;
+  return false;
+}
+/* 忙しくて見送った反映があれば、手が空いた時点で片付ける */
+let REFRESH_PENDING=false;
+function flushPendingRefresh(){
+  if(!REFRESH_PENDING||uiBusy())return;
+  REFRESH_PENDING=false;
+  if(ME)renderQuiet();
 }
 
 /* =========================================================
