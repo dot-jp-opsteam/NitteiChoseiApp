@@ -482,17 +482,100 @@ async function retrySave(){
    次にどこへ移ったかが決まってから見たいので、一拍おいてから確かめる */
 document.addEventListener('focusout',()=>setTimeout(flushPendingRefresh,0));
 
-// 他端末・他ブラウザでの変更をゆるやかに反映する定期ポーリング（30秒間隔）
+/* ---------- サーバーからの押し出しを受ける（SSE） ----------
+   ブラウザ標準の EventSource は Authorization ヘッダを付けられず、
+   このアプリは Cookie を使わない（auth.js 冒頭）ので、fetch のストリームを自分で読む。
+   切れたら自分でつなぎ直す（1秒→2秒→…最大30秒）*/
+let STREAM_CTRL=null,STREAM_WAIT=1000,STREAM_STOP=false;
+function startStream(){
+  STREAM_STOP=false;STREAM_WAIT=1000;connectStream();
+}
+function stopStream(){
+  STREAM_STOP=true;
+  if(STREAM_CTRL){try{STREAM_CTRL.abort();}catch(e){}STREAM_CTRL=null;}
+}
+async function connectStream(){
+  if(STREAM_STOP||!getToken())return;
+  const ctrl=new AbortController();STREAM_CTRL=ctrl;
+  try{
+    const res=await fetch('/api/stream',{
+      headers:{Authorization:'Bearer '+getToken()},signal:ctrl.signal});
+    // セッションが切れていた場合は、つなぎ直さずログインからやり直してもらう
+    if(res.status===401){STREAM_CTRL=null;handleUnauthorized();return;}
+    if(!res.ok||!res.body)throw new Error('stream '+res.status);
+    STREAM_WAIT=1000;   // つながったので待ち時間を戻す
+    const reader=res.body.getReader(),dec=new TextDecoder();
+    let buf='';
+    for(;;){
+      const {value,done}=await reader.read();
+      if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let i;
+      while((i=buf.indexOf('\n\n'))>=0){
+        const block=buf.slice(0,i);buf=buf.slice(i+2);
+        // 生きている合図（: ping）は読み飛ばす
+        if(block.indexOf('event: refresh')===0)onServerRefresh();
+      }
+    }
+  }catch(e){/* 切れただけ。下でつなぎ直す */}
+  STREAM_CTRL=null;
+  if(STREAM_STOP)return;
+  setTimeout(connectStream,STREAM_WAIT);
+  STREAM_WAIT=Math.min(STREAM_WAIT*2,30000);
+}
+
+/* 「更新があった」と言われたので取り直す。
+   何が変わったかはサーバーから送られてこない（送ると権限の判定が二重になるため）*/
+async function onServerRefresh(){
+  if(SYNCING)return;
+  SYNCING=true;
+  try{
+    const before=((DB&&DB.notifications)||[]).length;
+    const remote=await apiGetDB();
+    if(remote){
+      DB=remote;
+      sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+      applyRemoteUpdate((DB.notifications||[]).length-before);
+    }
+  }catch(e){/* オフライン時は無視 */}
+  finally{SYNCING=false;}
+}
+
+/* 取り込んだ内容を画面へ。
+   画面全体を覆うものは出さない。知らせるのはベルの数字とトーストだけ。
+   操作の最中は描き直さず印だけ立てて、手が空いてから反映する（設計書 4節）*/
+function applyRemoteUpdate(added){
+  updateBell();
+  if(added>0)toast(added===1?'新しい通知が届きました':`新しい通知が${added}件届きました`);
+  if(uiBusy()){REFRESH_PENDING=true;return;}
+  if(ME)renderQuiet();
+}
+
+/* 内容が変わったかを見分ける印。
+
+   updatedAt は store（1行JSON）が書き換わったときしか変わらない。
+   面談・通知・依頼は 2026-08-02 に専用テーブルへ移したので updatedAt が動かず、
+   ここを見ていなかったために「再読み込みするまで面談申請に気づけない」状態だった。
+   面談の確定や不成立でも通知は必ず積まれるので、件数を見れば取りこぼさない */
+function dbStamp(db){
+  if(!db)return '';
+  const n=k=>((db[k]||[]).length);
+  return [db.updatedAt||'',n('interviews'),n('notifications'),n('requests'),n('emails')].join('|');
+}
+
+/* 他端末・他ブラウザでの変更をゆるやかに反映する定期ポーリング（30秒間隔）。
+   本命は startStream() の押し出しで、これはつながらないときの保険 */
 function startPolling(){
   setInterval(async()=>{
     if(SYNCING)return;
     SYNCING=true;
     try{
       const remote=await apiGetDB();
-      if(remote&&remote.updatedAt&&remote.updatedAt!==DB.updatedAt){
+      if(remote&&dbStamp(remote)!==dbStamp(DB)){
+        const before=((DB&&DB.notifications)||[]).length;
         DB=remote;
         sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
-        if(ME)render();
+        applyRemoteUpdate((DB.notifications||[]).length-before);
       }
     }catch(e){/* オフライン時は無視 */}
     finally{SYNCING=false;}
@@ -1194,6 +1277,7 @@ function openDeepLink(){
   openAttendDetail(id);
 }
 async function logout(){
+  stopStream();
   try{await api('/api/auth/logout',{method:'POST'});}catch(e){}
   clearToken();
   location.reload();
@@ -4569,6 +4653,7 @@ function consumeTokenFromHash(){
     if(boot.user){
       await enterAppWith(boot.user,boot.db);
       startPolling();
+      startStream();
     }else{
       // 期限切れのトークンが残っていたら消しておく（次の起動で無駄に問い合わせないため）
       clearToken();
