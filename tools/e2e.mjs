@@ -500,6 +500,20 @@ async function testAttendance() {
     appHtml.includes("mode:kind==='attend'?'public':'all_staff'"), true);
   check('公開モードを送信APIへ明示する',
     appHtml.includes("public_access:attend&&REQFORM.mode==='public'"), true);
+  check('候補一覧に日程なし切替がある', appHtml.includes('日程を設定しない'), true);
+  check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
+  check('出欠候補は日付あり時間なしで始まる',
+    appHtml.includes('noDate:false,withTime:false'), true);
+  check('最初の候補は明日になる',
+    appHtml.includes('d.setDate(d.getDate()+1)'), true);
+  check('候補追加で時刻を1時間進める処理がある',
+    appHtml.includes('shiftReqTimeRange(last.t1,last.t2)'), true);
+  check('スタッフ画面は日付だけの内部時刻を表示しない',
+    appHtml.includes("if(o?.has_time===false)return fmtDate(o.start)"), true);
+  check('スタッフ画面は時間だけを日程未定と表示する',
+    appHtml.includes("if(o?.has_date===false)return `${o.start_time}"), true);
+  check('公開送信後は公開回答ページへ移動する',
+    appHtml.includes('location.assign(attendShareUrl(request))'), true);
   check('公開出欠の詳細に共有URLを表示する',
     appHtml.includes('誰でも回答できる共有URL'), true);
   check('公開出欠は回答人数に分母を表示しない',

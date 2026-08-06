@@ -4226,7 +4226,7 @@ function openAttendDetail(id){
     ${urlBlock}
     ${r.body?`<div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>`:''}
     ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
-      <b>${fmtSlot(confirmedOpt)}</b> で確定しました。カレンダーに予定を追加しています。</span></div>`:''}
+      <b>${fmtSlot(confirmedOpt)}</b> で確定しました。${confirmedOpt.has_date===false?'日程が未定のため、カレンダーには登録していません。':'カレンダーに予定を追加しています。'}</span></div>`:''}
     <label class="fl" style="margin-top:18px">出欠集計
       <span class="fl-sub">日程を押すと、誰が何を答えたかが見られます</span></label>
     <p class="atsum">${isPublicAttend(r)?`<b>${answered.size}名</b>が回答`:`${responders.length}名中 <b>${answered.size}名</b>が回答${responders.length>answered.size?` ・ 未回答 ${responders.length-answered.size}名`:''}`}</p>
@@ -4272,6 +4272,8 @@ function attendPerson(uid,r){
 }
 /* 候補1件の見せ方。「9/12(土) 19:00〜21:00」 */
 function fmtSlot(o){
+  if(o?.has_date===false)return `${o.start_time}${o.end_time?'〜'+o.end_time:''}（日程未定）`;
+  if(o?.has_time===false)return fmtDate(o.start);
   const s=new Date(o.start),e=o.end?new Date(o.end):null;
   return `${s.getMonth()+1}/${s.getDate()}(${WD_JP[s.getDay()]}) ${hm(s)}${e?'〜'+hm(e):''}`;
 }
@@ -4320,8 +4322,10 @@ async function confirmAttend(reqId,optId){
   const r=allRequests().find(x=>x.id===reqId);
   const o=(r.options||[]).find(x=>x.id===optId);
   if(!o)return;
-  if(!await confirmSheet('この日で確定する',
-    `${fmtSlot(o)} で確定します。カレンダーに予定が追加され、回答した方へお知らせが届きます。`,'確定する'))return;
+  const calNote=o.has_date===false
+    ?'日程が未定のためカレンダーには登録せず、回答した方へ確定をお知らせします。'
+    :'カレンダーに予定が追加され、回答した方へお知らせが届きます。';
+  if(!await confirmSheet('この候補で確定する',`${fmtSlot(o)} で確定します。${calNote}`,'確定する'))return;
   try{
     const res=await api(`/api/requests/${encodeURIComponent(reqId)}/confirm`,
       {method:'POST',body:JSON.stringify({option_id:optId})});
@@ -4423,7 +4427,7 @@ const REQ_MODES=[
 ];
 
 function openRequestForm(kind){
-  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[]};
+  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[],noDate:false,withTime:false};
   if(REQFORM.kind==='attend')addReqOption();   // 中で描き直すのでここでは呼ばない
   else renderRequestForm();
 }
@@ -4520,19 +4524,39 @@ function setReqKind(kind){
   REQFORM.kind=kind;
   if(kind==='attend'&&REQFORM.mode!=='public')REQFORM.mode='public';
   if(kind!=='attend'&&REQFORM.mode==='public')REQFORM.mode='all_staff';
+  if(kind==='attend'&&REQFORM.noDate==null){REQFORM.noDate=false;REQFORM.withTime=false;}
   if(kind==='attend'&&!REQFORM.opts.length)addReqOption();
   renderRequestForm(true);
 }
-/* 候補を1件足す。前の候補があればその翌週の同じ時間を初期値にする。
-   毎週の定例を並べることが多いので、そのほうが打ち直しが少ない */
+function setReqNoDate(on){
+  syncReqOptions();
+  REQFORM.noDate=on;
+  if(on)REQFORM.withTime=true;
+  renderRequestForm(true);
+}
+function setReqWithTime(on){
+  if(REQFORM.noDate&&!on)return;
+  syncReqOptions();
+  REQFORM.withTime=on;
+  renderRequestForm(true);
+}
+function shiftReqTimeRange(t1,t2){
+  const mins=v=>{const [h,m]=String(v).split(':').map(Number);return h*60+m;};
+  const from=mins(t1)+60,to=mins(t2)+60;
+  if(!Number.isFinite(from)||!Number.isFinite(to)||to>=24*60)return ['00:00','01:00'];
+  const text=v=>`${pad(Math.floor(v/60))}:${pad(v%60)}`;
+  return [text(from),text(to)];
+}
+/* 候補を1件足す。日付は前の候補の翌日、時間は1時間後を初期値にする。 */
 function addReqOption(){
   const last=REQFORM.opts[REQFORM.opts.length-1];
   if(last){
     const d=new Date(last.date+'T00:00');
-    d.setDate(d.getDate()+7);
-    REQFORM.opts.push({date:ymd(d),t1:last.t1,t2:last.t2});
+    d.setDate(d.getDate()+1);
+    const [t1,t2]=shiftReqTimeRange(last.t1,last.t2);
+    REQFORM.opts.push({date:ymd(d),t1,t2});
   }else{
-    const d=new Date();d.setDate(d.getDate()+7);
+    const d=new Date();d.setDate(d.getDate()+1);
     REQFORM.opts.push({date:ymd(d),t1:'19:00',t2:'21:00'});
   }
   renderRequestForm(true);
@@ -4553,17 +4577,24 @@ function syncReqOptions(){
 function reqOptionsHTML(){
   if(REQFORM.kind!=='attend')return '';
   const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
-      <input type="date" id="ro_d${i}" value="${o.date}" onchange="syncReqOptions()">
-      <div class="timerange">
+      ${REQFORM.noDate?'':`<input type="date" id="ro_d${i}" value="${o.date}" onchange="syncReqOptions()">`}
+      ${REQFORM.withTime?`<div class="timerange">
         <select id="ro_a${i}" onchange="syncReqOptions()">${timeOpts(o.t1)}</select>
         <span class="tr-sep">〜</span>
         <select id="ro_b${i}" onchange="syncReqOptions()">${timeOpts(o.t2)}</select>
-      </div>
+      </div>`:''}
       <button type="button" class="optx" onclick="syncReqOptions();removeReqOption(${i})"
         ${REQFORM.opts.length<=1?'disabled':''} aria-label="この候補を消す">×</button>
     </div>`).join('');
   return `<label class="fl" style="margin-top:16px">候補の日時<span class="req">*</span>
       <span class="fl-sub">答える人は候補ごとに ○△× を選びます</span></label>
+    <div class="modechips" style="margin:8px 0 10px">
+      <button type="button" class="modechip ${REQFORM.noDate?'on':''}" aria-pressed="${REQFORM.noDate}"
+        onclick="setReqNoDate(!REQFORM.noDate)">日程を設定しない</button>
+      <button type="button" class="modechip ${REQFORM.withTime?'on':''}" aria-pressed="${REQFORM.withTime}"
+        ${REQFORM.noDate?'disabled title="日程を設定しない場合は時間が必要です"':''}
+        onclick="setReqWithTime(!REQFORM.withTime)">時間を設定する</button>
+    </div>
     <div class="optlist">${rows}</div>
     <button type="button" class="btn ghost sm" style="margin-top:8px" onclick="syncReqOptions();addReqOption()">
       ＋ 候補を追加</button>`;
@@ -4617,30 +4648,35 @@ async function submitRequest(){
   if(!subject){err.textContent='件名を入力してください';err.classList.add('show');return;}
 
   const attend=REQFORM.kind==='attend';
+  const publicMode=attend&&REQFORM.mode==='public';
   let options=[];
   if(attend){
     syncReqOptions();
     if(!REQFORM.opts.length){err.textContent='候補の日時を1件以上追加してください';err.classList.add('show');return;}
     for(const o of REQFORM.opts){
-      if(!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
-      if(o.t2<=o.t1){err.textContent='終わりの時刻は始まりより後にしてください';err.classList.add('show');return;}
+      if(!REQFORM.noDate&&!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
+      if(REQFORM.withTime&&o.t2<=o.t1){err.textContent='終わりの時刻は始まりより後にしてください';err.classList.add('show');return;}
     }
     // 同じ日時が2つあると集計の見分けがつかないので弾く
     const seen=new Set();
     for(const o of REQFORM.opts){
-      const key=o.date+' '+o.t1;
+      const key=[REQFORM.noDate?'':o.date,REQFORM.withTime?`${o.t1}-${o.t2}`:''].join('|');
       if(seen.has(key)){err.textContent='同じ日時の候補が重なっています';err.classList.add('show');return;}
       seen.add(key);
     }
     options=REQFORM.opts.map(o=>({
-      start:new Date(`${o.date}T${o.t1}`).toISOString(),
-      end:new Date(`${o.date}T${o.t2}`).toISOString(),
+      date:REQFORM.noDate?undefined:o.date,
+      start_time:REQFORM.withTime?o.t1:undefined,
+      end_time:REQFORM.withTime?o.t2:undefined,
+      has_date:!REQFORM.noDate,
+      has_time:REQFORM.withTime,
     }));
   }
 
   btn.disabled=true;btn.textContent='送信中…';
   /* 依頼は専用APIで作る。あて先は送った時点で固定される（上のコメント参照）。
      受け取った人への通知はサーバー側で一緒に積まれる */
+  let request=null;
   try{
     const res=await api('/api/requests',{method:'POST',
       body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids,
@@ -4652,12 +4688,22 @@ async function submitRequest(){
       btn.disabled=false;btn.textContent=attend?'出欠確認を送る':'この内容で送る';
       return;
     }
-    const {request,notification}=await res.json();
+    const out=await res.json();request=out.request;
+    const notification=out.notification;
     DB.requests=[...(DB.requests||[]),request];
     // あて先への通知はサーバー側で一緒に積まれるので、手元の一覧にも反映する
     if(notification)DB.notifications=[...(DB.notifications||[]),notification];
     sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
     setSaveError(null);
+    if(publicMode){
+      if(!request.public_url){
+        err.textContent='共有URLを発行できませんでした。送った依頼の一覧からご確認ください。';err.classList.add('show');
+        return;
+      }
+      REQFORM=null;
+      location.assign(attendShareUrl(request));
+      return;
+    }
   }catch(e){
     console.warn('依頼の送信に失敗しました',e);
     err.textContent='送信できませんでした。通信状況をご確認ください';err.classList.add('show');
@@ -4666,7 +4712,7 @@ async function submitRequest(){
   }
   REQFORM=null;REQTAB='sent';
   closeSheet();updateBell();render();
-  toast(attend&&request.public_url?'共有URLを発行しました':`${request.recipient_ids.length}名に送りました`);
+  toast(`${request.recipient_ids.length}名に送りました`);
 }
 
 /* =========================================================
