@@ -27,6 +27,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"
   href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Noto+Sans+JP:wght@400;700;900&display=swap">
+<!-- このファイルと style.css はリポジトリ直下にあり、Renderの rootDir(server) の
+     外側にある。Renderダッシュボードの Build Filters → Included Paths に
+     登録しておかないと、ここを直したpushはビルドされず本番に届かない
+     （2026-08-06に登録し直し済み。控えは render.yaml のコメント） -->
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
