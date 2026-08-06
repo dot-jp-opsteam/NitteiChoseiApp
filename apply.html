@@ -152,7 +152,19 @@ function applyGroups(){
   return runs.sort(function(a,b){return at(a)-at(b);});
 }
 
-/* 続いた枠を「9:00〜11:30」にまとめ、離れていれば ＆ でつなぐ */
+/* 区間の終わりに出す時刻。
+   枠が2つ以上あるときは最後の枠の開始時刻、1つだけのときは開始＋30分。
+
+   表の1行は「その時刻から30分の枠」だが、申請する人は行の見出しを読んで
+   「17:00から18:00まで選んだ」と受け取る。その読み方に合わせている。
+   面談そのものは30分なので、ここに出る終了時刻より30分あとに終わることがある
+   （設計書 _specs/2026-08-06-面談まわりの改善-design.md の 1.4）*/
+function runEnd(run){
+  var last=run[run.length-1];
+  if(run.length>1)return new Date(last);
+  return new Date(new Date(last).getTime()+SLOT_MS);
+}
+/* 続いた枠を「9:00〜11:00」にまとめ、離れていれば ＆ でつなぐ */
 function fmtRanges(list){
   var sorted=list.slice().sort(function(a,b){return new Date(a)-new Date(b);});
   var runs=[];
@@ -163,7 +175,7 @@ function fmtRanges(list){
     else runs.push([iso]);
   });
   return runs.map(function(r){
-    return hm(r[0])+'〜'+hm(new Date(new Date(r[r.length-1]).getTime()+SLOT_MS));
+    return hm(r[0])+'〜'+hm(runEnd(r));
   }).join('＆');
 }
 // 「8/5(火)」
