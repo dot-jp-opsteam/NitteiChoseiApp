@@ -670,6 +670,12 @@ async function insertNotification({ type, msg, branch_id }) {
     sql: 'INSERT INTO notifications (id, type, msg, branch_id, at) VALUES (?,?,?,?,?)',
     args: [row.id, row.type, row.msg, row.branch_id, row.at],
   });
+  /* つながっている画面へ「更新があった」ことを押し出す。
+     呼び出し側ではなくここに置いているのは、通知を積む場所が増えても
+     送り忘れが起きないようにするため（設計書 3.3）。
+     送れなくても本筋の保存は済んでいるので、失敗しても先へ進む */
+  try { stream.broadcast(row.branch_id, { type: row.type || '' }); }
+  catch (e) { console.warn('更新の押し出しに失敗しました', e); }
   return row;
 }
 
@@ -693,6 +699,7 @@ async function writeDB(obj) {
    メール履歴の追記やGoogleカレンダーの取り込みには照合が無く、
    同時実行で片方が消える状態だった */
 const { withDBLock } = require('./dblock');
+const stream = require('./stream');
 
 /* ---------- users テーブル操作 ---------- */
 function toPublicUser(row) {
@@ -1218,6 +1225,26 @@ const app = express();
 app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+/* 更新をリアルタイムで押し出す（SSE）。
+   ブラウザ標準の EventSource は Authorization ヘッダを付けられず、
+   このアプリは Cookie を使わない方針（auth.js 冒頭）なので、
+   画面側は fetch のストリーム読み取りで受ける。形式は SSE のまま（設計書 3.2）。
+
+   このサーバーには圧縮ミドルウェアを入れていないので、途中で溜め込まれる心配はない。
+   念のため X-Accel-Buffering でも止めてある */
+app.get('/api/stream', requireAuth, (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write(': connected\n\n');
+  const c = stream.addClient(res, req.authUser);
+  stream.startHeartbeat();
+  req.on('close', () => stream.removeClient(c));
+});
 
 // ログイン画面（未認証）で支部選択に使う。認証情報は含まない
 app.get('/api/branches', async (req, res) => {

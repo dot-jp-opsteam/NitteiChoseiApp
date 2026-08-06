@@ -244,6 +244,45 @@ async function countRows() {
   return out;
 }
 
+/* SSE につないで、届いた refresh を数える。
+   fetch のストリームをそのまま読む（画面側と同じ受け方）。close() で切る */
+async function openStream(token) {
+  const ctrl = new AbortController();
+  let res;
+  try { res = await fetch(BASE + '/api/stream', { headers: H(token), signal: ctrl.signal }); }
+  catch (e) { return { status: 0, events: [], close() { ctrl.abort(); } }; }
+  const events = [];
+  if (!res.ok) { ctrl.abort(); return { status: res.status, events, close() {} }; }
+  (async () => {
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          if (block.startsWith('event: refresh')) events.push(block);
+        }
+      }
+    } catch { /* close() で切ったとき。ここは正常 */ }
+  })();
+  return { status: res.status, events, close() { ctrl.abort(); } };
+}
+/* 条件が満たされるまで待つ。押し出しは非同期なので、決め打ちの待ち時間にしない */
+async function waitFor(fn, ms = 3000) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (fn()) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
 /* 専用APIの呼び出し */
 async function api(token, method, pathname, payload) {
   const r = await fetch(BASE + pathname, {
@@ -919,6 +958,35 @@ async function run() {
     check('引っ越し前の面談も読める', (admin.interviews || []).some((iv) => iv.id === 'iv_old'), true);
     const raw = await readStoreRaw();
     check('store から面談が取り除かれている', 'interviews' in raw, false);
+  }
+
+  /* ---------- リアルタイム通知（SSE） ----------
+     面談申請が、再読み込みなしでスタッフの画面へ届くこと。
+     配信の宛先は listNotificationsFor と同じ規則（admin は全部／他は自分の支部）*/
+  console.log('\n─────── リアルタイム通知（SSE） ───────');
+  {
+    // ログインしていない相手にはつながせない
+    const anon = await openStream(null);
+    check('SSE：認証なしは401', anon.status, 401);
+    anon.close();
+
+    const s1 = await openStream(TOKENS.staff);    // b1のスタッフ（申請を受ける本人）
+    const s2 = await openStream(TOKENS.staff2);   // b2のスタッフ（他支部）
+    const ad = await openStream(TOKENS.admin);    // 全体管理者
+    check('SSE：スタッフはつながる', s1.status, 200);
+
+    const link = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
+    const tk = String(link.json.url || '').split('/i/')[1];
+    const slot = await firstOpenSlot(tk, 'u_e2e_staff');
+    const posted = await api(null, 'POST', `/api/apply/${tk}`,
+      { name: 'SSE検証 太郎', staff_id: 'u_e2e_staff', choices: [slot.iso] });
+    check('SSE：検証用の申請が通った', posted.status, 200);
+
+    check('SSE：同じ支部のスタッフに届く', await waitFor(() => s1.events.length >= 1), true);
+    check('SSE：全体管理者にも届く', await waitFor(() => ad.events.length >= 1), true);
+    check('SSE：他支部のスタッフには届かない', s2.events.length, 0);
+
+    s1.close(); s2.close(); ad.close();
   }
 
   console.log('\n─────── メール履歴 ───────');
