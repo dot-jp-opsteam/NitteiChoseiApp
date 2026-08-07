@@ -493,10 +493,9 @@ document.addEventListener('focusout',()=>setTimeout(flushPendingRefresh,0));
    ブラウザ標準の EventSource は Authorization ヘッダを付けられず、
    このアプリは Cookie を使わない（auth.js 冒頭）ので、fetch のストリームを自分で読む。
    切れたら自分でつなぎ直す（1秒→2秒→…最大30秒）*/
-/* 呼び出しは限られた場所だけ（enterAppWith と、下の visibilitychange ハンドラ）。
-   増やすときは、古い接続の後始末（STREAM_CTRL.abort()）が新しい接続を壊さないか
-   必ず確かめること。startStream() は自分で古い接続を閉じてから張り直す作りだが、
-   呼び出し側で非同期処理を挟むと「閉じる前に次を張る」順序になりかねない */
+/* 呼び出しは今のところ2か所（enterAppWith と、下の visibilitychange ハンドラ）。
+   張り直しが重なっても接続が2本にならないよう、connectStream() の後始末は
+   「自分が張った接続がまだ現役のときだけ」に限っている（下の STREAM_CTRL!==ctrl を参照）*/
 let STREAM_CTRL=null,STREAM_WAIT=1000,STREAM_STOP=false;
 function startStream(){
   // 二重に呼ばれても接続が2本残らないよう、張りっぱなしの接続があれば先に止めてから張り直す
@@ -539,7 +538,7 @@ async function connectStream(){
     const res=await fetch('/api/stream',{
       headers:{Authorization:'Bearer '+getToken()},signal:ctrl.signal});
     // セッションが切れていた場合は、つなぎ直さずログインからやり直してもらう
-    if(res.status===401){STREAM_CTRL=null;handleUnauthorized();return;}
+    if(res.status===401){if(STREAM_CTRL===ctrl)STREAM_CTRL=null;handleUnauthorized();return;}
     if(!res.ok||!res.body)throw new Error('stream '+res.status);
     STREAM_WAIT=1000;   // つながったので待ち時間を戻す
     const reader=res.body.getReader(),dec=new TextDecoder();
@@ -557,6 +556,11 @@ async function connectStream(){
       }
     }
   }catch(e){/* 切れただけ。下でつなぎ直す */}
+  /* 自分が張った接続が現役のときだけ後始末する。
+     startStream() で張り直された直後は STREAM_CTRL が新しい接続を指しているので、
+     ここで無条件に null を入れると新しい接続の記録を消してしまい、
+     さらに下のつなぎ直しで2本目を張ることになる（無料枠の消費が倍になる）*/
+  if(STREAM_CTRL!==ctrl)return;
   STREAM_CTRL=null;
   if(STREAM_STOP)return;
   setTimeout(connectStream,STREAM_WAIT);

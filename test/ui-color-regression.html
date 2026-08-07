@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>UI色 回帰テスト</title>
+</head>
+<body>
+<pre id="result">確認中…</pre>
+<iframe id="staff" src="/index.html" hidden></iframe>
+<iframe id="apply" src="/apply.html" hidden></iframe>
+<script>
+Promise.all(['staff','apply'].map(function(id){
+  return new Promise(function(resolve){
+    document.getElementById(id).addEventListener('load',resolve,{once:true});
+  });
+})).then(function(){
+  var staffDoc=document.getElementById('staff').contentDocument;
+  staffDoc.documentElement.setAttribute('data-theme','dark');
+  var time=staffDoc.createElement('input');
+  time.type='time';
+  staffDoc.body.appendChild(time);
+
+  var applyDoc=document.getElementById('apply').contentDocument;
+  var summary=applyDoc.createElement('div');
+  summary.className='selsummary';
+  summary.innerHTML='<div class="sr"><span class="st"><span class="stime">19:00〜20:00</span></span></div>';
+  applyDoc.body.appendChild(summary);
+
+  var timeScheme=staffDoc.defaultView.getComputedStyle(time).colorScheme;
+  var timeColor=applyDoc.defaultView.getComputedStyle(summary.querySelector('.stime')).color;
+  var ink=applyDoc.defaultView.getComputedStyle(applyDoc.documentElement).getPropertyValue('--ink').trim();
+  var probe=applyDoc.createElement('span');
+  probe.style.color=ink;
+  applyDoc.body.appendChild(probe);
+  var inkColor=applyDoc.defaultView.getComputedStyle(probe).color;
+
+  var checks=[
+    ['ダーク時刻入力が明色アイコン用テーマ',timeScheme==='dark','実際: '+timeScheme],
+    ['希望日時の時間が本文色',timeColor===inkColor,'実際: '+timeColor+' / 期待: '+inkColor]
+  ];
+  var failed=checks.filter(function(c){return !c[1];});
+  document.getElementById('result').textContent=checks.map(function(c){
+    return (c[1]?'PASS':'FAIL')+' '+c[0]+'（'+c[2]+'）';
+  }).join('\n');
+  document.title=failed.length?'FAIL: UI色 回帰テスト':'PASS: UI色 回帰テスト';
+});
+</script>
+</body>
+</html>
