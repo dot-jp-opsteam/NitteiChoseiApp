@@ -505,6 +505,7 @@
   .optrow{display:flex;align-items:center;gap:8px}
   .optrow input[type="date"]{flex:0 0 auto;width:auto;min-width:0}
   .optrow .timerange{flex:1;min-width:0}
+  [data-theme="dark"] .optrow input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:1}
   .optx{flex:none;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:9px;
     background:transparent;color:var(--sub);font-size:16px;cursor:pointer;line-height:1}
   .optx:hover:not(:disabled){border-color:var(--bad);color:var(--bad)}
@@ -597,7 +598,9 @@
      幅いっぱいにはせず、右下に小さく寄せる */
   .backhome{display:flex;justify-content:flex-end;margin-top:10px}
   .timerange{display:flex;align-items:center;gap:8px}
-  .timerange select{flex:1;min-width:0}
+  .timerange select,.timerange input{flex:1;min-width:0}
+  .timerange .timeinput{text-align:center;font-variant-numeric:tabular-nums}
+  .timerange .timeinput.invalid{border-color:var(--bad);color:var(--bad)}
   .timerange .tr-sep{color:var(--sub);font-weight:700;flex:none}
   .sheet h3{margin:0 0 4px;font-size:17px}
   @media(min-width:640px){

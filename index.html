@@ -4573,6 +4573,39 @@ function removeReqOption(i){
   REQFORM.opts.splice(i,1);
   renderRequestForm(true);
 }
+/* 出欠候補の時刻を数字入力から 24 時間表記へ整える。開始は4桁、終了は
+   先頭0を省いた3桁でも入れられるようにする。 */
+function normalizeReqTime(raw,{allowThree=false}={}){
+  const digits=String(raw||'').replace(/\D/g,'').slice(0,4);
+  if(allowThree&&digits.length===3){
+    const value=`0${digits[0]}:${digits.slice(1)}`;
+    const [hour,minute]=value.split(':').map(Number);
+    return {value,complete:true,valid:hour<=23&&minute<=59};
+  }
+  if(digits.length<4)return {value:digits,complete:false,valid:true};
+  const value=`${digits.slice(0,2)}:${digits.slice(2)}`;
+  const [hour,minute]=value.split(':').map(Number);
+  return {value,complete:true,valid:hour<=23&&minute<=59};
+}
+function selectReqTimeInput(input){
+  input.select();
+}
+function handleReqTimeInput(i,field,input){
+  const isEnd=field==='t2';
+  const out=normalizeReqTime(input.value,{allowThree:isEnd});
+  REQFORM.opts[i][field]=out.value;
+  input.value=out.value;
+  input.classList.toggle('invalid',out.complete&&!out.valid);
+  input.setAttribute('aria-invalid',out.complete&&!out.valid?'true':'false');
+  if(field==='t1'&&out.complete&&out.valid)document.getElementById('ro_b'+i)?.focus();
+}
+function handleReqTimeBlur(i,field,input){
+  const out=normalizeReqTime(input.value,{allowThree:field==='t2'});
+  REQFORM.opts[i][field]=out.value;
+  input.value=out.value;
+  input.classList.toggle('invalid',out.complete&&!out.valid);
+  input.setAttribute('aria-invalid',out.complete&&!out.valid?'true':'false');
+}
 /* 入力欄の値をその場で控える。描き直しても打った内容が消えないようにするため */
 function syncReqOptions(){
   REQFORM.opts.forEach((o,i)=>{
@@ -4587,9 +4620,13 @@ function reqOptionsHTML(){
   const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
       ${REQFORM.noDate?'':`<input type="date" id="ro_d${i}" value="${o.date}" onchange="syncReqOptions()">`}
       ${REQFORM.withTime?`<div class="timerange">
-        <select id="ro_a${i}" onchange="syncReqOptions()">${timeOpts(o.t1)}</select>
+        <input type="text" id="ro_a${i}" class="timeinput" inputmode="numeric" autocomplete="off"
+          aria-label="候補${i+1}の開始時刻" value="${esc(o.t1)}" placeholder="開始"
+          onfocus="selectReqTimeInput(this)" oninput="handleReqTimeInput(${i},'t1',this)" onblur="handleReqTimeBlur(${i},'t1',this)">
         <span class="tr-sep">〜</span>
-        <select id="ro_b${i}" onchange="syncReqOptions()">${timeOpts(o.t2)}</select>
+        <input type="text" id="ro_b${i}" class="timeinput" inputmode="numeric" autocomplete="off"
+          aria-label="候補${i+1}の終了時刻" value="${esc(o.t2)}" placeholder="終了"
+          onfocus="selectReqTimeInput(this)" oninput="handleReqTimeInput(${i},'t2',this)" onblur="handleReqTimeBlur(${i},'t2',this)">
       </div>`:''}
       <button type="button" class="optx" onclick="syncReqOptions();removeReqOption(${i})"
         ${REQFORM.opts.length<=1?'disabled':''} aria-label="この候補を消す">×</button>
@@ -4663,7 +4700,12 @@ async function submitRequest(){
     if(!REQFORM.opts.length){err.textContent='候補の日時を1件以上追加してください';err.classList.add('show');return;}
     for(const o of REQFORM.opts){
       if(!REQFORM.noDate&&!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
-      if(REQFORM.withTime&&o.t2<=o.t1){err.textContent='終わりの時刻は始まりより後にしてください';err.classList.add('show');return;}
+      if(REQFORM.withTime){
+        const start=normalizeReqTime(o.t1),end=normalizeReqTime(o.t2,{allowThree:true});
+        if(!start.complete||!start.valid||!end.complete||!end.valid){err.textContent='時刻は00:00〜23:59の4桁、または終了時刻のみ3桁で入力してください';err.classList.add('show');return;}
+        o.t1=start.value;o.t2=end.value;
+        if(o.t2<=o.t1){err.textContent='終わりの時刻は始まりより後にしてください';err.classList.add('show');return;}
+      }
     }
     // 同じ日時が2つあると集計の見分けがつかないので弾く
     const seen=new Set();

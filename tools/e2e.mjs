@@ -509,6 +509,20 @@ async function testAttendance() {
 
   const appHtml = await (await fetch(BASE + '/')).text();
   const serverSource = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
+  const styleSource = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+  const timeFnsStart = appHtml.indexOf('function normalizeReqTime(');
+  const timeFnsEnd = appHtml.indexOf('function handleReqTimeBlur(', timeFnsStart);
+  const requestDraft = { opts: [{ t1: '', t2: '' }] };
+  let movedToEnd = false;
+  const fakeDocument = { getElementById: (id) => id === 'ro_b0' ? { focus: () => { movedToEnd = true; } } : null };
+  const { normalizeReqTime, handleReqTimeInput } = Function('document', 'REQFORM',
+    `${appHtml.slice(timeFnsStart, timeFnsEnd)};return {normalizeReqTime,handleReqTimeInput};`)(fakeDocument, requestDraft);
+  const fakeTimeInput = (value) => {
+    const classes = new Set(), attrs = {};
+    return { value, classes, attrs,
+      classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name) },
+      setAttribute: (name, value) => { attrs[name] = value; } };
+  };
   const publicModePos = appHtml.indexOf("{id:'public',label:'誰でも回答OK'}");
   check('出欠の宛先先頭に「誰でも回答OK」がある',
     publicModePos >= 0
@@ -519,6 +533,29 @@ async function testAttendance() {
     appHtml.includes("public_access:attend&&REQFORM.mode==='public'"), true);
   check('候補一覧に日程なし切替がある', appHtml.includes('日程を設定しない'), true);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
+  check('出欠候補は数値で時刻を入力できる',
+    appHtml.includes('inputmode="numeric"') && appHtml.includes('handleReqTimeInput('), true);
+  check('数字以外を含む貼り付けを途中で切らない',
+    appHtml.includes('class="timeinput" inputmode="numeric" autocomplete="off" maxlength="5"'), false);
+  check('開始時刻4桁で終了時刻へ自動移動する',
+    appHtml.includes("document.getElementById('ro_b'+i)?.focus()"), true);
+  check('終了時刻3桁を先頭0付きで整形する',
+    appHtml.includes("const value=`0${digits[0]}:${digits.slice(1)}`"), true);
+  const startInput = fakeTimeInput('1146');
+  handleReqTimeInput(0, 't1', startInput);
+  check('開始時刻1146を11:46へ整形する', startInput.value, '11:46');
+  check('開始時刻4桁で終了欄へ移動する', movedToEnd, true);
+  const shortEndInput = fakeTimeInput('457');
+  handleReqTimeInput(0, 't2', shortEndInput);
+  check('終了時刻457を04:57へ整形する', shortEndInput.value, '04:57');
+  const zeroEndInput = fakeTimeInput('057');
+  handleReqTimeInput(0, 't2', zeroEndInput);
+  check('終了時刻057を00:57へ整形する', zeroEndInput.value, '00:57');
+  const invalidTime = normalizeReqTime('2960');
+  check('範囲外の時刻は不正として判定する', invalidTime.valid, false);
+  check('ダークモードの候補日付アイコンを白くする',
+    styleSource.includes('[data-theme="dark"] .optrow input[type="date"]::-webkit-calendar-picker-indicator')
+      && styleSource.includes('filter:invert(1)'), true);
   check('出欠候補は日付あり時間なしで始まる',
     appHtml.includes('noDate:false,withTime:false'), true);
   check('最初の候補は明日になる',
