@@ -518,6 +518,17 @@ async function testAttendance() {
     appHtml.includes("mode:kind==='attend'?'public':'all_staff'"), true);
   check('公開モードを送信APIへ明示する',
     appHtml.includes("public_access:attend&&REQFORM.mode==='public'"), true);
+  check('公開モードでは「いまのあて先」の行を出力しない',
+    appHtml.includes("const currentTargetHint=REQFORM.mode==='public'?'':"), true);
+  check('通常依頼の差出人・あて先・送信日時を控えめな1行にまとめる',
+    appHtml.includes('<p class="rq-meta">差出人：${esc(sender?sender.nickname')
+      && appHtml.includes(' ・ あて先：${esc(r.target_label')
+      && appHtml.includes(' ・ 送信日時：${fmtDT(r.created_at)}</p>'), true);
+  check('通常依頼の本文を主役にする接頭辞付きクラスがある',
+    appHtml.includes('class="rq-body"')
+      && styleSource.includes('.rq-body{white-space:pre-wrap;color:var(--ink);font-size:16px;line-height:1.8'), true);
+  check('通常依頼のメタ情報は小さく控えめな色にする',
+    styleSource.includes('.rq-meta{color:var(--sub);font-size:12px;line-height:1.5'), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
   /* 日付は入力欄をやめてカレンダーで選ぶ形にした。時刻は打ち込みではなくホイールで選ぶ */

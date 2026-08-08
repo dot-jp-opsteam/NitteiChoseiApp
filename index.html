@@ -4443,13 +4443,8 @@ function openRequestDetail(id){
   }
 
   openSheet(`<h3>${esc(r.subject)}</h3>
-    <dl class="kv" style="margin:12px 0">
-      <dt>差出人</dt><dd>${esc(sender?sender.nickname:'—')}</dd>
-      <dt>あて先</dt><dd>${esc(r.target_label||'—')}（${(r.recipient_ids||[]).length}名）</dd>
-      <dt>送信日時</dt><dd>${fmtDT(r.created_at)}</dd>
-    </dl>
-    <div class="divider"></div>
-    <div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>
+    <p class="rq-meta">差出人：${esc(sender?sender.nickname:'—')} ・ あて先：${esc(r.target_label||'—')}（${(r.recipient_ids||[]).length}名） ・ 送信日時：${fmtDT(r.created_at)}</p>
+    <div class="rq-body">${esc(r.body)}</div>
     ${mine?(done
       ? `<div class="hint" style="margin-top:18px">${ic('check')}<span>確認済みとしてお伝えしています。</span></div>`
       : `<button class="btn pri block" style="margin-top:18px" onclick="confirmRequest('${r.id}')">確認しました</button>`):''}
@@ -4871,6 +4866,8 @@ function renderRequestForm(keepText){
   const modes=attend?REQ_MODES:REQ_MODES.filter(o=>o.id!=='public');
   const modeBtns=modes.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
     onclick="setReqMode('${o.id}')">${o.label}</button>`).join('');
+  const currentTargetHint=REQFORM.mode==='public'?'':`
+    <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>（${ids.length}名）</span></div>`;
 
   openSheet(`<h3>${attend?'出欠を確認する':'依頼を出す'}</h3>
     <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、${attend?'日程の候補を出して出欠を集めます。':'連絡や依頼を送ります。'}</p>
@@ -4885,7 +4882,7 @@ function renderRequestForm(keepText){
     <div class="modechips">${modeBtns}</div>
     <div style="margin-top:12px">${reqPickerHTML()}</div>
 
-    <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>${REQFORM.mode==='public'?'（人数の制限なし）':`（${ids.length}名）`}</span></div>
+    ${currentTargetHint}
 
     <label class="fl" style="margin-top:16px">件名<span class="req">*</span></label>
     <input id="reqSubj" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">

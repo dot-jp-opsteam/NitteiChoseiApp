@@ -499,6 +499,10 @@
   /* 隠している状態。押せば戻せることが分かるよう、消すのではなく色を落とす */
   .btn.sm.iconly.off{color:var(--mut);border-color:var(--line2)}
   /* 時間の範囲。「13:00 〜 15:30」を1行に収める */
+  /* ---------- 通常依頼の詳細 ---------- */
+  .rq-meta{color:var(--sub);font-size:12px;line-height:1.5;margin:8px 0 0}
+  .rq-body{white-space:pre-wrap;color:var(--ink);font-size:16px;line-height:1.8;margin-top:18px}
+
   /* ---------- 出欠確認 ----------
      候補の入力（日付＋時間帯を1行ずつ） */
   .optlist{display:flex;flex-direction:column;gap:8px}
