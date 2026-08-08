@@ -516,6 +516,31 @@
     .optrow input[type="date"]{flex:1 0 100%}
   }
 
+  /* 候補の日時のミニカレンダー。押した日がそのまま候補になる */
+  .noselect{user-select:none;-webkit-user-select:none}
+  .reqcal{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:12px}
+  .rc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .rc-head b{font-size:14px;font-weight:800}
+  .rc-nav{width:32px;height:32px;padding:0;display:grid;place-items:center;cursor:pointer;
+    border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--ink)}
+  .rc-nav:hover{border-color:var(--line-h)}
+  .rc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+  .rc-w{text-align:center;font-size:11px;font-weight:800;color:var(--sub);padding:2px 0}
+  .rc-w.sun{color:var(--bad)}
+  .rc-w.sat{color:var(--brand)}
+  /* 高さは決め打ちにする。aspect-ratio で正方形にすると、
+     マスの最小幅がその高さに引きずられて7列が親幅に収まらなくなる */
+  .rc-d{height:36px;min-width:0;display:grid;place-items:center;border-radius:8px;cursor:pointer;
+    font-size:13px;font-variant-numeric:tabular-nums;border:1px solid transparent;
+    user-select:none;-webkit-user-select:none;touch-action:none}
+  .rc-d:hover:not(.past):not(.blank){border-color:var(--line-h)}
+  .rc-d.on{background:var(--brand);color:#fff;font-weight:800;border-color:var(--brand)}
+  .rc-d.past{color:var(--sub);opacity:.35;cursor:default}
+  /* 月の前後にはみ出すぶんの空きマス。汎用の .empty は
+     「データが無いとき」の表示用で padding:40px が付くため、別の名前にしてある */
+  .rc-d.blank{cursor:default}
+  .rc-d:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+
   /* URLの表示とコピー */
   .urlrow{display:flex;gap:8px;align-items:center;margin-top:6px}
   .urlrow input{flex:1;min-width:0;font-size:12.5px;color:var(--sub);background:var(--bg)}
