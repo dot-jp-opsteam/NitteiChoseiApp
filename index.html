@@ -1900,6 +1900,63 @@ function copyStaffInviteUrl(){
 }
 
 /* =========================================================
+   iPhone / Googleカレンダーへの購読登録
+   ========================================================= */
+async function openCalendarSubscriptionSettings(){
+  openSheet(`<h3>カレンダーに登録</h3>
+    <p class="page-sub">購読URLを読み込んでいます…</p>`);
+  try{
+    const res=await api('/api/calendar/subscription');
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error||'購読URLを取得できませんでした');
+    renderCalendarSubscriptionSettings(data.url);
+  }catch(e){
+    openSheet(`<h3>カレンダーに登録</h3>
+      <div class="hint mock">${ic('alert')}<span>${esc(e.message||'購読URLを取得できませんでした。時間をおいて再度お試しください。')}</span></div>`);
+  }
+}
+function renderCalendarSubscriptionSettings(url){
+  openSheet(`<h3>カレンダーに登録</h3>
+    <p class="page-sub" style="margin-top:0">確定した面談と自分の支部イベントを、いつものカレンダーから確認できます。</p>
+    <div class="ics-url" id="icsSubscriptionUrl" role="textbox" aria-label="カレンダー購読URL">${esc(url)}</div>
+    <button class="btn pri block ics-copy" style="margin-top:10px" onclick="copyCalendarSubscriptionUrl()">${ic('copy')}購読URLをコピー</button>
+    <div class="ics-steps">
+      <div class="ics-step"><b class="ics-platform">iPhone</b><span>設定 → カレンダー → アカウント → その他 → 照会するカレンダーを追加</span></div>
+      <div class="ics-step"><b class="ics-platform">Googleカレンダー</b><span>他のカレンダー → URLで追加</span></div>
+    </div>
+    <p class="fine ics-note">カレンダー側への反映には数時間かかることがあります。このURLを知っている人は予定を見られるため、他人に共有しないでください。</p>
+    <button class="btn block ics-regenerate" style="margin-top:14px;color:var(--bad);border-color:var(--bad-line)" onclick="regenerateCalendarSubscription()">キーを作り直す</button>`);
+}
+async function copyCalendarSubscriptionUrl(){
+  const el=document.getElementById('icsSubscriptionUrl');
+  if(!el)return;
+  const url=el.textContent.trim();
+  try{
+    await navigator.clipboard.writeText(url);
+    toast('購読URLをコピーしました');
+  }catch(e){
+    const range=document.createRange();range.selectNodeContents(el);
+    const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
+    toast('コピーできませんでした。選択したURLをコピーしてください');
+  }
+}
+async function regenerateCalendarSubscription(){
+  const ok=await confirmSheet('購読キーを作り直しますか？',
+    '今の購読URLはすぐに使えなくなります。iPhoneやGoogleカレンダーへ新しいURLを登録し直してください。',
+    '作り直す',true);
+  if(!ok)return;
+  try{
+    const res=await api('/api/calendar/subscription/regenerate',{method:'POST',body:'{}'});
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error||'購読キーを作り直せませんでした');
+    renderCalendarSubscriptionSettings(data.url);
+    toast('新しい購読URLを作りました');
+  }catch(e){
+    toast(e.message||'購読キーを作り直せませんでした');
+  }
+}
+
+/* =========================================================
    Googleカレンダー連携（スタッフ・インターン生）
    ========================================================= */
 async function openGoogleCalendarSettings(){
@@ -3926,6 +3983,7 @@ function profileLinks(){
     canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
     ['key','パスワードを変更','openPasswordChange()'],
     ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
+    ['calendar','カレンダーに登録','openCalendarSubscriptionSettings()'],
     // テーマだけは押しても画面が変わらないので、右端に「いまどちらか」を出す
     ['contrast','テーマ','toggleTheme()',themeVal],
   ].filter(Boolean).map(([icon,label,act,right])=>profileRow(icon,label,act,right)).join('');

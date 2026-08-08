@@ -20,7 +20,7 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // server/ 側にインストールされている @libsql/client を借りる（tools用の依存は増やさない）
@@ -517,6 +517,25 @@ async function testAttendance() {
   const appHtml = await (await fetch(BASE + '/')).text();
   const serverSource = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
   const styleSource = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+  /* 公開の回答ページ。スタッフが見る出欠確認の画面と同じ並びにしてある。
+     この画面は /style.css を読み込まず、自前の <style> だけで組み立てている */
+  const attendHtml = fs.readFileSync(path.join(ROOT, 'attendance.html'), 'utf8');
+  check('公開回答ページに出欠集計がある',
+    attendHtml.includes('出欠集計') && attendHtml.includes('日程を押すと、誰が何を答えたかが見られます'), true);
+  check('いちばん人数の多い候補に最有力が付く',
+    attendHtml.includes('pa-best') && attendHtml.includes('最有力'), true);
+  check('集計の行は押して開ける', attendHtml.includes('function toggleTally('), true);
+  check('あなたの回答が候補ごとに並ぶ',
+    attendHtml.includes('あなたの回答') && attendHtml.includes('候補ごとに選んでください'), true);
+  /* この2つは消してはいけない。名前が無いと誰の回答か分からなくなり、
+     共有URLが無いとこの画面から人に配れなくなる */
+  check('名前の入力欄が残っている', attendHtml.includes('id="respondentName"'), true);
+  check('共有URLのコピーが残っている',
+    attendHtml.includes('id="shareUrl"') && attendHtml.includes('copyShareUrl'), true);
+  /* legend は flex の子として並ばず、日程が行の上に飛び出す */
+  check('回答の行に fieldset と legend を使っていない',
+    attendHtml.includes('<legend'), false);
+
   const publicModePos = appHtml.indexOf("{id:'public',label:'誰でも回答OK'}");
   check('出欠の宛先先頭に「誰でも回答OK」がある',
     publicModePos >= 0
@@ -737,6 +756,136 @@ async function testMyCalendar() {
      他人のIDを添えても自分のぶんしか返らない（＝他人の予定は取り出せない） */
   const spoof = await api(TOKENS.staff3, 'GET', '/api/my-calendar/events' + range + '&staffId=u_e2e_staff');
   check('他人のIDを付けても他人の予定は取れない', spoof.json.connected, false);
+}
+
+/* ---------- iCalendar の文字列仕様 ---------- */
+async function testICalendarFormatting() {
+  console.log('\n─────── iCalendar文字列 ───────');
+  let ical = null;
+  try {
+    ical = await import(pathToFileURL(path.join(ROOT, 'server', 'ical.js')).href);
+  } catch { /* RED工程では未実装 */ }
+  check('iCalendar組み立て関数を独立モジュールから読める', !!ical, true);
+  if (!ical) return;
+
+  check('本文の記号と改行をエスケープする',
+    ical.escapeICalText('A,B;C\\D\r\nE\nF'), 'A\\,B\\;C\\\\D\\nE\\nF');
+  check('UTC時刻をYYYYMMDDTHHMMSSZで書く',
+    ical.formatICalDateTime('2026-08-08T01:02:03.456Z'), '20260808T010203Z');
+
+  const longLine = 'SUMMARY:' + '日本語の長い予定名'.repeat(12);
+  const folded = ical.foldICalLine(longLine);
+  const physical = folded.split('\r\n');
+  check('75オクテットを超える行を折り返す',
+    physical.every((line) => Buffer.byteLength(line, 'utf8') <= 75), true);
+  check('折り返した続きの行は空白で始まる',
+    physical.slice(1).every((line) => line.startsWith(' ')), true);
+  check('日本語を文字の途中で壊さず折り返す',
+    physical.map((line, i) => i ? line.slice(1) : line).join(''), longLine);
+
+  const calendar = ical.buildICalendar([{
+    id: 'ev_all_day', allDay: true, start: '2026-08-08', end: '2026-08-09',
+    updatedAt: '2026-08-01T00:00:00Z', summary: '終日の予定', description: '短い説明',
+  }]);
+  check('終日の予定はVALUE=DATEで書く',
+    calendar.includes('DTSTART;VALUE=DATE:20260808\r\nDTEND;VALUE=DATE:20260809'), true);
+  check('iCalendar全体をCRLFで終える', /\r\n$/.test(calendar) && !/(^|[^\r])\n/.test(calendar), true);
+}
+
+/* ---------- iCalendar 購読API ---------- */
+async function testCalendarSubscription() {
+  console.log('\n─────── iCalendar購読API ───────');
+  const now = new Date();
+  const at = (days, hour = 10) => {
+    const d = new Date(now.getTime() + days * 86400000);
+    d.setUTCHours(hour, 0, 0, 0);
+    return d.toISOString();
+  };
+  const allDayStart = at(3, 15);
+  const saved = await putDB(TOKENS.staff, (db) => {
+    db.events = [...(db.events || []),
+      { id: 'ev_ics_branch', title: '購読テスト,支部;予定', description: '外に出さない本文',
+        start_datetime: at(2), end_datetime: at(2, 11), has_time: true,
+        location: '東京\\会場', branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
+      { id: 'ev_ics_all_day', title: '終日支部イベント', description: '', start_datetime: allDayStart,
+        end_datetime: new Date(new Date(allDayStart).getTime() + 1800000).toISOString(), has_time: false,
+        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
+      { id: 'ev_ics_too_old', title: '古すぎる予定', start_datetime: at(-100), end_datetime: at(-100, 11),
+        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
+      { id: 'ev_ics_too_far', title: '先すぎる予定', start_datetime: at(370), end_datetime: at(370, 11),
+        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
+      { id: 'ev_ics_legacy', title: '終了時刻のない旧予定', start_datetime: at(7),
+        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
+    ];
+  });
+  check('購読テスト用の支部イベントを保存できる', saved.status, 200);
+  await putDB(TOKENS.staff3, (db) => {
+    db.events = [...(db.events || []), { id: 'ev_ics_private', title: '他人の非公開予定',
+      start_datetime: at(4), end_datetime: at(4, 11), branch_id: 'b1', visibility: 'private',
+      creator_id: 'u_e2e_staff3', created_at: now.toISOString() }];
+  });
+  await putDB(TOKENS.staff2, (db) => {
+    db.events = [...(db.events || []), { id: 'ev_ics_other_branch', title: '他支部の予定',
+      start_datetime: at(5), end_datetime: at(5, 11), branch_id: 'b2', visibility: 'branch',
+      creator_id: 'u_e2e_staff2', created_at: now.toISOString() }];
+  });
+
+  const c = createClient({ url: 'file:' + DB_PATH });
+  await c.execute({
+    sql: 'INSERT OR REPLACE INTO interviews (id,intern_id,staff_id,branch_id,status,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+    args: ['iv_ics_fixed', '', 'u_e2e_staff', 'b1', 'fixed', JSON.stringify({
+      intern_name: '購読 面談子', confirmed_datetime: at(6), meeting_type: 'meet',
+    }), now.toISOString(), now.toISOString()],
+  });
+  c.close();
+
+  const noAuth = await api(null, 'GET', '/api/calendar/subscription');
+  check('購読URLの取得にはログインが必要', noAuth.status, 401);
+  const issued = await api(TOKENS.staff, 'GET', '/api/calendar/subscription');
+  check('初回アクセスで購読URLを発行する', issued.status, 200);
+  const firstUrl = issued.json.url || '';
+  const key = /\/api\/calendar\/([A-Za-z0-9_-]+)\.ics$/.exec(firstUrl)?.[1] || '';
+  check('購読キーはURL安全な32文字以上', key.length >= 32, true);
+  const again = await api(TOKENS.staff, 'GET', '/api/calendar/subscription');
+  check('作り直すまでは同じ購読URLを返す', again.json.url, firstUrl);
+  if (!firstUrl) return;
+
+  const feedResponse = await fetch(firstUrl);
+  const feed = await feedResponse.text();
+  check('購読URLはログインなしで取得できる', feedResponse.status, 200);
+  check('購読URLはtext/calendarで返す', feedResponse.headers.get('content-type'), 'text/calendar; charset=utf-8');
+  check('自分が担当する確定面談を含める', feed.includes('面談: 購読 面談子さん'), true);
+  check('自分の支部イベントを含める', feed.includes('SUMMARY:購読テスト\\,支部\\;予定'), true);
+  check('終了時刻のない既存イベントも購読全体を壊さない',
+    feedResponse.status === 200 && feed.includes('終了時刻のない旧予定'), true);
+  check('終日イベントをVALUE=DATEで含める', feed.includes('DTSTART;VALUE=DATE:'), true);
+  check('イベント本文をDESCRIPTIONへ載せすぎない', feed.includes('外に出さない本文'), false);
+  check('他人の非公開予定を含めない', feed.includes('他人の非公開予定'), false);
+  check('他支部の予定を含めない', feed.includes('他支部の予定'), false);
+  check('3か月より古い予定を含めない', feed.includes('古すぎる予定'), false);
+  check('1年より先の予定を含めない', feed.includes('先すぎる予定'), false);
+
+  const missing = await fetch(BASE + '/api/calendar/' + 'x'.repeat(43) + '.ics');
+  check('存在しない購読キーは404', missing.status, 404);
+  const regenerated = await api(TOKENS.staff, 'POST', '/api/calendar/subscription/regenerate', {});
+  check('購読キーを作り直せる', regenerated.status, 200);
+  check('作り直すとURLが変わる', regenerated.json.url !== firstUrl, true);
+  check('作り直すと古いURLは404', (await fetch(firstUrl)).status, 404);
+  check('新しいURLはログインなしで取得できる', (await fetch(regenerated.json.url)).status, 200);
+
+  const appHtml = await (await fetch(BASE + '/')).text();
+  const appCss = await (await fetch(BASE + '/style.css')).text();
+  check('プロフィール設定に「カレンダーに登録」がある', appHtml.includes('カレンダーに登録'), true);
+  check('設定画面が購読URL APIを使う', appHtml.includes("api('/api/calendar/subscription')"), true);
+  check('購読URLをコピーする操作がある', appHtml.includes('copyCalendarSubscriptionUrl()'), true);
+  check('キーの作り直し前に既存確認シートを使う',
+    appHtml.includes("confirmSheet('購読キーを作り直しますか？'"), true);
+  check('iPhoneの購読手順を表示する',
+    appHtml.includes('設定 → カレンダー → アカウント → その他 → 照会するカレンダーを追加'), true);
+  check('Googleカレンダーの購読手順を表示する',
+    appHtml.includes('他のカレンダー → URLで追加'), true);
+  check('購読欄のCSSクラスはics接頭辞を使う',
+    appHtml.includes('class="ics-url"') && appCss.includes('.ics-url'), true);
 }
 
 async function testSharedCalFilter() {
@@ -1426,8 +1575,10 @@ try {
     console.log('BROWSER_URL=' + await createBrowserAttendanceFixture());
     await new Promise((resolve) => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
   } else {
+    await testICalendarFormatting();
     await run();
     await testAttendance();
+    await testCalendarSubscription();
     await testMyCalendar();
     await testSharedCalFilter();
     await testLockLogic();
