@@ -8,7 +8,39 @@
 <style>
 :root{color-scheme:light dark;--bg:#f5f7fb;--card:#fff;--ink:#172033;--sub:#647084;--line:#dce2ec;--brand:#176b87;--brand2:#0f536b;--soft:#e7f4f8;--ok:#17845b;--may:#b26a00;--no:#bf3f4d;--shadow:0 12px 34px rgba(31,48,72,.10)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;line-height:1.6}.wrap{width:min(760px,calc(100% - 28px));margin:0 auto;padding:28px 0 60px}.brand{font-weight:900;letter-spacing:.06em;color:var(--brand);margin-bottom:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow);margin-bottom:16px}h1,h2{line-height:1.35;margin:0}h1{font-size:clamp(22px,5vw,30px)}h2{font-size:18px;margin-bottom:12px}.meta,.sub{color:var(--sub);font-size:14px}.body{white-space:pre-wrap;margin-top:16px}.fixed{background:#e8f7ef;color:#126a4a;border-radius:12px;padding:12px 14px;margin-top:16px;font-weight:700}.notice{background:var(--soft);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:14px}.due-date{width:fit-content;margin-top:12px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:var(--soft);color:var(--brand2);font-size:14px;font-weight:800}.due-date.due-overdue{background:#fdecef;border-color:#f2bac2;color:#9c2333}.field{margin:16px 0}.field label,.slot-title{display:block;font-weight:800;margin-bottom:7px}.req{color:var(--no);margin-left:4px}input[type=text]{width:100%;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.share-row{display:flex;gap:8px;align-items:stretch}.share-row input{min-width:0}.share-row button{width:auto;flex:0 0 auto;margin:0;padding:10px 18px}.share-status{min-height:1.5em;margin-top:5px}.slot{border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:10px}.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.choice input{position:absolute;opacity:0;pointer-events:none}.choice span{display:block;text-align:center;border:1px solid var(--line);border-radius:10px;padding:9px 6px;font-weight:900;cursor:pointer}.choice input:focus-visible+span{outline:3px solid color-mix(in srgb,var(--brand) 35%,transparent)}.choice input:checked+span{color:#fff;border-color:transparent}.choice.ok input:checked+span{background:var(--ok)}.choice.may input:checked+span{background:var(--may)}.choice.no input:checked+span{background:var(--no)}button{width:100%;border:0;border-radius:11px;padding:13px 16px;background:var(--brand);color:#fff;font:inherit;font-weight:900;cursor:pointer;margin-top:18px}button:hover{background:var(--brand2)}button:disabled{opacity:.55;cursor:not-allowed}.error{color:var(--no);font-weight:700;margin-top:10px}.result-slot{border-top:1px solid var(--line);padding:14px 0}.result-slot:first-of-type{border-top:0}.counts{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.count{padding:4px 9px;border-radius:999px;background:var(--soft);font-weight:800}.people{display:grid;gap:6px}.person{display:flex;justify-content:space-between;gap:12px;font-size:14px}.mark{font-weight:900}.mark.ok{color:var(--ok)}.mark.may{color:var(--may)}.mark.no{color:var(--no)}.empty{color:var(--sub);font-size:14px}.loading{text-align:center;padding:70px 10px;color:var(--sub)}
-@media(prefers-color-scheme:dark){:root{--bg:#10151e;--card:#19212d;--ink:#f4f7fb;--sub:#aab5c5;--line:#344052;--brand:#6bc7df;--brand2:#4eabc5;--soft:#243642;--shadow:none}.fixed{background:#17372b;color:#8de0b8}.due-date{color:#8bdcf0}.due-date.due-overdue{background:#44232b;border-color:#80404d;color:#ffb3be}button{color:#07151b}}
+/* ここから下は、ログインしたスタッフが見る出欠確認の画面に見た目をそろえるためのもの。
+   このファイルは /style.css を読み込んでいないので、クラス名はこのファイルの中だけで完結する。
+   接頭辞 pa- は public attendance（公開の出欠確認）の意味 */
+.pa-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pa-badge{background:var(--soft);color:var(--brand2);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:800;white-space:nowrap}
+.pa-total{margin:12px 0 0;font-size:14px}
+.pa-rows{margin-top:12px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+/* 全体の button ルール（幅100%・濃い地色・上マージン）を、この行だけ打ち消す */
+.pa-row{width:100%;margin:0;padding:14px;border:0;border-top:1px solid var(--line);border-radius:0;
+  background:var(--card);color:var(--ink);font:inherit;font-weight:400;text-align:left;cursor:pointer;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pa-row:first-of-type{border-top:0}
+.pa-row:hover{background:var(--soft)}
+.pa-row:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 35%,transparent);outline-offset:-3px}
+/* いちばん人数の集まった候補。左端の帯と地色で目立たせる */
+.pa-row.pa-best{background:#e8f7ef;box-shadow:inset 4px 0 0 var(--ok)}
+.pa-row.pa-best:hover{background:#ddf1e6}
+.pa-when{font-weight:800;flex:1 1 auto;min-width:0}
+.pa-tag{background:#cdebdb;color:#126a4a;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:800;white-space:nowrap}
+.pa-counts{display:flex;gap:12px;font-weight:800;white-space:nowrap}
+.pa-c.ok{color:var(--ok)}.pa-c.may{color:var(--may)}.pa-c.no{color:var(--no)}
+.pa-people{padding:0 14px 14px;background:var(--card)}
+.pa-ans{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  border-top:1px solid var(--line);padding:14px 0}
+.pa-ans:first-of-type{border-top:0}
+.pa-ans .choices{grid-template-columns:repeat(3,56px);gap:8px}
+.pa-ans .choice span{padding:11px 6px;font-size:16px}
+@media(prefers-color-scheme:dark){:root{--bg:#10151e;--card:#19212d;--ink:#f4f7fb;--sub:#aab5c5;--line:#344052;--brand:#6bc7df;--brand2:#4eabc5;--soft:#243642;--shadow:none}.fixed{background:#17372b;color:#8de0b8}.due-date{color:#8bdcf0}.due-date.due-overdue{background:#44232b;border-color:#80404d;color:#ffb3be}button{color:#07151b}
+.pa-row{background:var(--card);color:var(--ink)}
+.pa-row.pa-best{background:#17372b;box-shadow:inset 4px 0 0 #3fbb84}
+.pa-row.pa-best:hover{background:#1d4635}
+.pa-tag{background:#1f5340;color:#8de0b8}
+.pa-c.ok{color:#7fdcb0}.pa-c.may{color:#e8bd72}.pa-c.no{color:#ff9aa6}}
 </style>
 </head>
 <body>
@@ -55,30 +87,85 @@ async function copyShareUrl(){
     status.textContent='URLを選択しました。コピー操作をしてください。';
   }
 }
-function renderResults(){
-  const r=DATA.request,people=DATA.respondents||[];
-  const rows=(r.options||[]).map(o=>{
-    const answers=people.map(p=>({name:p.name,response:(p.answers||[]).find(a=>a.option_id===o.id)?.response})).filter(x=>MARK[x.response]);
+/* 候補ごとの集計。○を2点、△を1点として数え、いちばん点の高いものを「最有力」にする。
+   同点が並んだときは全部に付ける（勝手にどれか1つを選ばない） */
+function tallyOptions(){
+  const people=DATA.respondents||[];
+  return (DATA.request.options||[]).map(o=>{
+    const answers=people
+      .map(p=>({name:p.name,response:(p.answers||[]).find(a=>a.option_id===o.id)?.response}))
+      .filter(x=>MARK[x.response]);
     const n=v=>answers.filter(a=>a.response===v).length;
-    return `<section class="result-slot"><div class="slot-title">${esc(slotText(o))}</div>
-      <div class="counts"><span class="count">○ ${n('ok')}</span><span class="count">△ ${n('may')}</span><span class="count">× ${n('no')}</span></div>
-      <div class="people">${answers.length?answers.map(a=>`<div class="person"><span>${esc(a.name)}</span><span class="mark ${a.response}">${MARK[a.response]}</span></div>`).join(''):'<div class="empty">まだ回答はありません。</div>'}</div></section>`;
+    const ok=n('ok'),may=n('may'),no=n('no');
+    return {option:o,answers:answers,ok:ok,may:may,no:no,score:ok*2+may};
+  });
+}
+/* 日程の行を押したときに、誰が何を答えたかを開いたり閉じたりする */
+function toggleTally(id){
+  const box=document.getElementById('pa_people_'+id);
+  const row=document.getElementById('pa_row_'+id);
+  if(!box||!row)return;
+  const open=box.hasAttribute('hidden');
+  if(open)box.removeAttribute('hidden'); else box.setAttribute('hidden','');
+  row.setAttribute('aria-expanded',open?'true':'false');
+}
+function renderResults(){
+  const people=DATA.respondents||[];
+  const tally=tallyOptions();
+  const top=Math.max(0,...tally.map(t=>t.score));
+  const rows=tally.map(t=>{
+    const o=t.option,best=top>0&&t.score===top;
+    const when=esc(slotText(o));
+    return `<button type="button" class="pa-row${best?' pa-best':''}" id="pa_row_${esc(o.id)}"
+        aria-expanded="false" aria-controls="pa_people_${esc(o.id)}" onclick="toggleTally('${esc(o.id)}')">
+        <span class="pa-when">${when}</span>${best?'<span class="pa-tag">最有力</span>':''}
+        <span class="pa-counts"><span class="pa-c ok">○ ${t.ok}</span><span class="pa-c may">△ ${t.may}</span><span class="pa-c no">× ${t.no}</span></span>
+      </button>
+      <div class="pa-people" id="pa_people_${esc(o.id)}" hidden>
+        <div class="people">${t.answers.length
+          ? t.answers.map(a=>`<div class="person"><span>${esc(a.name)}</span><span class="mark ${a.response}">${MARK[a.response]}</span></div>`).join('')
+          : '<div class="empty">まだ回答はありません。</div>'}</div>
+      </div>`;
   }).join('');
-  return `<div class="card" id="attendanceResults"><h2>みんなの回答</h2><p class="sub">回答済み ${people.length}名。URLを知っている人はいつでも確認できます。</p>${rows}</div>`;
+  return `<div class="card" id="attendanceResults"><h2>出欠集計</h2>
+    <p class="sub">日程を押すと、誰が何を答えたかが見られます</p>
+    <p class="pa-total"><b>${people.length}名</b>が回答</p>
+    <div class="pa-rows">${rows}</div></div>`;
 }
 function render(){
   const app=document.getElementById('attendanceApp'),r=DATA.request;
   const fixed=r.confirmed?(r.options||[]).find(o=>o.id===r.confirmed):null;
   const duePast=!!r.due_date&&r.due_date<todayYmd();
   const due=r.due_date?`<div class="due-date${duePast?' due-overdue':''}">回答の締切日：${esc(dueLabel(r.due_date))}${duePast?' ・ 締切を過ぎています':''}</div>`:'';
-  const form=fixed?'' : `<div class="card"><h2>${SAVED?'回答を変更する':'回答する'}</h2>
-    <div class="notice">アカウント登録は不要です。同じブラウザからは、あとで回答を変更できます。</div>
-    <div class="field"><label for="respondentName">お名前<span class="req">*</span></label><input type="text" id="respondentName" maxlength="50" autocomplete="name" value="${esc(SAVED?.name||'')}" placeholder="例：山田 太郎"></div>
-    <div>${(r.options||[]).map(o=>`<fieldset class="slot"><legend class="slot-title">${esc(slotText(o))}</legend><div class="choices">${['ok','may','no'].map(v=>`<label class="choice ${v}"><input type="radio" name="answer_${esc(o.id)}" value="${v}" ${answerOf(o.id)===v?'checked':''}><span>${MARK[v]} ${v==='ok'?'参加できる':v==='may'?'未定':'参加できない'}</span></label>`).join('')}</div></fieldset>`).join('')}</div>
-    <div id="formError" class="error" role="alert"></div><button id="answerButton" onclick="submitAnswer()">${SAVED?'回答を更新する':'回答を送る'}</button></div>`;
+  /* 候補ごとに、日程を左・○△×を右に並べる。ラジオの名前は日程が分かるものにして、
+     読み上げでも「どの日程のどれを選ぶのか」が伝わるようにする */
+  const answerRows=(r.options||[]).map(o=>{
+    const when=slotText(o);
+    /* fieldset + legend は使わない。legend は flex の子として並ばず、
+       日程が行の上に飛び出してしまう。読み上げ用の名前は各ラジオに持たせている */
+    return `<div class="pa-ans" role="group" aria-label="${esc(when)}"><span class="pa-when">${esc(when)}</span>
+      <div class="choices">${['ok','may','no'].map(v=>`<label class="choice ${v}">
+        <input type="radio" name="answer_${esc(o.id)}" value="${v}" ${answerOf(o.id)===v?'checked':''}
+          aria-label="${esc(when)} は${v==='ok'?'参加できる':v==='may'?'未定':'参加できない'}">
+        <span>${MARK[v]}</span></label>`).join('')}</div></div>`;
+  }).join('');
+  const form=fixed?'' : `<div class="card">
+    <div class="field"><label for="respondentName">お名前<span class="req">*</span></label>
+      <input type="text" id="respondentName" maxlength="50" autocomplete="name" value="${esc(SAVED?.name||'')}" placeholder="例：山田 太郎">
+      <div class="sub" style="margin-top:5px">アカウント登録は不要です。同じブラウザからは、あとで回答を変更できます。</div></div>
+    <h2 style="margin-top:20px">あなたの回答</h2>
+    <p class="sub">候補ごとに選んでください</p>
+    <div>${answerRows}</div>
+    <div id="formError" class="error" role="alert"></div>
+    <button id="answerButton" onclick="submitAnswer()">${SAVED?'回答を更新する':'回答を送る'}</button></div>`;
   app.className='';
   const share=`<div class="card"><h2>共有URL</h2><p class="sub">このURLを知っている人は、ログインせず回答と結果の確認ができます。</p><div class="share-row"><input type="text" id="shareUrl" readonly value="${esc(location.href)}" onclick="this.select()"><button type="button" onclick="copyShareUrl()">コピー</button></div><div class="sub share-status" id="shareStatus" aria-live="polite"></div></div>`;
-  app.innerHTML=`${share}<div class="card"><div class="meta">${esc(r.sender_name)}さんからの出欠確認</div><h1>${esc(r.subject)}</h1><div class="meta">${esc(fmt(r.created_at))}</div>${due}${r.body?`<div class="body">${esc(r.body)}</div>`:''}${fixed?`<div class="fixed">${esc(slotText(fixed))} で確定しました${fixed.has_date===false?'（カレンダーには登録していません）':''}</div>`:''}</div>${form}${renderResults()}`;
+  app.innerHTML=`<div class="card">
+      <div class="pa-head"><h1>${esc(r.subject)}</h1><span class="pa-badge">出欠</span></div>
+      <div class="meta">${esc(r.sender_name)}さん ・ 誰でも回答OK ・ ${esc(fmt(r.created_at))}</div>
+      ${due}${r.body?`<div class="body">${esc(r.body)}</div>`:''}
+      ${fixed?`<div class="fixed">${esc(slotText(fixed))} で確定しました${fixed.has_date===false?'（カレンダーには登録していません）':''}</div>`:''}
+    </div>${renderResults()}${form}${share}`;
 }
 async function submitAnswer(){
   const name=document.getElementById('respondentName').value.trim();
