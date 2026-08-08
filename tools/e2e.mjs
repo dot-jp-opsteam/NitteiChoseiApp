@@ -529,6 +529,26 @@ async function testAttendance() {
       && styleSource.includes('.rq-body{white-space:pre-wrap;color:var(--ink);font-size:16px;line-height:1.8'), true);
   check('通常依頼のメタ情報は小さく控えめな色にする',
     styleSource.includes('.rq-meta{color:var(--sub);font-size:12px;line-height:1.5'), true);
+  check('依頼タブは受けた依頼と完了済みの依頼を切り替える',
+    appHtml.includes('<span class="segb">完了済みの依頼</span>')
+      && !appHtml.includes('<span class="segb">送った依頼</span>'), true);
+  check('送った依頼は自前SVGの固定ボタンで切り替える',
+    appHtml.includes('class="rq-fab"')
+      && appHtml.includes('toggleSentRequests()')
+      && appHtml.includes("ic(REQTAB==='sent'?'back':'megaphone')")
+      && appHtml.includes('aria-label="${REQTAB===\'sent\'?\'受けた依頼に戻る\':\'送った依頼を表示\'}"')
+      && styleSource.includes('.rq-fab{position:fixed;'), true);
+  check('依頼一覧は固定ボタンに隠れない余白を持つ',
+    appHtml.includes('class="rq-list-space"') && styleSource.includes('.rq-list-space{padding-bottom:'), true);
+  check('通常依頼だけ完了と取り消しを操作できる',
+    appHtml.includes('>完了</button>')
+      && appHtml.includes('>完了を取り消す</button>')
+      && appHtml.includes("method:'DELETE'")
+      && appHtml.includes("toast('完了しました')")
+      && appHtml.includes("toast('完了を取り消しました')"), true);
+  check('未処理件数は未完了の通常依頼と未回答の出欠確認を数える',
+    appHtml.includes('function requestNeedsAction(r)')
+      && appHtml.includes("isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id)"), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
   /* 日付は入力欄をやめてカレンダーで選ぶ形にした。時刻は打ち込みではなくホイールで選ぶ */
@@ -849,6 +869,28 @@ async function run() {
 
     const notMine = await api(TOKENS.staff2, 'POST', `/api/requests/${REQ_ID}/read`);
     check('あて先でない人は確認できない', notMine.status, 403);
+
+    const secondDone = await api(TOKENS.staff4, 'POST', `/api/requests/${REQ_ID}/read`);
+    check('別のあて先も自分の完了を記録できる', secondDone.status, 200);
+    const undo = await api(TOKENS.staff3, 'DELETE', `/api/requests/${REQ_ID}/read`);
+    check('完了した本人は完了を取り消せる', undo.status, 200);
+    const afterUndo = await getDB(TOKENS.staff3);
+    const undoneRequest = (afterUndo.requests || []).find((x) => x.id === REQ_ID);
+    check('取り消した本人の完了記録だけ消える',
+      (undoneRequest?.read_by || []).some((x) => x.user_id === 'u_e2e_staff3'), false);
+    check('別の人の完了記録は消えない',
+      (undoneRequest?.read_by || []).some((x) => x.user_id === 'u_e2e_staff4'), true);
+    const undoAgain = await api(TOKENS.staff3, 'DELETE', `/api/requests/${REQ_ID}/read`);
+    check('完了取り消しは再送されても成功する', undoAgain.status, 200);
+
+    const attendForRead = await api(TOKENS.staff, 'POST', '/api/requests', {
+      subject: '完了対象外の出欠', body: '', target_label: '個別',
+      recipient_ids: ['u_e2e_staff3'], kind: 'attend',
+      options: [{ start: '2026-09-10T10:00:00+09:00', end: '2026-09-10T11:00:00+09:00' }],
+    });
+    const completeAttend = await api(TOKENS.staff3, 'POST',
+      `/api/requests/${attendForRead.json.request?.id}/read`);
+    check('出欠確認は完了扱いにできない', completeAttend.status, 400);
     /* インターン生のアカウントを廃止したので、
        「送れない相手」の検証は他支部のスタッフで行う */
     const crossSend = await api(TOKENS.staff2, 'POST', '/api/requests', {

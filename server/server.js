@@ -2398,7 +2398,7 @@ app.put('/api/attendance/:token/response', async (req, res) => {
   }
 });
 
-/* 依頼を「確認しました」にする。何人が同時に押しても衝突しない。
+/* 通常依頼を「完了」にする。何人が同時に押しても衝突しない。
    二度押しても状態が変わらない（同じ行を上書きするだけ） */
 app.post('/api/requests/:id/read', requireAuth, async (req, res) => {
   const actor = req.authUser;
@@ -2406,7 +2406,10 @@ app.post('/api/requests/:id/read', requireAuth, async (req, res) => {
     const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
     const row = rs.rows[0];
     if (!row) return res.status(404).json({ error: '依頼が見つかりません' });
-    // あて先の人だけが確認できる（見えない依頼に印を付けられないようにする）
+    if ((row.kind || 'normal') !== 'normal') {
+      return res.status(400).json({ error: '出欠確認は完了の対象ではありません' });
+    }
+    // あて先の人だけが完了できる（見えない依頼に印を付けられないようにする）
     if (!parseIds(row.recipient_ids).includes(actor.id)) {
       return res.status(403).json({ error: 'この依頼のあて先ではありません' });
     }
@@ -2417,8 +2420,33 @@ app.post('/api/requests/:id/read', requireAuth, async (req, res) => {
     });
     res.json({ ok: true, read: { user_id: actor.id, at } });
   } catch (e) {
-    console.error('依頼の確認に失敗しました', e);
-    res.status(500).json({ error: '確認できませんでした' });
+    console.error('依頼の完了に失敗しました', e);
+    res.status(500).json({ error: '完了できませんでした' });
+  }
+});
+
+/* 完了を取り消す。複合主キーで本人の1行だけを消すため、他の人の状態には触れない。
+   行がすでに無い再送も成功として扱い、通信の再試行で画面を止めない */
+app.delete('/api/requests/:id/read', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  try {
+    const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '依頼が見つかりません' });
+    if ((row.kind || 'normal') !== 'normal') {
+      return res.status(400).json({ error: '出欠確認は完了の対象ではありません' });
+    }
+    if (!parseIds(row.recipient_ids).includes(actor.id)) {
+      return res.status(403).json({ error: 'この依頼のあて先ではありません' });
+    }
+    await client.execute({
+      sql: 'DELETE FROM request_reads WHERE request_id = ? AND user_id = ?',
+      args: [req.params.id, actor.id],
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('依頼の完了取り消しに失敗しました', e);
+    res.status(500).json({ error: '完了を取り消せませんでした' });
   }
 });
 

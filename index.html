@@ -4100,44 +4100,52 @@ function sentRequests(){
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 }
 function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userId);}
+function requestNeedsAction(r){
+  return isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id);
+}
 
-let REQTAB='inbox'; // 'inbox' | 'sent'
+let REQTAB='inbox'; // 'inbox' | 'done' | 'sent'
+let REQBACKTAB='inbox';
 function setReqTab(t){REQTAB=t;render();}
+function toggleSentRequests(){
+  if(REQTAB==='sent')REQTAB=REQBACKTAB;
+  else{REQBACKTAB=REQTAB;REQTAB='sent';}
+  render();
+}
 
 function viewRequests(){
   const canSend=canSendRequest();
-  const inbox=myRequests();
-  const unread=inbox.filter(r=>!hasConfirmed(r,ME.id)).length;
-
-  // インターン生は受け取り専用なので、切り替えも新規作成も出さない
-  if(!canSend){
-    return `<h1 class="page">受けた依頼</h1>
-      <p class="page-sub">スタッフから届いた連絡・依頼です。</p>
-      ${unread?`<div class="hint">${ic('megaphone')}<span><b>${unread}件</b> がまだ未確認です。</span></div>`:''}
-      ${requestList(inbox,'inbox')}`;
-  }
-
+  const received=myRequests();
+  // 出欠確認は回答後も受信側に残す。通常依頼だけを本人の完了状態で分ける
+  const inbox=received.filter(r=>isAttend(r)||!hasConfirmed(r,ME.id));
+  const done=received.filter(r=>!isAttend(r)&&hasConfirmed(r,ME.id));
+  const pending=received.filter(requestNeedsAction).length;
   const sent=sentRequests();
   const tabs=`<div class="seg" style="margin-bottom:14px">
     <label><input type="radio" name="reqTab" ${REQTAB==='inbox'?'checked':''} onchange="setReqTab('inbox')">
-      <span class="segb">受けた依頼${unread?`（${unread}）`:''}</span></label>
-    <label><input type="radio" name="reqTab" ${REQTAB==='sent'?'checked':''} onchange="setReqTab('sent')">
-      <span class="segb">送った依頼</span></label>
+      <span class="segb">受けた依頼${pending?`（${pending}）`:''}</span></label>
+    <label><input type="radio" name="reqTab" ${REQTAB==='done'?'checked':''} onchange="setReqTab('done')">
+      <span class="segb">完了済みの依頼</span></label>
   </div>`;
   return `<h1 class="page">依頼</h1>
-    <p class="page-sub">${branchName(ME.branch_id)}のスタッフ・インターン生に、連絡や出欠確認を出せます。</p>
-    <div class="btn-row" style="margin-bottom:16px">
+    <p class="page-sub">${canSend?`${branchName(ME.branch_id)}のスタッフ・インターン生に、連絡や出欠確認を出せます。`:'スタッフから届いた連絡・依頼です。'}</p>
+    ${canSend?`<div class="btn-row" style="margin-bottom:16px">
       <button class="btn pri" style="flex:1" onclick="openRequestForm()">＋ 依頼を出す</button>
       <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">＋ 出欠を確認する</button>
-    </div>
+    </div>`:''}
     ${tabs}
-    ${REQTAB==='inbox'?requestList(inbox,'inbox'):requestList(sent,'sent')}`;
+    <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
+      :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
+    ${canSend?`<button type="button" class="rq-fab" onclick="toggleSentRequests()"
+      aria-label="${REQTAB==='sent'?'受けた依頼に戻る':'送った依頼を表示'}"
+      title="${REQTAB==='sent'?'受けた依頼に戻る':'送った依頼を表示'}">
+      ${ic(REQTAB==='sent'?'back':'megaphone')}</button>`:''}`;
 }
 
 function requestList(list,kind){
   if(!list.length){
     return `<div class="empty" style="padding:30px"><div class="ei">${ic('megaphone')}</div>
-      <p>${kind==='inbox'?'届いている依頼はありません。':'まだ依頼を出していません。'}</p></div>`;
+      <p>${kind==='inbox'?'届いている依頼はありません。':kind==='done'?'完了済みの依頼はありません。':'まだ依頼を出していません。'}</p></div>`;
   }
   const rows=list.map(r=>{
     const total=(r.recipient_ids||[]).length;
@@ -4153,11 +4161,12 @@ function requestList(list,kind){
         : `${esc(r.target_label||'')} ・ ${isPublicAttend(r)?`${numAns}人が回答`:`${numAns}/${total}人が回答`} ・ ${fmtRel(r.created_at)}`)
       : (kind==='inbox'
         ? `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`
-        : `${esc(r.target_label||'')} ・ ${done}/${total}人が確認 ・ ${fmtRel(r.created_at)}`);
+        : `${esc(r.target_label||'')} ・ ${done}/${total}人が完了 ・ ${fmtRel(r.created_at)}`);
     let badge='';
     if(att&&r.confirmed)badge='<span class="tag ok">確定</span>';
     else if(att&&kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
     else if(!att&&kind==='inbox'&&!hasConfirmed(r,ME.id))badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>';
+    else if(!att&&kind==='done')badge='<span class="tag ok">完了</span>';
     return `<div class="row" style="cursor:pointer" onclick="openRequestDetail('${r.id}')">
       <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
       <span class="rmain"><span class="rt">${esc(r.subject)} ${badge}</span>
@@ -4429,7 +4438,7 @@ function openRequestDetail(id){
   const mine=(r.recipient_ids||[]).includes(ME.id);
   const done=hasConfirmed(r,ME.id);
 
-  // 送った本人には、誰が確認したかを名前で見せる
+  // 送った本人には、誰が完了したかを名前で見せる
   let status='';
   if(r.sender_id===ME.id){
     const names=(r.recipient_ids||[]).map(uid2=>{
@@ -4438,7 +4447,7 @@ function openRequestDetail(id){
       return `<span class="slot" style="${ok?'':'opacity:.5'}">${ok?'✓ ':''}${esc(u?u.nickname:'—')}</span>`;
     }).join('');
     status=`<div class="divider"></div>
-      <p class="fl" style="margin-top:14px">確認した人（${(r.read_by||[]).length}/${(r.recipient_ids||[]).length}）</p>
+      <p class="fl" style="margin-top:14px">完了した人（${(r.read_by||[]).length}/${(r.recipient_ids||[]).length}）</p>
       <div class="slots" style="margin-top:8px">${names}</div>`;
   }
 
@@ -4446,20 +4455,20 @@ function openRequestDetail(id){
     <p class="rq-meta">差出人：${esc(sender?sender.nickname:'—')} ・ あて先：${esc(r.target_label||'—')}（${(r.recipient_ids||[]).length}名） ・ 送信日時：${fmtDT(r.created_at)}</p>
     <div class="rq-body">${esc(r.body)}</div>
     ${mine?(done
-      ? `<div class="hint" style="margin-top:18px">${ic('check')}<span>確認済みとしてお伝えしています。</span></div>`
-      : `<button class="btn pri block" style="margin-top:18px" onclick="confirmRequest('${r.id}')">確認しました</button>`):''}
+      ? `<button class="btn ghost block" style="margin-top:18px" onclick="undoRequestCompletion('${r.id}')">完了を取り消す</button>`
+      : `<button class="btn pri block" style="margin-top:18px" onclick="completeRequest('${r.id}')">完了</button>`):''}
     ${status}`);
 }
 
-/* 「確認しました」は専用APIで送る。ここは支部の全員に配った依頼を
+/* 「完了」は専用APIで送る。ここは支部の全員に配った依頼を
    全員が押す場所なので、DB全体を保存し直す方式では耐えられない。
    サーバー側は1人1行を足すだけなので、何人が同時に押しても衝突しない */
-async function confirmRequest(id){
+async function completeRequest(id){
   try{
     const res=await api(`/api/requests/${encodeURIComponent(id)}/read`,{method:'POST'});
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
-      setSaveError(d.error||'確認を保存できませんでした。');
+      setSaveError(d.error||'完了を保存できませんでした。');
       return;
     }
     const {read}=await res.json();
@@ -4471,12 +4480,33 @@ async function confirmRequest(id){
     sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
     setSaveError(null);
   }catch(e){
-    console.warn('確認の保存に失敗しました',e);
-    setSaveError('確認を保存できていません。通信状況をご確認ください。');
+    console.warn('完了の保存に失敗しました',e);
+    setSaveError('完了を保存できていません。通信状況をご確認ください。');
     return;
   }
   closeSheet();render();
-  toast('確認しました');
+  toast('完了しました');
+}
+
+async function undoRequestCompletion(id){
+  try{
+    const res=await api(`/api/requests/${encodeURIComponent(id)}/read`,{method:'DELETE'});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'完了を取り消せませんでした。');
+      return;
+    }
+    const r=(DB.requests||[]).find(x=>x.id===id);
+    if(r)r.read_by=(r.read_by||[]).filter(x=>x.user_id!==ME.id);
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('完了の取り消しに失敗しました',e);
+    setSaveError('完了を取り消せていません。通信状況をご確認ください。');
+    return;
+  }
+  closeSheet();render();
+  toast('完了を取り消しました');
 }
 
 /* ---------- 依頼を出す ---------- */
