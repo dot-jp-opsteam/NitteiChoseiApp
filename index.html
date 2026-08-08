@@ -4498,9 +4498,8 @@ const REQ_MODES=[
 ];
 
 function openRequestForm(kind){
-  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[],noDate:false,withTime:false};
-  if(REQFORM.kind==='attend')addReqOption();   // 中で描き直すのでここでは呼ばない
-  else renderRequestForm();
+  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[],withTime:false};
+  renderRequestForm();
 }
 function setReqMode(mode){
   REQFORM.mode=mode;
@@ -4590,46 +4589,17 @@ function reqPickerHTML(){
   return '';
 }
 
-/* ふつうの依頼と出欠確認の切り替え。候補の日時は REQFORM.opts に貯める */
+/* ふつうの依頼と出欠確認の切り替え。候補の日時は REQFORM.opts に貯める。
+   候補はカレンダーで選んでもらうので、ここでは作らない */
 function setReqKind(kind){
   REQFORM.kind=kind;
   if(kind==='attend'&&REQFORM.mode!=='public')REQFORM.mode='public';
   if(kind!=='attend'&&REQFORM.mode==='public')REQFORM.mode='all_staff';
-  if(kind==='attend'&&REQFORM.noDate==null){REQFORM.noDate=false;REQFORM.withTime=false;}
-  if(kind==='attend'&&!REQFORM.opts.length)addReqOption();
-  renderRequestForm(true);
-}
-function setReqNoDate(on){
-  syncReqOptions();
-  REQFORM.noDate=on;
-  if(on)REQFORM.withTime=true;
   renderRequestForm(true);
 }
 function setReqWithTime(on){
-  if(REQFORM.noDate&&!on)return;
   syncReqOptions();
   REQFORM.withTime=on;
-  renderRequestForm(true);
-}
-function shiftReqTimeRange(t1,t2){
-  const mins=v=>{const [h,m]=String(v).split(':').map(Number);return h*60+m;};
-  const from=mins(t1)+60,to=mins(t2)+60;
-  if(!Number.isFinite(from)||!Number.isFinite(to)||to>=24*60)return ['00:00','01:00'];
-  const text=v=>`${pad(Math.floor(v/60))}:${pad(v%60)}`;
-  return [text(from),text(to)];
-}
-/* 候補を1件足す。日付は前の候補の翌日、時間は1時間後を初期値にする。 */
-function addReqOption(){
-  const last=REQFORM.opts[REQFORM.opts.length-1];
-  if(last){
-    const d=new Date(last.date+'T00:00');
-    d.setDate(d.getDate()+1);
-    const [t1,t2]=shiftReqTimeRange(last.t1,last.t2);
-    REQFORM.opts.push({date:ymd(d),t1,t2});
-  }else{
-    const d=new Date();d.setDate(d.getDate()+1);
-    REQFORM.opts.push({date:ymd(d),t1:'19:00',t2:'21:00'});
-  }
   renderRequestForm(true);
 }
 function removeReqOption(i){
@@ -4681,7 +4651,7 @@ function syncReqOptions(){
 function reqOptionsHTML(){
   if(REQFORM.kind!=='attend')return '';
   const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
-      ${REQFORM.noDate?'':`<input type="date" id="ro_d${i}" value="${o.date}" onchange="syncReqOptions()">`}
+      <input type="date" id="ro_d${i}" value="${o.date}" onchange="syncReqOptions()">
       ${REQFORM.withTime?`<div class="timerange">
         <input type="text" id="ro_a${i}" class="timeinput" inputmode="numeric" autocomplete="off"
           aria-label="候補${i+1}の開始時刻" value="${esc(o.t1)}" placeholder="開始"
@@ -4697,15 +4667,10 @@ function reqOptionsHTML(){
   return `<label class="fl" style="margin-top:16px">候補の日時<span class="req">*</span>
       <span class="fl-sub">答える人は候補ごとに ○△× を選びます</span></label>
     <div class="modechips" style="margin:8px 0 10px">
-      <button type="button" class="modechip ${REQFORM.noDate?'on':''}" aria-pressed="${REQFORM.noDate}"
-        onclick="setReqNoDate(!REQFORM.noDate)">日程を設定しない</button>
       <button type="button" class="modechip ${REQFORM.withTime?'on':''}" aria-pressed="${REQFORM.withTime}"
-        ${REQFORM.noDate?'disabled title="日程を設定しない場合は時間が必要です"':''}
         onclick="setReqWithTime(!REQFORM.withTime)">時間を設定する</button>
     </div>
-    <div class="optlist">${rows}</div>
-    <button type="button" class="btn ghost sm" style="margin-top:8px" onclick="syncReqOptions();addReqOption()">
-      ＋ 候補を追加</button>`;
+    <div class="optlist">${rows}</div>`;
 }
 
 function renderRequestForm(keepText){
@@ -4762,7 +4727,7 @@ async function submitRequest(){
     syncReqOptions();
     if(!REQFORM.opts.length){err.textContent='候補の日時を1件以上追加してください';err.classList.add('show');return;}
     for(const o of REQFORM.opts){
-      if(!REQFORM.noDate&&!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
+      if(!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
       if(REQFORM.withTime){
         const start=normalizeReqTime(o.t1),end=normalizeReqTime(o.t2,{allowThree:true});
         if(!start.complete||!start.valid||!end.complete||!end.valid){err.textContent='時刻は00:00〜23:59の4桁、または終了時刻のみ3桁で入力してください';err.classList.add('show');return;}
@@ -4773,15 +4738,15 @@ async function submitRequest(){
     // 同じ日時が2つあると集計の見分けがつかないので弾く
     const seen=new Set();
     for(const o of REQFORM.opts){
-      const key=[REQFORM.noDate?'':o.date,REQFORM.withTime?`${o.t1}-${o.t2}`:''].join('|');
+      const key=[o.date,REQFORM.withTime?`${o.t1}-${o.t2}`:''].join('|');
       if(seen.has(key)){err.textContent='同じ日時の候補が重なっています';err.classList.add('show');return;}
       seen.add(key);
     }
     options=REQFORM.opts.map(o=>({
-      date:REQFORM.noDate?undefined:o.date,
+      date:o.date,
       start_time:REQFORM.withTime?o.t1:undefined,
       end_time:REQFORM.withTime?o.t2:undefined,
-      has_date:!REQFORM.noDate,
+      has_date:true,
       has_time:REQFORM.withTime,
     }));
   }

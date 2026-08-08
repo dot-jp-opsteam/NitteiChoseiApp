@@ -531,7 +531,7 @@ async function testAttendance() {
     appHtml.includes("mode:kind==='attend'?'public':'all_staff'"), true);
   check('公開モードを送信APIへ明示する',
     appHtml.includes("public_access:attend&&REQFORM.mode==='public'"), true);
-  check('候補一覧に日程なし切替がある', appHtml.includes('日程を設定しない'), true);
+  check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
   check('出欠候補は数値で時刻を入力できる',
     appHtml.includes('inputmode="numeric"') && appHtml.includes('handleReqTimeInput('), true);
@@ -556,12 +556,10 @@ async function testAttendance() {
   check('ダークモードの候補日付アイコンを白くする',
     styleSource.includes('[data-theme="dark"] .optrow input[type="date"]::-webkit-calendar-picker-indicator')
       && styleSource.includes('filter:invert(1)'), true);
-  check('出欠候補は日付あり時間なしで始まる',
-    appHtml.includes('noDate:false,withTime:false'), true);
-  check('最初の候補は明日になる',
-    appHtml.includes('d.setDate(d.getDate()+1)'), true);
-  check('候補追加で時刻を1時間進める処理がある',
-    appHtml.includes('shiftReqTimeRange(last.t1,last.t2)'), true);
+  check('出欠確認の候補は空で始まる（日付はカレンダーで選ぶ）',
+    appHtml.includes('opts:[],withTime:false'), true);
+  check('候補を自動で作る仕組みは残っていない',
+    !appHtml.includes('addReqOption') && !appHtml.includes('shiftReqTimeRange'), true);
   check('スタッフ画面は日付だけの内部時刻を表示しない',
     appHtml.includes("if(o?.has_time===false)return fmtDate(o.start)"), true);
   check('カレンダーも日付だけの内部時刻を表示しない',
