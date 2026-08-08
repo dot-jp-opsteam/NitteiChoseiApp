@@ -4609,48 +4609,13 @@ function removeReqOption(i){
   REQFORM.opts.splice(i,1);
   renderRequestForm(true);
 }
-/* 出欠候補の時刻を数字入力から 24 時間表記へ整える。開始は4桁、終了は
-   先頭0を省いた3桁でも入れられるようにする。 */
-function normalizeReqTime(raw,{allowThree=false}={}){
-  const digits=String(raw||'').replace(/\D/g,'').slice(0,4);
-  if(allowThree&&digits.length===3){
-    const value=`0${digits[0]}:${digits.slice(1)}`;
-    const [hour,minute]=value.split(':').map(Number);
-    return {value,complete:true,valid:hour<=23&&minute<=59};
-  }
-  if(digits.length<4)return {value:digits,complete:false,valid:true};
-  const value=`${digits.slice(0,2)}:${digits.slice(2)}`;
-  const [hour,minute]=value.split(':').map(Number);
-  return {value,complete:true,valid:hour<=23&&minute<=59};
-}
-function selectReqTimeInput(input){
-  input.select();
-}
-function handleReqTimeInput(i,field,input){
-  const isEnd=field==='t2';
-  const out=normalizeReqTime(input.value,{allowThree:isEnd});
-  REQFORM.opts[i][field]=out.value;
-  input.value=out.value;
-  input.classList.toggle('invalid',out.complete&&!out.valid);
-  input.setAttribute('aria-invalid',out.complete&&!out.valid?'true':'false');
-  if(field==='t1'&&out.complete&&out.valid)document.getElementById('ro_b'+i)?.focus();
-}
-function handleReqTimeBlur(i,field,input){
-  const out=normalizeReqTime(input.value,{allowThree:field==='t2'});
-  REQFORM.opts[i][field]=out.value;
-  input.value=out.value;
-  input.classList.toggle('invalid',out.complete&&!out.valid);
-  input.setAttribute('aria-invalid',out.complete&&!out.valid?'true':'false');
-}
-/* 入力欄の値をその場で控える。描き直しても打った内容が消えないようにするため */
-function syncReqOptions(){
-  REQFORM.opts.forEach((o,i)=>{
-    const d=document.getElementById('ro_d'+i), a=document.getElementById('ro_a'+i), b=document.getElementById('ro_b'+i);
-    if(d)o.date=d.value;
-    if(a)o.t1=a.value;
-    if(b)o.t2=b.value;
-  });
-}
+/* 以前は入力欄の値を控えるための関数だった。いまは日付も時刻も
+   REQFORM.opts が持っていて画面から読み戻すものが無いので、何もしない。
+   呼び出し口が多いので関数は残してある */
+function syncReqOptions(){}
+/* 時刻のホイールは次の段階で作る。それまで呼ばれても落ちないようにしておく */
+function openReqWheel(i,field){}
+function reqWheelHTML(){return '';}
 /* ===== 候補の日時のミニカレンダー =====
    光っている日は REQFORM.opts から毎回導き出す。別に持たない。
    二重に持つと、コピーで日付がずれたときや行を消したときに片方だけ古くなる */
@@ -4679,6 +4644,21 @@ function toggleReqDate(date){
   else REQFORM.opts.push(reqNewOption(date));
   reqSortOptions();
   renderRequestForm(true);
+}
+/* 同じ日をもう1件ふやす。時間を設定しているときだけ使う
+   （時刻が無いと中身の同じ候補が2件できるだけで、送るときに弾かれる） */
+function duplicateReqOption(i){
+  syncReqOptions();
+  const src=REQFORM.opts[i];
+  if(!src)return;
+  REQFORM.opts.push(copyReqOption(src));
+  reqSortOptions();
+  renderRequestForm(true);
+}
+/* 候補の一覧に出す日付。'2026-08-17' → '8月17日(月)' */
+function reqDateLabel(date){
+  const d=new Date(date+'T00:00');
+  return `${d.getMonth()+1}月${d.getDate()}日(${'日月火水木金土'[d.getDay()]})`;
 }
 /* 新しい日の初期の時刻は、直前の候補と同じにする。1件も無ければ 19:00〜21:00 */
 function reqNewOption(date){
@@ -4765,19 +4745,20 @@ function reqCalUp(){
 function reqOptionsHTML(){
   if(REQFORM.kind!=='attend')return '';
   const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
-      <input type="date" id="ro_d${i}" value="${o.date}" onchange="syncReqOptions()">
-      ${REQFORM.withTime?`<div class="timerange">
-        <input type="text" id="ro_a${i}" class="timeinput" inputmode="numeric" autocomplete="off"
-          aria-label="候補${i+1}の開始時刻" value="${esc(o.t1)}" placeholder="開始"
-          onfocus="selectReqTimeInput(this)" oninput="handleReqTimeInput(${i},'t1',this)" onblur="handleReqTimeBlur(${i},'t1',this)">
+      ${REQFORM.withTime?`<button type="button" class="optcopy" onclick="duplicateReqOption(${i})"
+        aria-label="${reqDateLabel(o.date)}と同じ日をもう1件ふやす" title="同じ日をふやす">${ic('copy')}</button>`:''}
+      <span class="optdate">${reqDateLabel(o.date)}</span>
+      ${REQFORM.withTime?`<span class="timerange">
+        <button type="button" class="timebtn" id="ro_a${i}" onclick="openReqWheel(${i},'t1')"
+          aria-label="候補${i+1}の開始時刻">${esc(o.t1)}</button>
         <span class="tr-sep">〜</span>
-        <input type="text" id="ro_b${i}" class="timeinput" inputmode="numeric" autocomplete="off"
-          aria-label="候補${i+1}の終了時刻" value="${esc(o.t2)}" placeholder="終了"
-          onfocus="selectReqTimeInput(this)" oninput="handleReqTimeInput(${i},'t2',this)" onblur="handleReqTimeBlur(${i},'t2',this)">
-      </div>`:''}
-      <button type="button" class="optx" onclick="syncReqOptions();removeReqOption(${i})"
+        <button type="button" class="timebtn" id="ro_b${i}" onclick="openReqWheel(${i},'t2')"
+          aria-label="候補${i+1}の終了時刻">${esc(o.t2)}</button>
+      </span>`:''}
+      <button type="button" class="optx" onclick="removeReqOption(${i})"
         ${REQFORM.opts.length<=1?'disabled':''} aria-label="この候補を消す">×</button>
-    </div>`).join('');
+    </div>
+    ${reqWheelHTML(i)}`).join('');
   return `<label class="fl" style="margin-top:16px">候補の日時<span class="req">*</span>
       <span class="fl-sub">答える人は候補ごとに ○△× を選びます</span></label>
     <div class="modechips" style="margin:8px 0 10px">

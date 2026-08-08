@@ -503,17 +503,24 @@
      候補の入力（日付＋時間帯を1行ずつ） */
   .optlist{display:flex;flex-direction:column;gap:8px}
   .optrow{display:flex;align-items:center;gap:8px}
-  .optrow input[type="date"]{flex:0 0 auto;width:auto;min-width:0}
-  .optrow .timerange{flex:1;min-width:0}
-  [data-theme="dark"] .optrow input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:1}
+  /* 同じ日をもう1件ふやすボタン。日付のすぐ左に置く */
+  .optcopy{flex:none;width:34px;height:34px;padding:0;display:grid;place-items:center;cursor:pointer;
+    border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--sub)}
+  .optcopy:hover{border-color:var(--brand);color:var(--brand)}
+  .optdate{flex:none;font-weight:700;font-size:14px}
+  .optrow .timerange{flex:1;min-width:0;justify-content:flex-end}
+  .timebtn{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer;
+    padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--ink)}
+  .timebtn:hover{border-color:var(--line-h)}
+  .timebtn.open{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
   .optx{flex:none;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:9px;
     background:transparent;color:var(--sub);font-size:16px;cursor:pointer;line-height:1}
   .optx:hover:not(:disabled){border-color:var(--bad);color:var(--bad)}
   .optx:disabled{opacity:.35;cursor:default}
   @media(max-width:520px){
-    /* 狭い画面では1行に収まらないので、日付を上・時間帯と×を下に折り返す */
+    /* 狭い画面では1行に収まらないので、時間帯を下に折り返す */
     .optrow{flex-wrap:wrap}
-    .optrow input[type="date"]{flex:1 0 100%}
+    .optrow .timerange{flex:1 0 100%;justify-content:flex-start}
   }
 
   /* 候補の日時のミニカレンダー。押した日がそのまま候補になる */
