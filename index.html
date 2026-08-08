@@ -795,6 +795,65 @@ function getWeekly(id){const a=DB.availability&&DB.availability[id];return (a&&a
 function ymd(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
 function hm(iso){const d=new Date(iso);return `${pad(d.getHours())}:${pad(d.getMinutes())}`;}
 
+/* ===== 出欠確認の候補日時をつくるための計算 =====
+   ここは画面に触らない。tools/test-fmt.mjs が関数を切り出して動かすので、
+   HTMLの組み立てを混ぜないこと */
+
+/* 時刻 'HH:MM' と、0時からの分数を行き来する。上限は 23:59（24:00 は無い） */
+function reqMins(t){const p=String(t||'').split(':');return (Number(p[0])||0)*60+(Number(p[1])||0);}
+function reqHHMM(m){const v=Math.min(Math.max(m,0),1439);return pad(Math.floor(v/60))+':'+pad(v%60);}
+function reqShiftDate(date,days){
+  const d=new Date(date+'T00:00');
+  d.setDate(d.getDate()+days);
+  return ymd(d);
+}
+/* なぞった両端から、間の日付をぜんぶ返す。逆向きになぞられても昇順にそろえる */
+function reqDateRange(a,b){
+  const from=a<=b?a:b, to=a<=b?b:a;
+  const out=[];
+  const d=new Date(from+'T00:00'), end=new Date(to+'T00:00');
+  while(d<=end){out.push(ymd(d));d.setDate(d.getDate()+1);}
+  return out;
+}
+/* 同じ日をもう1件ふやす。前の終わりから始めて長さは変えない。
+   その日に収まらないときは翌日の 0 時へ送る（23:59 が上限なので、
+   終わりがちょうど 24:00 になる場合も収まらない扱いにする） */
+function copyReqOption(opt){
+  const len=Math.max(1,reqMins(opt.t2)-reqMins(opt.t1));
+  const from=reqMins(opt.t2);
+  if(from+len>1439)return {date:reqShiftDate(opt.date,1),t1:'00:00',t2:reqHHMM(len)};
+  return {date:opt.date,t1:reqHHMM(from),t2:reqHHMM(from+len)};
+}
+/* ホイールで片方を動かしたときの、開始と終わりの組。
+   逆転した状態を作らせないよう、長さを保ったまま相手も引き連れて動かす */
+function reqApplyTimeChange(opt,field,value){
+  const len=Math.max(1,reqMins(opt.t2)-reqMins(opt.t1));
+  if(field==='t1'){
+    const from=reqMins(value);
+    let to=reqMins(opt.t2);
+    if(to<=from)to=Math.min(from+len,1439);
+    return {t1:reqHHMM(Math.min(from,to-1)),t2:reqHHMM(to)};
+  }
+  const to=reqMins(value);
+  let from=reqMins(opt.t1);
+  if(from>=to)from=Math.max(to-len,0);
+  return {t1:reqHHMM(from),t2:reqHHMM(Math.max(to,from+1))};
+}
+/* カレンダーに並べるマス。前の月にはみ出すぶんは null で埋め、
+   末尾は行がそろうまで null を足す。dates に入っている日を on にする */
+function reqCalendarCells(year,month,dates,today){
+  const head=new Date(year,month,1).getDay();
+  const days=new Date(year,month+1,0).getDate();
+  const cells=[];
+  for(let i=0;i<head;i++)cells.push(null);
+  for(let d=1;d<=days;d++){
+    const date=ymd(new Date(year,month,d));
+    cells.push({date:date,day:d,on:dates.indexOf(date)>=0,past:date<today});
+  }
+  while(cells.length%7)cells.push(null);
+  return cells;
+}
+
 // スタッフの空きスロット（30分刻み）を今後N日分生成
 // 除外条件：曜日別の可能時間帯外／登録済みの不可時間ブロック／確定済み面談
 function genSlots(staffId,days=14){

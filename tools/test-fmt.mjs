@@ -105,5 +105,61 @@ console.log('\n[ スタッフ画面 index.html の開始時刻チェック ]');
     '8/7(金) 17:00〜18:00 の範囲内で入力してください（17:00・17:30・18:00）');
 }
 
+/* 出欠確認の候補日時。日付と時刻の計算だけを見る（画面の組み立ては目視で確かめる） */
+console.log('\n[ スタッフ画面 index.html の候補日時の計算 ]');
+{
+  const I = load('index.html',
+    ['pad', 'ymd', 'reqMins', 'reqHHMM', 'reqShiftDate', 'reqDateRange',
+     'copyReqOption', 'reqApplyTimeChange', 'reqCalendarCells']);
+
+  check('時刻を分に直す', I.reqMins('19:30'), 19 * 60 + 30);
+  check('分を時刻に戻す', I.reqHHMM(19 * 60 + 30), '19:30');
+  check('0時ちょうども戻せる', I.reqHHMM(0), '00:00');
+  check('日付を1日進める', I.reqShiftDate('2026-08-17', 1), '2026-08-18');
+  check('月をまたいで進める', I.reqShiftDate('2026-08-31', 1), '2026-09-01');
+
+  check('なぞった範囲を昇順で返す',
+    I.reqDateRange('2026-08-17', '2026-08-19'),
+    ['2026-08-17', '2026-08-18', '2026-08-19']);
+  check('逆向きになぞっても昇順',
+    I.reqDateRange('2026-08-19', '2026-08-17'),
+    ['2026-08-17', '2026-08-18', '2026-08-19']);
+  check('同じ日なら1件', I.reqDateRange('2026-08-17', '2026-08-17'), ['2026-08-17']);
+
+  check('コピーは前の終わりから始まり長さを保つ',
+    I.copyReqOption({ date: '2026-08-17', t1: '19:00', t2: '21:00' }),
+    { date: '2026-08-17', t1: '21:00', t2: '23:00' });
+  check('その日に収まらないぶんは翌日の先頭へ',
+    I.copyReqOption({ date: '2026-08-17', t1: '21:00', t2: '23:00' }),
+    { date: '2026-08-18', t1: '00:00', t2: '02:00' });
+  check('終わりが24:00になる場合も翌日へ送る',
+    I.copyReqOption({ date: '2026-08-17', t1: '22:00', t2: '23:00' }),
+    { date: '2026-08-18', t1: '00:00', t2: '01:00' });
+  check('月末をコピーすると翌月へ',
+    I.copyReqOption({ date: '2026-08-31', t1: '22:00', t2: '23:00' }),
+    { date: '2026-09-01', t1: '00:00', t2: '01:00' });
+
+  const base = { t1: '19:00', t2: '21:00' };
+  check('終わりを後ろへ動かすと開始はそのまま',
+    I.reqApplyTimeChange(base, 't2', '22:00'), { t1: '19:00', t2: '22:00' });
+  check('終わりを開始より前に回すと開始も一緒に下がる',
+    I.reqApplyTimeChange(base, 't2', '18:00'), { t1: '16:00', t2: '18:00' });
+  check('開始を終わりより後ろに回すと終わりも一緒に上がる',
+    I.reqApplyTimeChange(base, 't1', '22:00'), { t1: '22:00', t2: '23:59' });
+  check('開始を前へ動かすと終わりはそのまま',
+    I.reqApplyTimeChange(base, 't1', '17:00'), { t1: '17:00', t2: '21:00' });
+  check('終わりを0時へ回しても開始が負にならない',
+    I.reqApplyTimeChange(base, 't2', '00:30'), { t1: '00:00', t2: '00:30' });
+
+  /* 2026年8月は土曜はじまりで31日まで。1日の前に6つの空きが要る */
+  const cells = I.reqCalendarCells(2026, 7, ['2026-08-17'], '2026-08-10');
+  check('先頭は曜日のぶんだけ空く', cells.slice(0, 6), [null, null, null, null, null, null]);
+  check('1日は7つめ', cells[6], { date: '2026-08-01', day: 1, on: false, past: true });
+  check('選んだ日は on', cells[6 + 16], { date: '2026-08-17', day: 17, on: true, past: false });
+  check('今日は past ではない', cells[6 + 9], { date: '2026-08-10', day: 10, on: false, past: false });
+  check('末尾は7の倍数まで埋める', cells.length % 7, 0);
+  check('マスの数は 6 + 31 を7で丸めた数', cells.length, 42);
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
