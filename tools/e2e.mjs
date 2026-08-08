@@ -577,23 +577,38 @@ async function testAttendance() {
       && appHtml.includes("isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id)"), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
-  /* 日付は入力欄をやめてカレンダーで選ぶ形にした。時刻は打ち込みではなくホイールで選ぶ */
+  /* 日付は入力欄をやめてカレンダーで選ぶ形にした */
   check('候補の日付は入力欄ではなくラベルで出す',
     appHtml.includes('class="optdate"') && !appHtml.includes('id="ro_d${i}"'), true);
-  check('時刻は打ち込みではなくホイールを開くボタン',
-    appHtml.includes('class="timebtn') && appHtml.includes('openReqWheel('), true);
+  /* 時刻はOS標準の入力欄で受ける。自前のホイールはスマホで当たり判定が悪くやめた */
+  check('時刻はOS標準の時刻入力欄で受ける',
+    appHtml.includes('<input type="time" class="optt"')
+      && appHtml.includes('function setReqOptTime('), true);
+  check('時刻の入力欄はダークテーマでも読める',
+    styleSource.includes(':root:not([data-theme="light"]) .optt{color-scheme:dark}'), true);
+  check('自前の時刻ホイールは残っていない',
+    appHtml.includes('REQWHEEL') || styleSource.includes('.reqwheel'), false);
   check('数字を打ち込む時刻入力欄は残っていない',
     appHtml.includes('inputmode="numeric"') || appHtml.includes('handleReqTimeInput('), false);
   /* 定義を消した関数の呼び出しが残っていると、その場で落ちる。
      消したものは名前ごと消えていることを確かめる（実際に呼び出しが1件残っていた） */
   check('消した関数の呼び出しが残っていない',
     ['normalizeReqTime', 'handleReqTimeInput', 'handleReqTimeBlur', 'selectReqTimeInput',
-     'addReqOption', 'shiftReqTimeRange', 'setReqNoDate']
+     'addReqOption', 'shiftReqTimeRange', 'setReqNoDate',
+     'openReqWheel', 'closeReqWheelIfOpen', 'reqWheelHTML', 'commitReqWheel']
       .filter((name) => appHtml.includes(name)), []);
   check('同じ日をふやすボタンがある',
     appHtml.includes('duplicateReqOption(') && appHtml.includes("ic('copy')"), true);
   check('ふやすボタンは時間を設定しているときだけ出す',
-    appHtml.includes('${REQFORM.withTime?`<button type="button" class="optcopy"'), true);
+    appHtml.includes('${REQFORM.withTime?`<span class="opttime">')
+      && appHtml.includes('class="optcopy"'), true);
+  /* 選んだ日は縦1列ではなくタブ（チップ）で横に並べる。
+     縦に積むと4件5件で画面が埋まる */
+  check('選んだ日程はタブ（チップ）で横に並べる',
+    appHtml.includes('class="optchip"')
+      && styleSource.includes('.optlist{display:flex;flex-wrap:wrap'), true);
+  check('時間の切替はカレンダーの下に置く',
+    appHtml.indexOf('${reqCalendarHTML()}') < appHtml.indexOf('時間を設定する</button>'), true);
   check('カレンダーの空きマスは汎用の .empty を使わない',
     appHtml.includes('class="rc-d blank"') && styleSource.includes('.rc-d.blank'), true);
   check('カレンダーのマスは高さを決め打ちにする（7列が親幅に収まらなくなるため）',
