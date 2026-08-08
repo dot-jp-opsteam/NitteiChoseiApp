@@ -4712,11 +4712,55 @@ function reqCalendarHTML(){
       <div class="rc-grid">${head}${body}</div>
     </div>`;
 }
-/* なぞる仕掛けは次の段階で入れる。いまは押しただけで切り替える */
+/* なぞって選ぶ。押し始めた日が未選択なら追加、選択済みなら解除でモードを決め、
+   往復してもモードが入れ替わらないようにする。
+   毎回「なぞる前の状態」から組み立て直すので、指を戻せば選択も戻る */
+let REQDRAG=null;
 function reqCalDown(e,date){
   if(e.button!==undefined&&e.button!==0)return;
   e.preventDefault();
-  toggleReqDate(date);
+  syncReqOptions();
+  REQDRAG={
+    anchor:date,
+    mode:REQFORM.opts.some(o=>o.date===date)?'remove':'add',
+    base:REQFORM.opts.map(o=>({date:o.date,t1:o.t1,t2:o.t2})),
+  };
+  document.body.classList.add('noselect');
+  reqCalDragTo(date);
+  document.addEventListener('pointermove',reqCalMove);
+  document.addEventListener('pointerup',reqCalUp);
+  document.addEventListener('pointercancel',reqCalUp);
+}
+/* 指の下にあるマスの日付を読む。カレンダーの外へ出たときは何もしない */
+function reqCalMove(e){
+  if(!REQDRAG)return;
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  const cell=el&&el.closest?el.closest('.rc-d[data-date]'):null;
+  if(cell)reqCalDragTo(cell.dataset.date);
+}
+function reqCalDragTo(date){
+  const d=REQDRAG;
+  if(!d)return;
+  const today=ymd(new Date());
+  const targets=reqDateRange(d.anchor,date).filter(x=>x>=today);   // 過去日はまたぐだけ
+  REQFORM.opts=d.base.map(o=>({date:o.date,t1:o.t1,t2:o.t2}));
+  if(d.mode==='add'){
+    targets.forEach(x=>{
+      if(!REQFORM.opts.some(o=>o.date===x))REQFORM.opts.push(reqNewOption(x));
+    });
+  }else{
+    REQFORM.opts=REQFORM.opts.filter(o=>targets.indexOf(o.date)<0);
+  }
+  reqSortOptions();
+  renderRequestForm(true);
+}
+function reqCalUp(){
+  if(!REQDRAG)return;
+  REQDRAG=null;
+  document.body.classList.remove('noselect');
+  document.removeEventListener('pointermove',reqCalMove);
+  document.removeEventListener('pointerup',reqCalUp);
+  document.removeEventListener('pointercancel',reqCalUp);
 }
 function reqOptionsHTML(){
   if(REQFORM.kind!=='attend')return '';
