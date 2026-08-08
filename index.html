@@ -4602,10 +4602,12 @@ function setReqKind(kind){
 }
 function setReqWithTime(on){
   syncReqOptions();
+  closeReqWheelIfOpen();   // 時刻のボタンごと消えるので、開きっぱなしにしない
   REQFORM.withTime=on;
   renderRequestForm(true);
 }
 function removeReqOption(i){
+  closeReqWheelIfOpen();
   REQFORM.opts.splice(i,1);
   renderRequestForm(true);
 }
@@ -4613,9 +4615,91 @@ function removeReqOption(i){
    REQFORM.opts が持っていて画面から読み戻すものが無いので、何もしない。
    呼び出し口が多いので関数は残してある */
 function syncReqOptions(){}
-/* 時刻のホイールは次の段階で作る。それまで呼ばれても落ちないようにしておく */
-function openReqWheel(i,field){}
-function reqWheelHTML(){return '';}
+/* ===== 時刻のホイール =====
+   押した時刻の下に、時と分の列を開く。scroll-snap で止まった位置から値を読む。
+   スクロールは細かく発火するので、止まってから読むまで少し待つ */
+const REQ_WHEEL_ROW=34;   // style.css の .rw-item の高さと必ずそろえること
+let REQWHEEL=null;        // 開いている場所 {i, field}
+let REQ_WHEEL_TIMER=null;
+function openReqWheel(i,field){
+  const same=REQWHEEL&&REQWHEEL.i===i&&REQWHEEL.field===field;
+  REQWHEEL=same?null:{i:i,field:field};
+  renderRequestForm(true);
+  /* 描き直した直後に同期で位置を合わせる。requestAnimationFrame を挟むと、
+     まだ列のレイアウトが決まっていないうちに走って設定が効かない。
+     タブが背面のときは rAF 自体が呼ばれないという問題もある */
+  if(REQWHEEL)scrollReqWheelIntoPlace();
+}
+function closeReqWheel(){
+  if(!REQWHEEL)return;
+  REQWHEEL=null;
+  renderRequestForm(true);
+}
+/* 開いた直後に、いまの時刻の位置まで飛ばす。
+   scroll-snap は「近いところで止める」だけなので、初期位置は自分で合わせる */
+function scrollReqWheelIntoPlace(){
+  if(!REQWHEEL)return;
+  const o=REQFORM.opts[REQWHEEL.i];
+  if(!o)return;
+  const v=String(o[REQWHEEL.field]).split(':');
+  const hc=document.getElementById('rw_h'), mc=document.getElementById('rw_m');
+  if(hc)hc.scrollTop=(Number(v[0])||0)*REQ_WHEEL_ROW;
+  if(mc)mc.scrollTop=(Number(v[1])||0)*REQ_WHEEL_ROW;
+}
+/* 止まった位置から時刻を組み立てて控える。逆転は reqApplyTimeChange が直す */
+function onReqWheelScroll(){
+  clearTimeout(REQ_WHEEL_TIMER);
+  REQ_WHEEL_TIMER=setTimeout(commitReqWheel,120);
+}
+function commitReqWheel(){
+  if(!REQWHEEL)return;
+  const o=REQFORM.opts[REQWHEEL.i];
+  const hc=document.getElementById('rw_h'), mc=document.getElementById('rw_m');
+  if(!o||!hc||!mc)return;
+  const h=Math.min(23,Math.max(0,Math.round(hc.scrollTop/REQ_WHEEL_ROW)));
+  const m=Math.min(59,Math.max(0,Math.round(mc.scrollTop/REQ_WHEEL_ROW)));
+  const next=reqApplyTimeChange(o,REQWHEEL.field,pad(h)+':'+pad(m));
+  if(next.t1===o.t1&&next.t2===o.t2)return;   // 変わっていないなら描き直さない
+  o.t1=next.t1;o.t2=next.t2;
+  reqSortOptions();
+  /* 並べ替えで場所が変わると、開いているホイールが別の候補を指してしまう。
+     中身そのものを目印にして追い直す */
+  REQWHEEL.i=REQFORM.opts.indexOf(o);
+  renderRequestForm(true);
+  scrollReqWheelIntoPlace();
+}
+/* 矢印キーでも動かせるようにする。数字を打つ入力欄は無くしたので、
+   キーボードだけで操作する人にはこれが唯一の手段になる。必ず残すこと */
+function onReqWheelKey(e,col){
+  const step=e.key==='ArrowUp'?-1:e.key==='ArrowDown'?1:
+    e.key==='PageUp'?-10:e.key==='PageDown'?10:0;
+  if(!step)return;
+  e.preventDefault();
+  const el=document.getElementById(col==='h'?'rw_h':'rw_m');
+  if(!el)return;
+  el.scrollTop+=step*REQ_WHEEL_ROW;
+  onReqWheelScroll();
+}
+function reqWheelHTML(i){
+  if(!REQWHEEL||REQWHEEL.i!==i)return '';
+  const o=REQFORM.opts[i];
+  if(!o)return '';
+  const v=String(o[REQWHEEL.field]).split(':');
+  const cur={h:Number(v[0])||0,m:Number(v[1])||0};
+  const col=(n,key,label)=>{
+    let out='';
+    for(let x=0;x<n;x++){
+      out+=`<div class="rw-item${x===cur[key]?' rw-on':''}${key==='m'&&x%5===0?' rw-tick':''}">${pad(x)}</div>`;
+    }
+    return `<div class="rw-col" id="rw_${key}" tabindex="0" role="listbox" aria-label="${label}"
+      onscroll="onReqWheelScroll()" onkeydown="onReqWheelKey(event,'${key}')">
+      <div class="rw-pad"></div>${out}<div class="rw-pad"></div></div>`;
+  };
+  return `<div class="reqwheel">
+      <div class="rw-cols"><div class="rw-line" aria-hidden="true"></div>${col(24,'h','時')}${col(60,'m','分')}</div>
+      <button type="button" class="btn ghost sm rw-done" onclick="closeReqWheel()">閉じる</button>
+    </div>`;
+}
 /* ===== 候補の日時のミニカレンダー =====
    光っている日は REQFORM.opts から毎回導き出す。別に持たない。
    二重に持つと、コピーで日付がずれたときや行を消したときに片方だけ古くなる */
@@ -4639,6 +4723,7 @@ function moveReqCal(delta){
 /* その日を足す、または外す。外すときはその日の候補をぜんぶ消す */
 function toggleReqDate(date){
   syncReqOptions();
+  closeReqWheelIfOpen();
   const has=REQFORM.opts.some(o=>o.date===date);
   if(has)REQFORM.opts=REQFORM.opts.filter(o=>o.date!==date);
   else REQFORM.opts.push(reqNewOption(date));
@@ -4649,6 +4734,7 @@ function toggleReqDate(date){
    （時刻が無いと中身の同じ候補が2件できるだけで、送るときに弾かれる） */
 function duplicateReqOption(i){
   syncReqOptions();
+  closeReqWheelIfOpen();
   const src=REQFORM.opts[i];
   if(!src)return;
   REQFORM.opts.push(copyReqOption(src));
@@ -4669,6 +4755,9 @@ function reqNewOption(date){
 function reqSortOptions(){
   REQFORM.opts.sort((a,b)=>a.date===b.date?reqMins(a.t1)-reqMins(b.t1):(a.date<b.date?-1:1));
 }
+/* 候補が増えたり減ったりすると、開いているホイールが別の候補を指しかねない。
+   時刻を変えたときだけは commitReqWheel が場所を追い直すので、そちらは閉じない */
+function closeReqWheelIfOpen(){REQWHEEL=null;}
 function reqCalendarHTML(){
   reqCalInit();
   const today=ymd(new Date());
@@ -4721,6 +4810,7 @@ function reqCalMove(e){
 function reqCalDragTo(date){
   const d=REQDRAG;
   if(!d)return;
+  closeReqWheelIfOpen();
   const today=ymd(new Date());
   const targets=reqDateRange(d.anchor,date).filter(x=>x>=today);   // 過去日はまたぐだけ
   REQFORM.opts=d.base.map(o=>({date:o.date,t1:o.t1,t2:o.t2}));
@@ -4749,10 +4839,12 @@ function reqOptionsHTML(){
         aria-label="${reqDateLabel(o.date)}と同じ日をもう1件ふやす" title="同じ日をふやす">${ic('copy')}</button>`:''}
       <span class="optdate">${reqDateLabel(o.date)}</span>
       ${REQFORM.withTime?`<span class="timerange">
-        <button type="button" class="timebtn" id="ro_a${i}" onclick="openReqWheel(${i},'t1')"
+        <button type="button" class="timebtn${REQWHEEL&&REQWHEEL.i===i&&REQWHEEL.field==='t1'?' open':''}"
+          id="ro_a${i}" onclick="openReqWheel(${i},'t1')"
           aria-label="候補${i+1}の開始時刻">${esc(o.t1)}</button>
         <span class="tr-sep">〜</span>
-        <button type="button" class="timebtn" id="ro_b${i}" onclick="openReqWheel(${i},'t2')"
+        <button type="button" class="timebtn${REQWHEEL&&REQWHEEL.i===i&&REQWHEEL.field==='t2'?' open':''}"
+          id="ro_b${i}" onclick="openReqWheel(${i},'t2')"
           aria-label="候補${i+1}の終了時刻">${esc(o.t2)}</button>
       </span>`:''}
       <button type="button" class="optx" onclick="removeReqOption(${i})"

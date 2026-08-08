@@ -548,6 +548,31 @@
   .rc-d.blank{cursor:default}
   .rc-d:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 
+  /* 時刻のホイール。.rw-item の高さ34pxは index.html の REQ_WHEEL_ROW と
+     そろえてある。ずれると止まった位置から読む時刻が狂う */
+  .reqwheel{position:relative;border:1px solid var(--line);border-radius:12px;
+    padding:8px;margin:2px 0 10px}
+  .rw-cols{display:flex;gap:8px;justify-content:center;position:relative;height:170px}
+  .rw-col{height:170px;overflow-y:auto;scroll-snap-type:y mandatory;width:74px;position:relative;z-index:1;
+    scrollbar-width:none;-ms-overflow-style:none}
+  .rw-col::-webkit-scrollbar{display:none}
+  .rw-col:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:8px}
+  /* 上下の余白は (列の高さ170 - 行34) / 2。これで「選んだ行が中央」と
+     「scrollTop = 行番号 × 34」が同時に成り立つ */
+  .rw-pad{height:68px}
+  /* start だと行が列の上端にそろってしまい、中央の帯と合わない */
+  .rw-item{height:34px;line-height:34px;text-align:center;scroll-snap-align:center;
+    font-size:15px;font-variant-numeric:tabular-nums;color:var(--sub)}
+  /* クラス名は rw- で始めること。mark や on のような短い名前は
+     このアプリの別の用途（ロゴの六角形など）と衝突する */
+  .rw-item.rw-tick{font-weight:700}
+  .rw-item.rw-on{color:var(--ink);font-weight:800;font-size:17px}
+  /* 選ばれる位置を示す帯。列と同じ入れ物に置いて、その中央にそろえる */
+  .rw-line{position:absolute;left:0;right:0;top:calc(50% - 17px);height:34px;
+    border-top:1px solid var(--brand);border-bottom:1px solid var(--brand);
+    background:var(--brand-soft);opacity:.35;pointer-events:none;border-radius:6px}
+  .rw-done{display:block;margin:6px auto 0}
+
   /* URLの表示とコピー */
   .urlrow{display:flex;gap:8px;align-items:center;margin-top:6px}
   .urlrow input{flex:1;min-width:0;font-size:12.5px;color:var(--sub);background:var(--bg)}
