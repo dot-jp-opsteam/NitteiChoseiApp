@@ -336,18 +336,22 @@ async function testAttendance() {
   console.log('\n─────── 出欠確認 ───────');
   const t1 = new Date(Date.now() + 7 * 86400000);
   const t2 = new Date(Date.now() + 14 * 86400000);
+  const dueDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(Date.now() + 5 * 86400000));
   const mk = (d, h) => { const x = new Date(d); x.setHours(h, 0, 0, 0); return x.toISOString(); };
 
   const made = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: 'チーム懇親会', body: '場所は未定です',
     target_label: '支部の全インターン生', recipient_ids: ['u_e2e_staff3', 'u_e2e_staff4'],
-    kind: 'attend',
+    kind: 'attend', due_date: dueDate,
     options: [{ start: mk(t1, 19), end: mk(t1, 21) }, { start: mk(t2, 19), end: mk(t2, 21) }],
   });
   check('出欠確認を作れる', made.status, 200);
   check('出欠確認として記録される', made.json.request?.kind, 'attend');
   check('候補が2件ある', made.json.request?.options?.length, 2);
   check('候補にidが振られる', made.json.request?.options?.[0]?.id, 'op0');
+  check('締切日を付けた出欠確認を作れる', made.json.request?.due_date, dueDate);
   const attId = made.json.request?.id;
   check('出欠確認は送った本人もあて先に入る',
     made.json.request?.recipient_ids?.includes('u_e2e_staff'), true);
@@ -359,6 +363,8 @@ async function testAttendance() {
   /* 依頼の一覧を見ていない人がメール画面からでも気づけるよう、
      出欠確認はあて先ひとりずつのメール履歴にも残す */
   const mailView = await getDB(TOKENS.staff3);
+  check('締切日を付けた出欠確認を読み出せる',
+    (mailView.requests || []).find((r) => r.id === made.json.request?.id)?.due_date, dueDate);
   const attMail = (mailView.emails || []).find((m) => m.subject === '【出欠確認】チーム懇親会');
   check('出欠確認がメール履歴にも残る', !!attMail, true);
   check('あて先本人が受け取っている', attMail?.receiver_id, 'u_e2e_staff3');
@@ -492,7 +498,7 @@ async function testAttendance() {
   // ---- アカウント不要の公開出欠 ----
   const publicMade = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '公開懇親会', body: '公開回答のテストです', target_label: '誰でも回答OK',
-    recipient_ids: [], kind: 'attend', public_access: true,
+    recipient_ids: [], kind: 'attend', public_access: true, due_date: dueDate,
     options: [{ start: mk(t1, 10), end: mk(t1, 11) }, { start: mk(t2, 10), end: mk(t2, 11) }],
   });
   check('誰でも回答OKの出欠確認を作れる', publicMade.status, 200);
@@ -505,6 +511,7 @@ async function testAttendance() {
   const publicView = await api(null, 'GET', `/api/attendance/${publicToken}`);
   check('ログインせず公開出欠を見られる', publicView.status, 200);
   check('公開画面に件名が返る', publicView.json.request?.subject, '公開懇親会');
+  check('公開画面に締切日が返る', publicView.json.request?.due_date, dueDate);
   check('回答前でも結果一覧を見られる', publicView.json.respondents, []);
 
   const appHtml = await (await fetch(BASE + '/')).text();
@@ -595,6 +602,17 @@ async function testAttendance() {
       && appHtml.includes('回答人数に制限なし'), true);
   check('回答人数は実際に回答した人だけを数える',
     appHtml.includes('const numAns=att?attendAnswered(r).length:0;'), true);
+  check('依頼と出欠に共通の任意締切日欄がある',
+    appHtml.includes('回答の締切日（任意）')
+      && appHtml.includes('type="date" id="reqDueDate"')
+      && appHtml.includes('min="${ymd(new Date())}"'), true);
+  check('締切日を送信データに含める', appHtml.includes('due_date:dueDate||undefined'), true);
+  check('依頼一覧と詳細に締切日を表示する',
+    appHtml.includes('dueRequestMeta(r)') && appHtml.includes('dueRequestDetail(r)'), true);
+  check('ホームに締切通知をまとめて表示する',
+    appHtml.includes('dueHomeNotice()') && appHtml.includes('class="hint due-home"'), true);
+  check('締切用CSSクラスはdue接頭辞を使う',
+    styleSource.includes('.due-home') && styleSource.includes('.due-date'), true);
 
   const publicPage = await fetch(BASE + `/a/${publicToken}`);
   const publicPageHtml = await publicPage.text();
@@ -607,6 +625,10 @@ async function testAttendance() {
     publicPageHtml.includes('o.has_date===false'), true);
   check('公開回答ページに名前入力がある', publicPageHtml.includes('id="respondentName"'), true);
   check('公開回答ページに結果一覧がある', publicPageHtml.includes('id="attendanceResults"'), true);
+  check('公開回答ページに締切日と期限超過表示がある',
+    publicPageHtml.includes('due_date')
+      && publicPageHtml.includes('締切を過ぎています')
+      && publicPageHtml.includes('.due-date'), true);
 
   const noPublicName = await api(null, 'PUT', `/api/attendance/${publicToken}/response`, {
     name: '  ', answers: [{ option_id: 'op0', response: 'ok' }],
@@ -659,6 +681,7 @@ async function testAttendance() {
     subject: 'ふつうの依頼', body: '本文', target_label: 'x', recipient_ids: ['u_e2e_staff3'],
   });
   check('ふつうの依頼は今までどおり作れる', normal.status, 200);
+  check('締切日を付けずに依頼を作れる', normal.json.request?.due_date, undefined);
   check('ふつうの依頼には出欠の印が付かない', normal.json.request?.kind, 'normal');
   check('ふつうの依頼には公開URLを発行しない', normal.json.request?.public_url, undefined);
   const normalMail = await getDB(TOKENS.staff3);
@@ -667,6 +690,25 @@ async function testAttendance() {
   const notAttend = await api(TOKENS.staff3, 'PUT', `/api/requests/${normal.json.request?.id}/response`,
     { answers: [{ option_id: 'op0', response: 'ok' }] });
   check('ふつうの依頼には出欠で答えられない', notAttend.status, 400);
+
+  const normalWithDue = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '締切付きの依頼', body: '本文', target_label: '個別',
+    recipient_ids: ['u_e2e_staff3'], due_date: dueDate,
+  });
+  check('締切日を付けた通常依頼を作れる', normalWithDue.status, 200);
+  const normalWithDueView = await getDB(TOKENS.staff3);
+  check('締切日を付けた通常依頼を読み出せる',
+    (normalWithDueView.requests || []).find((r) => r.id === normalWithDue.json.request?.id)?.due_date,
+    dueDate);
+
+  const malformedDue = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '不正な締切', recipient_ids: ['u_e2e_staff3'], due_date: '2026-02-30',
+  });
+  check('実在しない締切日は作れない', malformedDue.status, 400);
+  const pastDue = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '過去の締切', recipient_ids: ['u_e2e_staff3'], due_date: '2000-01-01',
+  });
+  check('昨日以前の締切日は作れない', pastDue.status, 400);
 }
 
 /* 自分のGoogleカレンダーの取り込み。

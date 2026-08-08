@@ -169,7 +169,7 @@ async function initDB() {
        options    … 候補の日時。JSON配列 [{id,start,end}]
        confirmed  … 確定した候補のid。未確定なら null */
   for (const [col, type] of [['kind', 'TEXT'], ['options', 'TEXT'], ['confirmed', 'TEXT'],
-    ['event_id', 'TEXT'], ['public_token', 'TEXT']]) {
+    ['event_id', 'TEXT'], ['public_token', 'TEXT'], ['due_date', 'TEXT']]) {
     try { await client.execute(`ALTER TABLE requests ADD COLUMN ${col} ${type}`); }
     catch (e) { /* 既にある。SQLiteには IF NOT EXISTS が無いのでこれで判定する */ }
   }
@@ -404,10 +404,11 @@ async function migrateStoreToTables() {
     let moved = 0;
     for (const rq of db.requests || []) {
       await client.execute({
-        sql: `INSERT OR IGNORE INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at)
-              VALUES (?,?,?,?,?,?,?,?)`,
+        sql: `INSERT OR IGNORE INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, due_date)
+              VALUES (?,?,?,?,?,?,?,?,?)`,
         args: [rq.id, rq.sender_id, rq.branch_id || null, rq.subject || '', rq.body || '',
-          rq.target_label || null, JSON.stringify(rq.recipient_ids || []), rq.created_at || new Date().toISOString()],
+          rq.target_label || null, JSON.stringify(rq.recipient_ids || []), rq.created_at || new Date().toISOString(),
+          rq.due_date || null],
       });
       for (const r of rq.read_by || []) {
         await client.execute({
@@ -509,6 +510,7 @@ async function listRequestsFor(user) {
     id: r.id, sender_id: r.sender_id, branch_id: r.branch_id,
     subject: r.subject, body: r.body, target_label: r.target_label,
     recipient_ids: parseIds(r.recipient_ids), created_at: r.created_at,
+    due_date: r.due_date || undefined,
     read_by: byRequest.get(r.id) || [],
     kind: r.kind || 'normal',
     options: safeJson(r.options, []),
@@ -668,6 +670,18 @@ function validAttendDate(value) {
   return d.getUTCFullYear() === Number(hit[1])
     && d.getUTCMonth() + 1 === Number(hit[2])
     && d.getUTCDate() === Number(hit[3]);
+}
+
+function todayInJapan() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+function normalizeDueDate(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string' || !validAttendDate(value) || value < todayInJapan()) return undefined;
+  return value;
 }
 
 function validAttendTime(value) {
@@ -2212,8 +2226,10 @@ app.post('/api/requests', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '依頼を送れるのはスタッフだけです' });
   }
-  const { subject, body, target_label, recipient_ids, kind, options, public_access } = req.body || {};
+  const { subject, body, target_label, recipient_ids, kind, options, public_access, due_date } = req.body || {};
   if (!subject || !String(subject).trim()) return res.status(400).json({ error: '件名を入力してください' });
+  const dueDate = normalizeDueDate(due_date);
+  if (dueDate === undefined) return res.status(400).json({ error: '締切日が正しくありません' });
   /* 出欠確認のときは候補の日時が要る。候補は画面から来た値をそのまま信じず、
      日時として読める形かどうかをここで確かめる */
   const isAttend = kind === 'attend';
@@ -2251,6 +2267,7 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       subject: String(subject).trim(), body: String(body || ''),
       target_label: target_label || null, recipient_ids: ids,
       created_at: new Date().toISOString(), read_by: [],
+      due_date: dueDate || undefined,
       kind: isAttend ? 'attend' : 'normal', options: opts, confirmed: null, event_id: null,
       public_url: publicToken
         ? `${process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`}/a/${publicToken}`
@@ -2258,11 +2275,11 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       responses: [],
     };
     await client.execute({
-      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, kind, options, public_token)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, kind, options, public_token, due_date)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [request.id, request.sender_id, request.branch_id, request.subject,
         request.body, request.target_label, JSON.stringify(ids), request.created_at,
-        request.kind, JSON.stringify(opts), publicToken],
+        request.kind, JSON.stringify(opts), publicToken, dueDate],
     });
     /* 出欠確認は、あて先ひとりずつのメール履歴にも残す。
        依頼の一覧を見ていない人でも、メール画面から気づけるようにするため。
@@ -2318,7 +2335,7 @@ app.get('/api/attendance/:token', async (req, res) => {
       request: {
         id: row.id, subject: row.subject, body: row.body || '', sender_name: row.sender_name || '',
         options: safeJson(row.options, []), confirmed: row.confirmed || null,
-        created_at: row.created_at,
+        created_at: row.created_at, due_date: row.due_date || undefined,
       },
       respondents,
     });

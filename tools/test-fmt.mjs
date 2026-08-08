@@ -161,5 +161,24 @@ console.log('\n[ スタッフ画面 index.html の候補日時の計算 ]');
   check('マスの数は 6 + 31 を7で丸めた数', cells.length, 42);
 }
 
+/* 締切日の通知計算。時刻を見ず、日付だけで境界を判定する */
+console.log('\n[ スタッフ画面 index.html の締切通知の計算 ]');
+{
+  const I = load('index.html', ['dueDaysRemaining', 'dueShouldNotify', 'dueNoticeText']);
+
+  check('月をまたいでも残り日数を数えられる',
+    I.dueDaysRemaining('2026-09-02', '2026-08-31'), 2);
+  check('締切が4日後ならまだ出さない', I.dueShouldNotify('2026-09-04', '2026-08-31'), false);
+  check('締切の3日前になったら出す', I.dueShouldNotify('2026-09-03', '2026-08-31'), true);
+  check('締切が2日後なら出す', I.dueShouldNotify('2026-09-02', '2026-08-31'), true);
+  check('締切が今日なら出す', I.dueShouldNotify('2026-08-31', '2026-08-31'), true);
+  check('締切が昨日なら出さない', I.dueShouldNotify('2026-08-30', '2026-08-31'), false);
+  check('締切が未設定なら出さない', I.dueShouldNotify('', '2026-08-31'), false);
+  check('2日前の文言に件名と残り日数が入る',
+    I.dueNoticeText('チーム懇親会', 2), 'チーム懇親会の回答期限まであと2日です');
+  check('当日の文言は「今日まで」になる',
+    I.dueNoticeText('資料確認', 0), '資料確認の回答期限は今日までです');
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

@@ -502,6 +502,23 @@
   /* ---------- 通常依頼の詳細 ---------- */
   .rq-meta{color:var(--sub);font-size:12px;line-height:1.5;margin:8px 0 0}
   .rq-body{white-space:pre-wrap;color:var(--ink);font-size:16px;line-height:1.8;margin-top:18px}
+  .due-field{display:flex;align-items:center;gap:12px;margin-top:14px}
+  .due-field label{flex:1;min-width:0;color:var(--sub);font-size:13px;font-weight:600}
+  .due-field input{flex:0 1 180px;min-width:145px;max-width:180px;color-scheme:light}
+  :root:not([data-theme="light"]) .due-field input{color-scheme:dark}
+  .due-date{color:var(--brand-d);font-weight:650}
+  .due-detail{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:fit-content;
+    margin-top:12px;padding:7px 10px;border:1px solid var(--hint-line);border-radius:9px;background:var(--brand-soft);font-size:13px}
+  .due-overdue{color:var(--bad)}
+  .due-detail.due-overdue{background:var(--bad-soft);border-color:var(--bad-line)}
+  .due-detail span{font-weight:800}
+  .due-home{align-items:flex-start;margin-bottom:14px}
+  .due-home-list{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+  .due-home-link{appearance:none;width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:7px 0;border:0;border-top:1px solid var(--hint-line);background:transparent;color:inherit;
+    font:inherit;font-weight:650;text-align:left;cursor:pointer}
+  .due-home-link:first-of-type{margin-top:4px}
+  .due-home-link svg{width:15px;height:15px;flex:none}
   .rq-list-space{padding-bottom:88px}
   .rq-fab{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));
     /* #sbScrim（左のメニューを開いたときの暗幕）が z-index:39 なので、
@@ -513,6 +530,8 @@
   .rq-fab:hover{transform:translateY(-2px);filter:brightness(1.08)}
   .rq-fab:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
   @media(max-width:600px){
+    .due-field{gap:8px}
+    .due-field input{flex-basis:155px;min-width:145px;padding-left:8px;padding-right:6px;font-size:14px}
     .rq-fab{right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));width:56px;height:56px}
   }
   @media(prefers-reduced-motion:reduce){.rq-fab{transition:none}.rq-fab:hover{transform:none}}

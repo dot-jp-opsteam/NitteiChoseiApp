@@ -798,6 +798,25 @@ function getWeekly(id){const a=DB.availability&&DB.availability[id];return (a&&a
 function ymd(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
 function hm(iso){const d=new Date(iso);return `${pad(d.getHours())}:${pad(d.getMinutes())}`;}
 
+/* ===== 締切日の計算 =====
+   tools/test-fmt.mjs から切り出す純粋関数。時刻やDOMには触れない */
+function dueDaysRemaining(dueDate,today){
+  if(!dueDate||!today)return null;
+  const due=Date.parse(String(dueDate)+'T00:00:00Z');
+  const base=Date.parse(String(today)+'T00:00:00Z');
+  if(!Number.isFinite(due)||!Number.isFinite(base))return null;
+  return Math.round((due-base)/86400000);
+}
+function dueShouldNotify(dueDate,today){
+  const days=dueDaysRemaining(dueDate,today);
+  /* 「締切の3日前」当日から出す。残り3日はその日にあたるので含める */
+  return days!==null&&days>=0&&days<=3;
+}
+function dueNoticeText(subject,days){
+  if(days===0)return String(subject)+'の回答期限は今日までです';
+  return String(subject)+'の回答期限まであと'+days+'日です';
+}
+
 /* ===== 出欠確認の候補日時をつくるための計算 =====
    ここは画面に触らない。tools/test-fmt.mjs が関数を切り出して動かすので、
    HTMLの組み立てを混ぜないこと */
@@ -1796,6 +1815,7 @@ function hexgrid(items){
 function viewHome(){
   const hi=`<h1 class="page">日調アプリへ<br>ようこそ、${esc(ME.nickname)}さん</h1>
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
+  const dueNotice=dueHomeNotice();
   if(ME.role==='intern'){
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
     /* 面談を申請する入口はここに無い。アカウントの要らない apply.html へ
@@ -1803,7 +1823,7 @@ function viewHome(){
        _archive/2026-08-06-インターン生の面談申請画面/README.md */
     /* ここは「これからやること」だけに絞る。
        受信メール・カレンダー連携は左メニューへ移した */
-    return hi+hexgrid([
+    return hi+dueNotice+hexgrid([
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
       hex("go('requests')",'megaphone','受けた依頼','スタッフからの連絡',unread),
     ])+eventsSection();
@@ -1828,12 +1848,12 @@ function viewHome(){
       <span class="fb-ic">${ic('link')}</span>
       <span class="fb-tx"><b>インターン生に渡すリンクを作る</b><small>登録リンクを渡すと、あなたが担当になります</small></span>
       <span class="fb-go">${ic('chevron')}</span></button>`;
-    return hi+
+    return hi+dueNotice+
       (pend?`<div class="hint">${ic('bell')}<span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
       linkBtn+hexgrid(items)+eventsSection();
   }
   // admin
-  return hi+hexgrid([
+  return hi+dueNotice+hexgrid([
     hex("go('branches')",'building','支部管理','支部の追加・編集'),
     hex("go('users')",'users','ユーザー管理','全支部の権限を管理'),
     hex('openSharedCalendarSettings()','calendar','全体予定表',SHARED_CAL.configured?esc(SHARED_CAL.name||'設定済み'):'スタッフ全員に見せる予定'),
@@ -4103,6 +4123,33 @@ function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userI
 function requestNeedsAction(r){
   return isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id);
 }
+function dueDateLabel(value){
+  if(!value)return '';
+  const parts=String(value).split('-');
+  if(parts.length!==3)return '';
+  return Number(parts[0])+'年'+Number(parts[1])+'月'+Number(parts[2])+'日';
+}
+function dueIsPast(value){return dueDaysRemaining(value,ymd(new Date()))<0;}
+function dueRequestMeta(r){
+  if(!r.due_date)return '';
+  const past=dueIsPast(r.due_date);
+  return ` ・ <span class="due-date${past?' due-overdue':''}">回答期限：${esc(dueDateLabel(r.due_date))}${past?'（締切を過ぎています）':''}</span>`;
+}
+function dueRequestDetail(r){
+  if(!r.due_date)return '';
+  const past=dueIsPast(r.due_date);
+  return `<div class="due-date due-detail${past?' due-overdue':''}">回答の締切日：<b>${esc(dueDateLabel(r.due_date))}</b>${past?'<span>締切を過ぎています</span>':''}</div>`;
+}
+function dueHomeNotice(){
+  const today=ymd(new Date());
+  const targets=myRequests().filter(r=>requestNeedsAction(r)&&dueShouldNotify(r.due_date,today));
+  if(!targets.length)return '';
+  const rows=targets.map(r=>{
+    const days=dueDaysRemaining(r.due_date,today);
+    return `<button type="button" class="due-home-link" onclick="openRequestDetail('${r.id}')">${esc(dueNoticeText(r.subject,days))}${ic('chevron')}</button>`;
+  }).join('');
+  return `<div class="hint due-home">${ic('bell')}<div class="due-home-list"><b>回答期限が近い依頼があります</b>${rows}</div></div>`;
+}
 
 let REQTAB='inbox'; // 'inbox' | 'done' | 'sent'
 let REQBACKTAB='inbox';
@@ -4170,7 +4217,7 @@ function requestList(list,kind){
     return `<div class="row" style="cursor:pointer" onclick="openRequestDetail('${r.id}')">
       <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
       <span class="rmain"><span class="rt">${esc(r.subject)} ${badge}</span>
-      <span class="rs">${sub}</span></span>
+      <span class="rs">${sub}${dueRequestMeta(r)}</span></span>
       <span class="tile-arrow">${ic('chevron')}</span></div>`;
   }).join('');
   return `<div class="card"><div class="rowlist">${rows}</div></div>`;
@@ -4306,6 +4353,7 @@ function openAttendDetail(id){
 
   openSheet(`<h3>${esc(r.subject)} <span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">出欠</span></h3>
     <p class="page-sub" style="margin-top:0">${esc(sender?sender.nickname:'—')}さん ・ ${esc(r.target_label||'')}${isPublicAttend(r)?'（回答人数に制限なし）':`（${(r.recipient_ids||[]).length}名）`}</p>
+    ${dueRequestDetail(r)}
     ${urlBlock}
     ${r.body?`<div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>`:''}
     ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
@@ -4453,6 +4501,7 @@ function openRequestDetail(id){
 
   openSheet(`<h3>${esc(r.subject)}</h3>
     <p class="rq-meta">差出人：${esc(sender?sender.nickname:'—')} ・ あて先：${esc(r.target_label||'—')}（${(r.recipient_ids||[]).length}名） ・ 送信日時：${fmtDT(r.created_at)}</p>
+    ${dueRequestDetail(r)}
     <div class="rq-body">${esc(r.body)}</div>
     ${mine?(done
       ? `<button class="btn ghost block" style="margin-top:18px" onclick="undoRequestCompletion('${r.id}')">完了を取り消す</button>`
@@ -4526,7 +4575,7 @@ const REQ_MODES=[
 ];
 
 function openRequestForm(kind){
-  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[],withTime:false};
+  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[],withTime:false,dueDate:''};
   renderRequestForm();
 }
 function setReqMode(mode){
@@ -4918,6 +4967,10 @@ function renderRequestForm(keepText){
     <input id="reqSubj" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
     <label class="fl">本文</label>
     <textarea id="reqBody" rows="${attend?4:6}" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>
+    <div class="due-field">
+      <label for="reqDueDate">回答の締切日（任意）</label>
+      <input type="date" id="reqDueDate" min="${ymd(new Date())}" value="${esc(REQFORM.dueDate||'')}" oninput="REQFORM.dueDate=this.value">
+    </div>
     ${reqOptionsHTML()}
     <div class="field-err" id="reqErr"></div>
 
@@ -4927,6 +4980,7 @@ function renderRequestForm(keepText){
 async function submitRequest(){
   const subject=document.getElementById('reqSubj').value.trim();
   const body=document.getElementById('reqBody').value.trim();
+  const dueDate=document.getElementById('reqDueDate').value;
   const err=document.getElementById('reqErr');
   const btn=document.getElementById('reqBtn');
   err.classList.remove('show');
@@ -4975,6 +5029,7 @@ async function submitRequest(){
     const res=await api('/api/requests',{method:'POST',
       body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids,
         kind:attend?'attend':'normal',options,
+        due_date:dueDate||undefined,
         public_access:attend&&REQFORM.mode==='public'})});
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
