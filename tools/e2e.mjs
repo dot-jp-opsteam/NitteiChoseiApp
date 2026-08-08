@@ -602,11 +602,12 @@ async function testAttendance() {
   check('ふやすボタンは時間を設定しているときだけ出す',
     appHtml.includes('${REQFORM.withTime?`<span class="opttime">')
       && appHtml.includes('class="optcopy"'), true);
-  /* 選んだ日は縦1列ではなくタブ（チップ）で横に並べる。
-     縦に積むと4件5件で画面が埋まる */
-  check('選んだ日程はタブ（チップ）で横に並べる',
-    appHtml.includes('class="optchip"')
-      && styleSource.includes('.optlist{display:flex;flex-wrap:wrap'), true);
+  /* 選んだ日は1件ずつ縦に積む。横に折り返すチップは一覧として読みにくかった */
+  check('選んだ日程は縦1列に並べる',
+    appHtml.includes('class="optrow"')
+      && styleSource.includes('.optlist{display:flex;flex-direction:column'), true);
+  check('候補の行は角丸の四角で、丸いピルではない',
+    styleSource.includes('.optrow{') && !styleSource.includes('.optchip'), true);
   check('時間の切替はカレンダーの下に置く',
     appHtml.indexOf('${reqCalendarHTML()}') < appHtml.indexOf('時間を設定する</button>'), true);
   check('カレンダーの空きマスは汎用の .empty を使わない',

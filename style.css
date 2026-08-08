@@ -557,12 +557,13 @@
 
   /* ---------- 出欠確認 ----------
      候補の入力（日付＋時間帯を1行ずつ） */
-  /* 選んだ日はタブ（チップ）にして横に並べ、入りきらないぶんは折り返す。
-     縦1列に積むと、日を4つ5つ選んだだけで画面がチップで埋まってしまう */
-  .optlist{display:flex;flex-wrap:wrap;gap:8px}
-  .optchip{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 12px;
-    border:1px solid var(--hint-line);border-radius:999px;background:var(--brand-soft)}
-  .optdate{flex:none;font-weight:700;font-size:14px;white-space:nowrap}
+  /* 選んだ日は1件ずつ縦に積む。角丸の四角い枠で、背景色は付けない。
+     横に折り返すチップにしていた時期があるが、候補の一覧として読みにくかった */
+  .optlist{display:flex;flex-direction:column;gap:8px}
+  .optrow{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;
+    border:1px solid var(--line);border-radius:12px}
+  /* 「8月1日(金)」と「8月12日(火)」で長さが違う。幅を揃えないと行ごとに時刻がずれる */
+  .optdate{flex:none;min-width:7.2em;font-weight:700;font-size:14px;white-space:nowrap}
   .opttime{display:flex;align-items:center;gap:6px}
   /* OS標準の時刻入力欄。色の明暗を color-scheme で伝えないと、
      ダークテーマでピッカーの中身が白地のまま出る */
@@ -572,20 +573,22 @@
   :root:not([data-theme="light"]) .optt{color-scheme:dark}
   .optt:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
   /* 同じ日をもう1件ふやすボタン */
+  /* ボタンは行の右端にそろえる。時間を設定していない行は日付しか無いので、
+     そのままだと × が日付の真横に来て右side が大きく空く */
   .optcopy{flex:none;width:30px;height:30px;padding:0;display:grid;place-items:center;cursor:pointer;
-    border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--sub)}
+    border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--sub);
+    margin-left:auto}
+  .optrow:not(:has(.optcopy)) .optx{margin-left:auto}
   .optcopy:hover{border-color:var(--brand);color:var(--brand)}
-  .optx{flex:none;width:30px;height:30px;padding:0;border:1px solid var(--line);border-radius:999px;
+  .optx{flex:none;width:30px;height:30px;padding:0;border:1px solid var(--line);border-radius:8px;
     background:var(--panel);color:var(--sub);font-size:15px;cursor:pointer;line-height:1}
   .optx:hover:not(:disabled){border-color:var(--bad);color:var(--bad)}
   .optx:disabled{opacity:.35;cursor:default}
   @media(max-width:520px){
-    /* 狭い画面では、日付＋時刻2つ＋ボタン2つが1行に収まらない。
-       チップを幅いっぱいに広げ、日付だけを上の行に出して折り返す。
-       丸みも角丸に落とす（2行のチップを999pxで丸めると両端が大きく削れる） */
-    .optchip:has(.opttime){flex:1 1 100%;flex-wrap:wrap;border-radius:16px;padding:8px 12px;gap:6px 8px}
-    .optchip:has(.opttime) .optdate{flex:1 1 100%}
-    .optchip .opttime{margin-right:auto}
+    /* 狭い画面では、日付＋時刻2つ＋ボタン2つが1行に収まらない（約380px 対 約343px）。
+       日付だけを上の行に出して折り返す。枠の角丸は12pxのままでよい */
+    .optrow:has(.opttime){flex-wrap:wrap;gap:6px 8px;padding:8px 12px}
+    .optrow:has(.opttime) .optdate{flex:1 1 100%;min-width:0}
     .optt{width:96px}
   }
 

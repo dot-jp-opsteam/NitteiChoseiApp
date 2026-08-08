@@ -4887,9 +4887,9 @@ function reqCalUp(){
 }
 function reqOptionsHTML(){
   if(REQFORM.kind!=='attend')return '';
-  /* 選んだ日はタブ（チップ）にして横に並べる。時間を設定しているときは
-     時刻の入力欄と「同じ日をふやす」も同じチップの中に入れる */
-  const chips=REQFORM.opts.map((o,i)=>`<div class="optchip">
+  /* 選んだ日は1件ずつ縦に積む。時間を設定しているときは
+     時刻の入力欄と「同じ日をふやす」も同じ行の中に入れる */
+  const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
       <span class="optdate">${reqDateLabel(o.date)}</span>
       ${REQFORM.withTime?`<span class="opttime">
         <input type="time" class="optt" value="${esc(o.t1)}"
@@ -4910,7 +4910,7 @@ function reqOptionsHTML(){
       <button type="button" class="modechip ${REQFORM.withTime?'on':''}" aria-pressed="${REQFORM.withTime}"
         onclick="setReqWithTime(!REQFORM.withTime)">時間を設定する</button>
     </div>
-    <div class="optlist">${chips}</div>`;
+    <div class="optlist">${rows}</div>`;
 }
 
 function renderRequestForm(keepText){
