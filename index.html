@@ -4917,9 +4917,10 @@ async function submitRequest(){
     for(const o of REQFORM.opts){
       if(!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
       if(REQFORM.withTime){
-        const start=normalizeReqTime(o.t1),end=normalizeReqTime(o.t2,{allowThree:true});
-        if(!start.complete||!start.valid||!end.complete||!end.valid){err.textContent='時刻は00:00〜23:59の4桁、または終了時刻のみ3桁で入力してください';err.classList.add('show');return;}
-        o.t1=start.value;o.t2=end.value;
+        // 時刻はホイールでしか変えられないので崩れないはずだが、
+        // 送ってしまう前にもう一度だけ確かめる（サーバー側も同じ形で弾く）
+        const ok=v=>/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v);
+        if(!ok(o.t1)||!ok(o.t2)){err.textContent='時刻の形がおかしくなっています。選び直してください';err.classList.add('show');return;}
         if(o.t2<=o.t1){err.textContent='終わりの時刻は始まりより後にしてください';err.classList.add('show');return;}
       }
     }

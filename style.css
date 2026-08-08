@@ -523,8 +523,8 @@
     .optrow .timerange{flex:1 0 100%;justify-content:flex-start}
   }
 
-  /* 候補の日時のミニカレンダー。押した日がそのまま候補になる */
-  .noselect{user-select:none;-webkit-user-select:none}
+  /* 候補の日時のミニカレンダー。押した日がそのまま候補になる。
+     なぞっている間の文字選択止めは、下のほうにある body.noselect を使う */
   .reqcal{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:12px}
   .rc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .rc-head b{font-size:14px;font-weight:800}
@@ -656,8 +656,6 @@
   .backhome{display:flex;justify-content:flex-end;margin-top:10px}
   .timerange{display:flex;align-items:center;gap:8px}
   .timerange select,.timerange input{flex:1;min-width:0}
-  .timerange .timeinput{text-align:center;font-variant-numeric:tabular-nums}
-  .timerange .timeinput.invalid{border-color:var(--bad);color:var(--bad)}
   .timerange .tr-sep{color:var(--sub);font-weight:700;flex:none}
   .sheet h3{margin:0 0 4px;font-size:17px}
   @media(min-width:640px){

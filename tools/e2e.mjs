@@ -527,6 +527,12 @@ async function testAttendance() {
     appHtml.includes('class="timebtn') && appHtml.includes('openReqWheel('), true);
   check('数字を打ち込む時刻入力欄は残っていない',
     appHtml.includes('inputmode="numeric"') || appHtml.includes('handleReqTimeInput('), false);
+  /* 定義を消した関数の呼び出しが残っていると、その場で落ちる。
+     消したものは名前ごと消えていることを確かめる（実際に呼び出しが1件残っていた） */
+  check('消した関数の呼び出しが残っていない',
+    ['normalizeReqTime', 'handleReqTimeInput', 'handleReqTimeBlur', 'selectReqTimeInput',
+     'addReqOption', 'shiftReqTimeRange', 'setReqNoDate']
+      .filter((name) => appHtml.includes(name)), []);
   check('同じ日をふやすボタンがある',
     appHtml.includes('duplicateReqOption(') && appHtml.includes("ic('copy')"), true);
   check('ふやすボタンは時間を設定しているときだけ出す',
