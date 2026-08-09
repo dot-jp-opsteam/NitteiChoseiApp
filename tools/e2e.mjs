@@ -517,21 +517,29 @@ async function testAttendance() {
   const appHtml = await (await fetch(BASE + '/')).text();
   const serverSource = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
   const styleSource = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
-  /* 公開の回答ページ。スタッフが見る出欠確認の画面と同じ並びにしてある。
-     この画面は /style.css を読み込まず、自前の <style> だけで組み立てている */
+  /* 公開の回答ページ。スタッフが見る出欠確認の画面（openAttendDetail）と
+     同じ見た目にするため、/style.css を読んで同じクラスで組み立てている。
+     このファイルに自前の <style> を持たせないこと（持たせると見た目がずれる） */
   const attendHtml = fs.readFileSync(path.join(ROOT, 'attendance.html'), 'utf8');
+  check('公開回答ページはアプリと同じ style.css を読む',
+    attendHtml.includes('href="/style.css"') && !attendHtml.includes('<style>'), true);
+  check('公開回答ページはアプリのシートの中に出る',
+    attendHtml.includes('class="scrim open"') && attendHtml.includes('class="sheet"'), true);
+  check('公開回答ページの配色はアプリの設定に従う',
+    attendHtml.includes("localStorage.getItem('ops_theme_v1')"), true);
   check('公開回答ページに出欠集計がある',
     attendHtml.includes('出欠集計') && attendHtml.includes('日程を押すと、誰が何を答えたかが見られます'), true);
   check('いちばん人数の多い候補に最有力が付く',
-    attendHtml.includes('pa-best') && attendHtml.includes('最有力'), true);
-  check('集計の行は押して開ける', attendHtml.includes('function toggleTally('), true);
+    attendHtml.includes('class="atl ') && attendHtml.includes('最有力'), true);
+  check('集計の行を押すと回答状況に入れ替わる',
+    attendHtml.includes('function openOption(') && attendHtml.includes('出欠集計へ戻る'), true);
   check('あなたの回答が候補ごとに並ぶ',
     attendHtml.includes('あなたの回答') && attendHtml.includes('候補ごとに選んでください'), true);
   /* この2つは消してはいけない。名前が無いと誰の回答か分からなくなり、
      共有URLが無いとこの画面から人に配れなくなる */
   check('名前の入力欄が残っている', attendHtml.includes('id="respondentName"'), true);
   check('共有URLのコピーが残っている',
-    attendHtml.includes('id="shareUrl"') && attendHtml.includes('copyShareUrl'), true);
+    attendHtml.includes('id="attUrl"') && attendHtml.includes('copyShareUrl'), true);
   /* legend は flex の子として並ばず、日程が行の上に飛び出す */
   check('回答の行に fieldset と legend を使っていない',
     attendHtml.includes('<legend'), false);
@@ -628,8 +636,12 @@ async function testAttendance() {
     serverSource.includes("picked.has_time === false ? { reminders: { useDefault: false } } : {}"), true);
   check('スタッフ画面は時間だけを日程未定と表示する',
     appHtml.includes("if(o?.has_date===false)return `${o.start_time}"), true);
-  check('公開送信後は公開回答ページへ移動する',
-    appHtml.includes('location.assign(attendShareUrl(request))'), true);
+  /* 送ったあとに公開ページへ飛ばすと、アプリの外へ出てしまい戻れない。
+     どちらのあて先でも、その場で集計シートを開く */
+  check('出欠を送ったあとページ遷移しない',
+    appHtml.includes('location.assign(attendShareUrl'), false);
+  check('出欠を送ったあとは集計シートを開く',
+    appHtml.includes('if(attend)openAttendDetail(request.id);'), true);
   check('公開出欠の詳細に共有URLを表示する',
     appHtml.includes('誰でも回答できる共有URL'), true);
   check('公開出欠は回答人数に分母を表示しない',
@@ -652,18 +664,18 @@ async function testAttendance() {
   const publicPage = await fetch(BASE + `/a/${publicToken}`);
   const publicPageHtml = await publicPage.text();
   check('公開回答ページを配信できる', publicPage.status, 200);
-  check('公開回答ページ上部に共有URL欄がある', publicPageHtml.includes('id="shareUrl"'), true);
+  check('公開回答ページ上部に共有URL欄がある', publicPageHtml.includes('id="attUrl"'), true);
   check('公開回答ページにURLコピーボタンがある', publicPageHtml.includes('copyShareUrl()'), true);
   check('公開回答ページは日付だけの内部時刻を表示しない',
     publicPageHtml.includes('o.has_time===false'), true);
   check('公開回答ページは時間だけを日程未定と表示する',
     publicPageHtml.includes('o.has_date===false'), true);
   check('公開回答ページに名前入力がある', publicPageHtml.includes('id="respondentName"'), true);
-  check('公開回答ページに結果一覧がある', publicPageHtml.includes('id="attendanceResults"'), true);
+  check('公開回答ページに結果一覧がある', publicPageHtml.includes('class="atlist"'), true);
   check('公開回答ページに締切日と期限超過表示がある',
     publicPageHtml.includes('due_date')
       && publicPageHtml.includes('締切を過ぎています')
-      && publicPageHtml.includes('.due-date'), true);
+      && publicPageHtml.includes('due-date due-detail'), true);
 
   const noPublicName = await api(null, 'PUT', `/api/attendance/${publicToken}/response`, {
     name: '  ', answers: [{ option_id: 'op0', response: 'ok' }],

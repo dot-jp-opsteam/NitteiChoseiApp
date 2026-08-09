@@ -5022,13 +5022,9 @@ async function submitRequest(){
     if(notification)DB.notifications=[...(DB.notifications||[]),notification];
     sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
     setSaveError(null);
-    if(publicMode){
-      if(!request.public_url){
-        err.textContent='共有URLを発行できませんでした。送った依頼の一覧からご確認ください。';err.classList.add('show');
-        return;
-      }
-      REQFORM=null;
-      location.assign(attendShareUrl(request));
+    /* 共有URLが無いまま集計を開くと、送った本人が配る先を失う。ここで止めて知らせる */
+    if(publicMode&&!request.public_url){
+      err.textContent='共有URLを発行できませんでした。送った依頼の一覧からご確認ください。';err.classList.add('show');
       return;
     }
   }catch(e){
@@ -5040,6 +5036,11 @@ async function submitRequest(){
   REQFORM=null;REQTAB='sent';
   closeSheet();updateBell();render();
   toast(`${request.recipient_ids.length}名に送りました`);
+  /* 出欠確認は送ったあとに集計を開く。共有URLのコピー欄がここにあるので、
+     「誰でも回答OK」で送った人はそのまま配れる。
+     以前は公開の回答ページへ location.assign で飛ばしていたが、
+     アプリの外へ出てしまい、戻るには履歴を戻るしかなかった */
+  if(attend)openAttendDetail(request.id);
 }
 
 /* =========================================================

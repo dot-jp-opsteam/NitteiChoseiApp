@@ -4,66 +4,88 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#000000">
 <title>出欠確認 | OPS日調</title>
-<style>
-:root{color-scheme:light dark;--bg:#f5f7fb;--card:#fff;--ink:#172033;--sub:#647084;--line:#dce2ec;--brand:#176b87;--brand2:#0f536b;--soft:#e7f4f8;--ok:#17845b;--may:#b26a00;--no:#bf3f4d;--shadow:0 12px 34px rgba(31,48,72,.10)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;line-height:1.6}.wrap{width:min(760px,calc(100% - 28px));margin:0 auto;padding:28px 0 60px}.brand{font-weight:900;letter-spacing:.06em;color:var(--brand);margin-bottom:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow);margin-bottom:16px}h1,h2{line-height:1.35;margin:0}h1{font-size:clamp(22px,5vw,30px)}h2{font-size:18px;margin-bottom:12px}.meta,.sub{color:var(--sub);font-size:14px}.body{white-space:pre-wrap;margin-top:16px}.fixed{background:#e8f7ef;color:#126a4a;border-radius:12px;padding:12px 14px;margin-top:16px;font-weight:700}.notice{background:var(--soft);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:14px}.due-date{width:fit-content;margin-top:12px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:var(--soft);color:var(--brand2);font-size:14px;font-weight:800}.due-date.due-overdue{background:#fdecef;border-color:#f2bac2;color:#9c2333}.field{margin:16px 0}.field label,.slot-title{display:block;font-weight:800;margin-bottom:7px}.req{color:var(--no);margin-left:4px}input[type=text]{width:100%;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.share-row{display:flex;gap:8px;align-items:stretch}.share-row input{min-width:0}.share-row button{width:auto;flex:0 0 auto;margin:0;padding:10px 18px}.share-status{min-height:1.5em;margin-top:5px}.slot{border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:10px}.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.choice input{position:absolute;opacity:0;pointer-events:none}.choice span{display:block;text-align:center;border:1px solid var(--line);border-radius:10px;padding:9px 6px;font-weight:900;cursor:pointer}.choice input:focus-visible+span{outline:3px solid color-mix(in srgb,var(--brand) 35%,transparent)}.choice input:checked+span{color:#fff;border-color:transparent}.choice.ok input:checked+span{background:var(--ok)}.choice.may input:checked+span{background:var(--may)}.choice.no input:checked+span{background:var(--no)}button{width:100%;border:0;border-radius:11px;padding:13px 16px;background:var(--brand);color:#fff;font:inherit;font-weight:900;cursor:pointer;margin-top:18px}button:hover{background:var(--brand2)}button:disabled{opacity:.55;cursor:not-allowed}.error{color:var(--no);font-weight:700;margin-top:10px}.result-slot{border-top:1px solid var(--line);padding:14px 0}.result-slot:first-of-type{border-top:0}.counts{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.count{padding:4px 9px;border-radius:999px;background:var(--soft);font-weight:800}.people{display:grid;gap:6px}.person{display:flex;justify-content:space-between;gap:12px;font-size:14px}.mark{font-weight:900}.mark.ok{color:var(--ok)}.mark.may{color:var(--may)}.mark.no{color:var(--no)}.empty{color:var(--sub);font-size:14px}.loading{text-align:center;padding:70px 10px;color:var(--sub)}
-/* ここから下は、ログインしたスタッフが見る出欠確認の画面に見た目をそろえるためのもの。
-   このファイルは /style.css を読み込んでいないので、クラス名はこのファイルの中だけで完結する。
-   接頭辞 pa- は public attendance（公開の出欠確認）の意味 */
-.pa-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.pa-badge{background:var(--soft);color:var(--brand2);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:800;white-space:nowrap}
-.pa-total{margin:12px 0 0;font-size:14px}
-.pa-rows{margin-top:12px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
-/* 全体の button ルール（幅100%・濃い地色・上マージン）を、この行だけ打ち消す */
-.pa-row{width:100%;margin:0;padding:14px;border:0;border-top:1px solid var(--line);border-radius:0;
-  background:var(--card);color:var(--ink);font:inherit;font-weight:400;text-align:left;cursor:pointer;
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.pa-row:first-of-type{border-top:0}
-.pa-row:hover{background:var(--soft)}
-.pa-row:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 35%,transparent);outline-offset:-3px}
-/* いちばん人数の集まった候補。左端の帯と地色で目立たせる */
-.pa-row.pa-best{background:#e8f7ef;box-shadow:inset 4px 0 0 var(--ok)}
-.pa-row.pa-best:hover{background:#ddf1e6}
-.pa-when{font-weight:800;flex:1 1 auto;min-width:0}
-.pa-tag{background:#cdebdb;color:#126a4a;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:800;white-space:nowrap}
-.pa-counts{display:flex;gap:12px;font-weight:800;white-space:nowrap}
-.pa-c.ok{color:var(--ok)}.pa-c.may{color:var(--may)}.pa-c.no{color:var(--no)}
-.pa-people{padding:0 14px 14px;background:var(--card)}
-.pa-ans{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
-  border-top:1px solid var(--line);padding:14px 0}
-.pa-ans:first-of-type{border-top:0}
-.pa-ans .choices{grid-template-columns:repeat(3,56px);gap:8px}
-.pa-ans .choice span{padding:11px 6px;font-size:16px}
-@media(prefers-color-scheme:dark){:root{--bg:#10151e;--card:#19212d;--ink:#f4f7fb;--sub:#aab5c5;--line:#344052;--brand:#6bc7df;--brand2:#4eabc5;--soft:#243642;--shadow:none}.fixed{background:#17372b;color:#8de0b8}.due-date{color:#8bdcf0}.due-date.due-overdue{background:#44232b;border-color:#80404d;color:#ffb3be}button{color:#07151b}
-.pa-row{background:var(--card);color:var(--ink)}
-.pa-row.pa-best{background:#17372b;box-shadow:inset 4px 0 0 #3fbb84}
-.pa-row.pa-best:hover{background:#1d4635}
-.pa-tag{background:#1f5340;color:#8de0b8}
-.pa-c.ok{color:#7fdcb0}.pa-c.may{color:#e8bd72}.pa-c.no{color:#ff9aa6}}
-</style>
+<!-- 配色はアプリ本体と同じ指定に従う。既定はダーク。
+     CSSより先に data-theme を確定させないと、一瞬だけ違う配色が見えてしまう -->
+<script>
+(function(){
+  var el=document.documentElement;
+  try{
+    var t=localStorage.getItem('ops_theme_v1');
+    el.setAttribute('data-theme',t==='light'?'light':'dark');
+  }catch(e){el.setAttribute('data-theme','dark');}
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Noto+Sans+JP:wght@400;700;900&display=swap">
+<!-- アプリ本体と同じスタイルシートを読む。このページ専用のCSSは持たない。
+     見た目をアプリの「受けた依頼」の画面とそろえるため、
+     部品（.sheet / .atl / .attb など）もアプリと同じものを使う -->
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<main class="wrap">
-  <div class="brand">OPS 日調</div>
-  <div id="attendanceApp" class="loading">出欠確認を読み込んでいます…</div>
-</main>
+<!-- アプリのシートをそのまま再現する。ログインしていない人が開くページなので、
+     掴みバーと「背景を押して閉じる」は付けない。閉じても戻る先がない -->
+<div class="scrim open">
+  <div class="sheet" id="sheet">
+    <p class="page-sub">出欠確認を読み込んでいます…</p>
+  </div>
+</div>
+
 <script>
 'use strict';
 const TOKEN=location.pathname.split('/').filter(Boolean)[1]||'';
-const MARK={ok:'○',may:'△',no:'×'};
-let DATA=null;
-let SAVED=null;
-const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmt=(iso)=>new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'long',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(iso));
-const fmtDay=(iso)=>new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'long',day:'numeric',weekday:'short'}).format(new Date(iso));
-const todayYmd=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-const dueLabel=(value)=>{const p=String(value||'').split('-');return p.length===3?`${Number(p[0])}年${Number(p[1])}月${Number(p[2])}日`:'';};
-const slotText=(o)=>{
-  if(o.has_date===false)return `${o.start_time}${o.end_time?'〜'+o.end_time:''}（日程未定）`;
-  if(o.has_time===false)return fmtDay(o.start);
-  return `${fmt(o.start)}〜${new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'}).format(new Date(o.end))}`;
+const ATT_MARK={ok:'○',may:'△',no:'×'};
+/* アプリ本体のアイコンは index.html の ICON 辞書にある。
+   このページで使うのは2つだけなので、同じ線画をここへ写している */
+const ICON={
+  back:'<path pathLength="1" d="M19.5 12h-15"/><path pathLength="1" d="m11 5.5-6.5 6.5 6.5 6.5"/>',
+  check:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="m7.9 12.3 2.8 2.8 5.5-5.6"/>',
 };
+const ic=(name)=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]||''}</svg>`;
+let DATA=null;     // 公開APIから受け取った中身
+let SAVED=null;    // このブラウザで前に送った回答
+let PICKED={};     // 画面上で選んでいる回答 {候補id:'ok'|'may'|'no'}
+
+const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* 日時は日本時間で読む。アプリ本体は端末の時計で描いているが、
+   このページは海外から開かれることもあるので、時間帯を固定する。
+   国内で見るかぎり、出てくる文字はアプリと同じ */
+function jstParts(iso){
+  const p={};
+  new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric',
+    weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'})
+    .formatToParts(new Date(iso)).forEach(x=>{p[x.type]=x.value;});
+  return p;
+}
+const hm=(iso)=>{const p=jstParts(iso);return `${p.hour}:${p.minute}`;};
+/* 候補1件の見せ方。「9/12(土) 19:00〜21:00」。index.html の fmtSlot と同じ形 */
+function fmtSlot(o){
+  if(!o)return '';
+  if(o.has_date===false)return `${o.start_time}${o.end_time?'〜'+o.end_time:''}（日程未定）`;
+  const p=jstParts(o.start);
+  const day=`${p.month}/${p.day}(${p.weekday})`;
+  if(o.has_time===false)return day;
+  return `${day} ${hm(o.start)}${o.end?'〜'+hm(o.end):''}`;
+}
+const todayYmd=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',
+  year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+function dueDateLabel(value){
+  const parts=String(value||'').split('-');
+  if(parts.length!==3)return '';
+  return Number(parts[0])+'年'+Number(parts[1])+'月'+Number(parts[2])+'日';
+}
+function dueBlock(r){
+  if(!r.due_date)return '';
+  const past=r.due_date<todayYmd();
+  return `<div class="due-date due-detail${past?' due-overdue':''}">回答の締切日：<b>${esc(dueDateLabel(r.due_date))}</b>${past?'<span>締切を過ぎています</span>':''}</div>`;
+}
+function initials(name){return (name||'?').slice(0,1);}
+
 async function call(path,opt){
   const res=await fetch(path,opt);
   const json=await res.json().catch(()=>({}));
@@ -73,122 +95,195 @@ async function call(path,opt){
 function storageKey(){return DATA?`ops_attendance_respondent_${DATA.request.id}`:'';}
 function loadSaved(){
   try{SAVED=JSON.parse(localStorage.getItem(storageKey())||'null');}catch(e){SAVED=null;}
-}
-function answerOf(optionId){
-  return (SAVED&&Array.isArray(SAVED.answers)?SAVED.answers:[]).find(a=>a.option_id===optionId)?.response||'';
+  PICKED={};
+  (SAVED&&Array.isArray(SAVED.answers)?SAVED.answers:[]).forEach(a=>{PICKED[a.option_id]=a.response;});
 }
 async function copyShareUrl(){
-  const input=document.getElementById('shareUrl'),status=document.getElementById('shareStatus');
+  const input=document.getElementById('attUrl');
   try{
     await navigator.clipboard.writeText(input.value);
-    status.textContent='URLをコピーしました。';
+    toast('URLをコピーしました');
   }catch(e){
+    // 権限が下りない環境（古い端末など）では選択状態にして手でコピーしてもらう
     input.focus();input.select();
-    status.textContent='URLを選択しました。コピー操作をしてください。';
+    toast('コピーできませんでした。選択された文字をコピーしてください');
   }
 }
-/* 候補ごとの集計。○を2点、△を1点として数え、いちばん点の高いものを「最有力」にする。
-   同点が並んだときは全部に付ける（勝手にどれか1つを選ばない） */
+/* 画面の下に一瞬だけ出す知らせ。アプリの toast と同じ見た目にする */
+let TOAST_T=null;
+function toast(msg){
+  let el=document.getElementById('toast');
+  if(!el){el=document.createElement('div');el.id='toast';document.body.appendChild(el);}
+  el.textContent=msg;el.classList.add('show');
+  clearTimeout(TOAST_T);
+  TOAST_T=setTimeout(()=>el.classList.remove('show'),2600);
+}
+
+/* 候補ごとの集計。誰が何を答えたかも一緒に持つ。
+   index.html の attendTally と同じ形（人の識別が user_id ではなく回答者idになるだけ） */
 function tallyOptions(){
+  const byOpt=new Map();
+  (DATA.request.options||[]).forEach(o=>byOpt.set(o.id,{ok:0,may:0,no:0,who:[]}));
+  (DATA.respondents||[]).forEach(p=>{
+    (p.answers||[]).forEach(a=>{
+      const t=byOpt.get(a.option_id);
+      if(!t||!ATT_MARK[a.response])return;
+      t[a.response]++;
+      t.who.push({name:p.name,response:a.response});
+    });
+  });
+  return byOpt;
+}
+/* ○がいちばん多い候補。同じ数なら全部に付ける（勝手にどれか1つを選ばない）。
+   index.html の attendBest と同じ数え方 */
+function bestOptions(tally){
+  let top=0;
+  (DATA.request.options||[]).forEach(o=>{const t=tally.get(o.id);if(t&&t.ok>top)top=t.ok;});
+  if(!top)return new Set();
+  return new Set((DATA.request.options||[]).filter(o=>tally.get(o.id).ok===top).map(o=>o.id));
+}
+
+function setSheet(html){
+  const s=document.getElementById('sheet');
+  s.innerHTML=html;
+  s.scrollTop=0;
+}
+
+/* 出欠の集計と回答欄。index.html の openAttendDetail と同じ並び・同じクラスで組む */
+function render(){
+  const r=DATA.request;
+  const tally=tallyOptions();
+  const best=bestOptions(tally);
+  const opts=r.options||[];
+  const confirmedOpt=r.confirmed?opts.find(o=>o.id===r.confirmed):null;
   const people=DATA.respondents||[];
-  return (DATA.request.options||[]).map(o=>{
-    const answers=people
-      .map(p=>({name:p.name,response:(p.answers||[]).find(a=>a.option_id===o.id)?.response}))
-      .filter(x=>MARK[x.response]);
-    const n=v=>answers.filter(a=>a.response===v).length;
-    const ok=n('ok'),may=n('may'),no=n('no');
-    return {option:o,answers:answers,ok:ok,may:may,no:no,score:ok*2+may};
+
+  const rows=opts.map(o=>{
+    const t=tally.get(o.id);
+    const isConf=r.confirmed===o.id;
+    const isBest=!r.confirmed&&best.has(o.id);
+    const tag=isConf?'<span class="tag ok">確定</span>'
+      :isBest?'<span class="tag ok">最有力</span>':'';
+    return `<div class="atl ${isConf?'on':''} ${isBest?'best':''}"
+      onclick="openOption('${esc(o.id)}')">
+      <span class="atl-d">${esc(fmtSlot(o))}${tag}</span>
+      ${['ok','may','no'].map(v=>`<span class="atl-c ${v} ${t[v]?'':'zero'}"
+        >${ATT_MARK[v]}<b>${t[v]}</b></span>`).join('')}
+    </div>`;
+  }).join('');
+
+  /* 確定した依頼には答えられない。アプリ側も確定後は回答欄を出さない */
+  const answerBlock=confirmedOpt?'':`
+    <div class="divider" style="margin:18px 0 14px"></div>
+    <label class="fl" for="respondentName">お名前<span class="req">*</span>
+      <span class="fl-sub">アカウント登録は不要です。同じブラウザからは、あとで回答を変更できます</span></label>
+    <input type="text" id="respondentName" maxlength="50" autocomplete="name"
+      value="${esc((SAVED&&SAVED.name)||'')}" placeholder="例：山田 太郎">
+    <label class="fl">あなたの回答<span class="fl-sub">候補ごとに選んでください</span></label>
+    <div class="attans" id="attans">${opts.map(o=>`
+      <div class="attrow">
+        <span class="atname">${esc(fmtSlot(o))}</span>
+        <span class="att3">${['ok','may','no'].map(v=>`
+          <button type="button" class="attb v-${v} ${PICKED[o.id]===v?'on':''}"
+            data-op="${esc(o.id)}" data-v="${v}"
+            aria-label="${esc(fmtSlot(o))} は${v==='ok'?'参加できる':v==='may'?'未定':'参加できない'}"
+            onclick="pick('${esc(o.id)}','${v}')">${ATT_MARK[v]}</button>`).join('')}</span>
+      </div>`).join('')}</div>
+    <div class="field-err" id="attErr" role="alert"></div>
+    <button class="btn pri block" style="margin-top:14px" id="attBtn"
+      onclick="submitAnswer()">${SAVED?'回答を更新する':'回答を送る'}</button>`;
+
+  setSheet(`<h3>${esc(r.subject)} <span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">出欠</span></h3>
+    <p class="page-sub" style="margin-top:0">${esc(r.sender_name)}さん ・ 誰でも回答OK</p>
+    ${dueBlock(r)}
+    <label class="fl" style="margin-top:14px">誰でも回答できる共有URL
+      <span class="fl-sub">このURLを知っている人は、ログインせず回答と結果閲覧ができます</span></label>
+    <div class="urlrow">
+      <input id="attUrl" readonly value="${esc(location.href)}" onclick="this.select()">
+      <button class="btn sm" onclick="copyShareUrl()">コピー</button>
+    </div>
+    ${r.body?`<div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>`:''}
+    ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
+      <b>${esc(fmtSlot(confirmedOpt))}</b> で確定しました。${confirmedOpt.has_date===false?'日程が未定のため、カレンダーには登録していません。':'カレンダーに予定を追加しています。'}</span></div>`:''}
+    <label class="fl" style="margin-top:18px">出欠集計
+      <span class="fl-sub">日程を押すと、誰が何を答えたかが見られます</span></label>
+    <p class="atsum"><b>${people.length}名</b>が回答</p>
+    <div class="atlist">${rows}</div>
+    ${answerBlock}`);
+}
+
+/* 日程1件の回答状況。○△× ごとに名前を並べる。
+   誰があて先かをこのページは知らないので「まだ回答していない人」は出さない。
+   シートを重ねずに中身だけ入れ替える（index.html の openAttendOption と同じ） */
+function openOption(optId){
+  const r=DATA.request;
+  const o=(r.options||[]).find(x=>x.id===optId);
+  if(!o)return;
+  const who=tallyOptions().get(optId).who;
+  const groups=[
+    ['ok', ATT_MARK.ok,  who.filter(x=>x.response==='ok')],
+    ['may',ATT_MARK.may, who.filter(x=>x.response==='may')],
+    ['no', ATT_MARK.no,  who.filter(x=>x.response==='no')],
+  ];
+  // 0人の区分は見出しごと出さない
+  const blocks=groups.filter(g=>g[2].length).map(([v,ttl,list])=>`
+    <div class="atgrp">
+      <div class="atgh"><span class="atgm ${v}">${ttl}</span><b>${list.length}名</b></div>
+      <div class="atppl">${list.map(x=>`<span class="atp"><span class="av">${esc(initials(x.name))}</span>
+        <span>${esc(x.name)}</span></span>`).join('')}</div>
+    </div>`).join('');
+  setSheet(`<button type="button" class="atback" onclick="render()">${ic('back')}出欠集計へ戻る</button>
+    <h3>${esc(fmtSlot(o))} の回答状況</h3>
+    <p class="page-sub" style="margin-top:0">${esc(r.subject)}</p>
+    ${blocks||'<p class="atsum">まだ回答はありません</p>'}`);
+}
+
+function pick(optId,v){
+  PICKED[optId]=v;
+  // 押した行のボタンだけ塗り替える。画面ごと作り直すと入力中の名前が消える
+  document.querySelectorAll(`#attans .attb[data-op="${CSS.escape(optId)}"]`).forEach(b=>{
+    b.classList.toggle('on',b.dataset.v===v);
   });
 }
-/* 日程の行を押したときに、誰が何を答えたかを開いたり閉じたりする */
-function toggleTally(id){
-  const box=document.getElementById('pa_people_'+id);
-  const row=document.getElementById('pa_row_'+id);
-  if(!box||!row)return;
-  const open=box.hasAttribute('hidden');
-  if(open)box.removeAttribute('hidden'); else box.setAttribute('hidden','');
-  row.setAttribute('aria-expanded',open?'true':'false');
-}
-function renderResults(){
-  const people=DATA.respondents||[];
-  const tally=tallyOptions();
-  const top=Math.max(0,...tally.map(t=>t.score));
-  const rows=tally.map(t=>{
-    const o=t.option,best=top>0&&t.score===top;
-    const when=esc(slotText(o));
-    return `<button type="button" class="pa-row${best?' pa-best':''}" id="pa_row_${esc(o.id)}"
-        aria-expanded="false" aria-controls="pa_people_${esc(o.id)}" onclick="toggleTally('${esc(o.id)}')">
-        <span class="pa-when">${when}</span>${best?'<span class="pa-tag">最有力</span>':''}
-        <span class="pa-counts"><span class="pa-c ok">○ ${t.ok}</span><span class="pa-c may">△ ${t.may}</span><span class="pa-c no">× ${t.no}</span></span>
-      </button>
-      <div class="pa-people" id="pa_people_${esc(o.id)}" hidden>
-        <div class="people">${t.answers.length
-          ? t.answers.map(a=>`<div class="person"><span>${esc(a.name)}</span><span class="mark ${a.response}">${MARK[a.response]}</span></div>`).join('')
-          : '<div class="empty">まだ回答はありません。</div>'}</div>
-      </div>`;
-  }).join('');
-  return `<div class="card" id="attendanceResults"><h2>出欠集計</h2>
-    <p class="sub">日程を押すと、誰が何を答えたかが見られます</p>
-    <p class="pa-total"><b>${people.length}名</b>が回答</p>
-    <div class="pa-rows">${rows}</div></div>`;
-}
-function render(){
-  const app=document.getElementById('attendanceApp'),r=DATA.request;
-  const fixed=r.confirmed?(r.options||[]).find(o=>o.id===r.confirmed):null;
-  const duePast=!!r.due_date&&r.due_date<todayYmd();
-  const due=r.due_date?`<div class="due-date${duePast?' due-overdue':''}">回答の締切日：${esc(dueLabel(r.due_date))}${duePast?' ・ 締切を過ぎています':''}</div>`:'';
-  /* 候補ごとに、日程を左・○△×を右に並べる。ラジオの名前は日程が分かるものにして、
-     読み上げでも「どの日程のどれを選ぶのか」が伝わるようにする */
-  const answerRows=(r.options||[]).map(o=>{
-    const when=slotText(o);
-    /* fieldset + legend は使わない。legend は flex の子として並ばず、
-       日程が行の上に飛び出してしまう。読み上げ用の名前は各ラジオに持たせている */
-    return `<div class="pa-ans" role="group" aria-label="${esc(when)}"><span class="pa-when">${esc(when)}</span>
-      <div class="choices">${['ok','may','no'].map(v=>`<label class="choice ${v}">
-        <input type="radio" name="answer_${esc(o.id)}" value="${v}" ${answerOf(o.id)===v?'checked':''}
-          aria-label="${esc(when)} は${v==='ok'?'参加できる':v==='may'?'未定':'参加できない'}">
-        <span>${MARK[v]}</span></label>`).join('')}</div></div>`;
-  }).join('');
-  const form=fixed?'' : `<div class="card">
-    <div class="field"><label for="respondentName">お名前<span class="req">*</span></label>
-      <input type="text" id="respondentName" maxlength="50" autocomplete="name" value="${esc(SAVED?.name||'')}" placeholder="例：山田 太郎">
-      <div class="sub" style="margin-top:5px">アカウント登録は不要です。同じブラウザからは、あとで回答を変更できます。</div></div>
-    <h2 style="margin-top:20px">あなたの回答</h2>
-    <p class="sub">候補ごとに選んでください</p>
-    <div>${answerRows}</div>
-    <div id="formError" class="error" role="alert"></div>
-    <button id="answerButton" onclick="submitAnswer()">${SAVED?'回答を更新する':'回答を送る'}</button></div>`;
-  app.className='';
-  const share=`<div class="card"><h2>共有URL</h2><p class="sub">このURLを知っている人は、ログインせず回答と結果の確認ができます。</p><div class="share-row"><input type="text" id="shareUrl" readonly value="${esc(location.href)}" onclick="this.select()"><button type="button" onclick="copyShareUrl()">コピー</button></div><div class="sub share-status" id="shareStatus" aria-live="polite"></div></div>`;
-  app.innerHTML=`<div class="card">
-      <div class="pa-head"><h1>${esc(r.subject)}</h1><span class="pa-badge">出欠</span></div>
-      <div class="meta">${esc(r.sender_name)}さん ・ 誰でも回答OK ・ ${esc(fmt(r.created_at))}</div>
-      ${due}${r.body?`<div class="body">${esc(r.body)}</div>`:''}
-      ${fixed?`<div class="fixed">${esc(slotText(fixed))} で確定しました${fixed.has_date===false?'（カレンダーには登録していません）':''}</div>`:''}
-    </div>${renderResults()}${form}${share}`;
-}
+
 async function submitAnswer(){
-  const name=document.getElementById('respondentName').value.trim();
-  const err=document.getElementById('formError');
-  if(!name){err.textContent='お名前を入力してください。';document.getElementById('respondentName').focus();return;}
+  const err=document.getElementById('attErr');
+  const btn=document.getElementById('attBtn');
+  const input=document.getElementById('respondentName');
+  err.classList.remove('show');
+  const name=input.value.trim();
+  if(!name){err.textContent='お名前を入力してください';err.classList.add('show');input.focus();return;}
   const answers=[];
   for(const o of DATA.request.options||[]){
-    const picked=document.querySelector(`input[name="answer_${CSS.escape(o.id)}"]:checked`);
-    if(!picked){err.textContent='すべての候補に回答してください。';return;}
-    answers.push({option_id:o.id,response:picked.value});
+    if(!PICKED[o.id]){err.textContent='すべての候補に答えてください';err.classList.add('show');return;}
+    answers.push({option_id:o.id,response:PICKED[o.id]});
   }
-  const btn=document.getElementById('answerButton');btn.disabled=true;btn.textContent='保存中…';err.textContent='';
+  const label=btn.textContent;
+  btn.disabled=true;btn.textContent='送信中…';
   try{
-    const out=await call(`/api/attendance/${encodeURIComponent(TOKEN)}/response`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,answers,respondent_key:SAVED?.key||''})});
+    const out=await call(`/api/attendance/${encodeURIComponent(TOKEN)}/response`,
+      {method:'PUT',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({name,answers,respondent_key:(SAVED&&SAVED.key)||''})});
     SAVED={key:out.respondent_key,id:out.respondent.id,name,answers};
     localStorage.setItem(storageKey(),JSON.stringify(SAVED));
     DATA=await call(`/api/attendance/${encodeURIComponent(TOKEN)}`);
     render();
-  }catch(e){err.textContent=e.message;btn.disabled=false;btn.textContent=SAVED?'回答を更新する':'回答を送る';}
+    toast('回答を送りました');
+  }catch(e){
+    err.textContent=e.message;err.classList.add('show');
+    btn.disabled=false;btn.textContent=label;
+  }
 }
+
 async function start(){
-  try{DATA=await call(`/api/attendance/${encodeURIComponent(TOKEN)}`);loadSaved();render();}
-  catch(e){const app=document.getElementById('attendanceApp');app.className='card';app.innerHTML=`<h1>出欠確認を開けませんでした</h1><p>${esc(e.message)}</p>`;}
+  try{
+    DATA=await call(`/api/attendance/${encodeURIComponent(TOKEN)}`);
+    loadSaved();
+    render();
+  }catch(e){
+    setSheet(`<h3>出欠確認を開けませんでした</h3>
+      <p class="page-sub" style="margin-top:4px">${esc(e.message)}</p>`);
+  }
 }
 start();
 </script>
