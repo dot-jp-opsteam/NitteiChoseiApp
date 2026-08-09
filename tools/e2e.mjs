@@ -655,8 +655,15 @@ async function testAttendance() {
      候補1件で作り、その場ですぐ確定させるだけで、専用のAPIは足していない */
   check('出欠確認フォームは名前・説明・日付の3つだけ',
     appHtml.includes('function openRsvpForm()')
-      && appHtml.includes('id="rsvpTitle"') && appHtml.includes('id="rsvpBody"') && appHtml.includes('id="rsvpDate"')
+      && appHtml.includes('id="rsvpTitle"') && appHtml.includes('id="rsvpBody"') && appHtml.includes('id="rsvpCalWrap"')
       && !appHtml.includes('id="rsvpTime"'), true);
+  /* 日付は入力欄ではなく、日程調整と同じカレンダーから選ぶ。
+     ただしなぞって複数選ぶ仕組みは無く、押した1日だけが選択になる */
+  check('出欠確認の日付はカレンダーから1日だけ選ぶ',
+    appHtml.includes('function rsvpCalendarHTML()')
+      && appHtml.includes('function pickRsvpDate(date)')
+      && appHtml.includes('RSVPCAL.date=RSVPCAL.date===date?\'\':date;')
+      && !appHtml.includes('type="date" id="rsvpDate"'), true);
   check('出欠確認は支部の全スタッフ固定で対象を選ばせない',
     appHtml.includes("target_label:'支部の全スタッフ',recipient_ids:ids")
       && appHtml.includes('const ids=branchStaff().filter(u=>u.id!==ME.id).map(u=>u.id);'), true);
@@ -680,6 +687,19 @@ async function testAttendance() {
   check('場所を入力しないイベントは行ごと表示しない',
     appHtml.includes('${ev.location?`<div class="meta">')
       && !appHtml.includes("esc(ev.location||'—')"), true);
+
+  /* カレンダー画面の操作バー。自分のGoogleカレンダーを隠すボタンと、
+     月／リストの切り替えタブは分かりにくいという指摘で取り除いた。
+     全社カレンダーへ飛ぶボタンは、縁も背景も無い ghost 表示だと押せることが
+     伝わらなかったので、ふつうのボタンの見た目に変え、遷移を示す矢印を足した */
+  check('自分のカレンダーを隠すボタンは無い',
+    appHtml.includes('toggleMyCal') || appHtml.includes('myCalHidden') || appHtml.includes('MYCAL_HIDE_KEY'), false);
+  check('月／リストの切り替えタブは無い',
+    appHtml.includes('calview-tabs') || appHtml.includes('function agendaView(') || appHtml.includes('function setCalMode('), false);
+  check('全社カレンダーのボタンはふつうのボタンの見た目にする',
+    appHtml.includes('class="btn sm" onclick="openSharedCalendarSite()"')
+      && appHtml.includes("全社カレンダー${ic('chevron')}</button>")
+      && !appHtml.includes('class="btn ghost sm" onclick="openSharedCalendarSite()"'), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
   /* 日付は入力欄をやめてカレンダーで選ぶ形にした */

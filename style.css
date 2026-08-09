@@ -995,7 +995,7 @@
   .calsec-head h2{margin:0;font-size:18px;display:flex;align-items:center;gap:8px}
   .calsec-tools{margin-left:auto;display:flex;gap:6px;align-items:center}
   /* ボタンのラベルは折り返させない。折り返すと「ドッ／ト」のように割れる */
-  .calview-tabs button,.calfull-btn{white-space:nowrap}
+  .calfull-btn{white-space:nowrap}
   /* 狭い画面では見出しと同じ行に5つも入らないので、操作だけ次の行に落とす */
   @media(max-width:760px){
     .calsec-head{flex-wrap:wrap}
@@ -1054,21 +1054,6 @@
   .noti .ns{font-size:12px;color:var(--mut)}
   .noti.unread{background:var(--brand-soft);border-radius:8px;padding-left:8px;padding-right:8px}
 
-  /* calendar: ビュー切替 */
-  .calview-tabs{display:flex;gap:6px}
-  .calview-tabs button{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;
-    font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;min-height:36px}
-  .calview-tabs button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
-  .agenda{display:flex;flex-direction:column}
-  .agenda .ag{display:flex;gap:11px;padding:11px 4px;border-bottom:1px solid var(--line2)}
-  .agenda .ag:last-child{border-bottom:0}
-  .agenda .agd{flex:none;width:52px;text-align:center}
-  .agenda .agd .agn{font-size:18px;font-weight:800;line-height:1}
-  .agenda .agd .agw{font-size:11px;color:var(--sub)}
-  .agenda .agbar{width:4px;border-radius:2px;background:var(--brand);flex:none}
-  .agenda .agbar.iv{background:var(--iv)}
-  .agenda .agt{font-weight:600}
-  .agenda .ags{font-size:12px;color:var(--sub)}
   .legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-right:3px}
 
   /* date pager (面談予約) */
@@ -1682,18 +1667,6 @@
   .cal .navbtn:first-child:hover{transform:translateX(-2px)}
   .cal .navbtn:last-child:hover{transform:translateX(2px)}
 
-  /* 月／リストの切り替え */
-  .calview-tabs button{transition:border-color var(--t-fast) var(--ease),
-                                 background var(--t-fast) var(--ease),
-                                 color var(--t-fast) var(--ease)}
-  .calview-tabs button.on{animation:v2-tap .34s var(--pop)}
-
-  /* リスト表示の各行 */
-  .agenda .ag{transition:padding-left var(--t-fast) var(--ease),background var(--t-fast) var(--ease)}
-  .agenda .ag:hover{padding-left:10px;background:var(--panel2)}
-  .agenda .agbar{transition:transform var(--t-mid) var(--ease)}
-  .agenda .ag:hover .agbar{transform:scaleY(1.06)}
-
   /* ---------- 12. 通知 ----------
      未読があることに気づいてほしいので、数字だけ跳ねさせる */
   .bell .badge{animation:v2-pop .5s var(--pop) backwards;animation-delay:.5s}
@@ -1707,12 +1680,11 @@
   @media (prefers-reduced-motion:reduce){
     .view,.view>*,.hex .hxb,.st-fixed::before,.sheet,.bell .badge,
     .atmodal,.atmodal-card,
-    .calcell.sel::after,.calview-tabs button.on,
+    .calcell.sel::after,
     .seg input:checked + .segb,.modechip.on,.pickchip.on{animation:none}
     .calcell.sel::after{display:none}
     .calcell:not(.out):hover .dn,.calcell .chip:hover,
-    .cal .navbtn:hover,.bell:hover,.agenda .ag:hover .agbar{transform:none}
-    .agenda .ag:hover{padding-left:4px}
+    .cal .navbtn:hover,.bell:hover{transform:none}
     .cgroup .cwrap{transition:none}
     .btn.pri:hover::after{animation:none}
     .hex:hover,.hex:focus-visible{transform:none}

@@ -214,13 +214,9 @@ const ICON={
   lock:'<rect pathLength="1" x="4.2" y="10.2" width="15.6" height="10.6" rx="2.2"/>'
       +'<path pathLength="1" d="M8 10.2V7.4a4 4 0 0 1 8 0v2.8"/>',
   /* 目。見えている状態と、斜線を引いて隠している状態の2つを持つ */
-  /* 自分のGoogleカレンダーの出し入れに使う。人の形にして、
-     全社カレンダーの目のボタンと押し間違えないようにしている */
+  /* Googleカレンダー連携の案内で使う人の形 */
   user:'<circle pathLength="1" cx="12" cy="8" r="3.6"/>'
      +'<path pathLength="1" d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>',
-  'user-off':'<circle pathLength="1" cx="12" cy="8" r="3.6"/>'
-     +'<path pathLength="1" d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>'
-     +'<path pathLength="1" d="M4 4l16 16"/>',
   eye:'<path pathLength="1" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/>'
      +'<circle pathLength="1" cx="12" cy="12" r="3.2"/>',
   'eye-off':'<path pathLength="1" d="M2.5 12S6 5.5 12 5.5c1.6 0 3 .5 4.2 1.1"/>'
@@ -1606,7 +1602,6 @@ const NAV={
 };
 let currentTab='home';
 let calYM=null, calSel=null; // イベントカレンダーの表示月・選択日
-let calMode='month';         // 'month' | 'list'（表示切替）
 let calFull=false;           // カレンダーだけを画面いっぱいに出しているか
 /* 予定の見せ方。以前は「ドット（色の丸）」と「文字」を切り替えられたが、
    ドットだと何の予定か分からず一覧を開き直す手間があったため、文字だけに一本化した。
@@ -2697,16 +2692,6 @@ function sharedItemsFor(y,m){
    サーバーは「呼んだ本人のカレンダー」しか返さないので、
    ここに並ぶ予定が他の人の画面に出ることはない */
 let MY_CAL={events:{},loading:{},connected:null};
-const MYCAL_HIDE_KEY='ops_hide_mycal_v1';
-function myCalHidden(){
-  try{return localStorage.getItem(MYCAL_HIDE_KEY)==='1';}catch(e){return false;}
-}
-function toggleMyCal(){
-  const next=!myCalHidden();
-  try{localStorage.setItem(MYCAL_HIDE_KEY,next?'1':'0');}catch(e){}
-  render();
-  toast(next?'自分のGoogleカレンダーの予定を隠しました':'自分のGoogleカレンダーの予定を表示しました');
-}
 function ensureMyCal(y,m){
   const key=sharedKey(y,m);
   if(MY_CAL.events[key])return MY_CAL.events[key];
@@ -2730,7 +2715,6 @@ function ensureMyCal(y,m){
    自分にしか見えないものなので、印を付けて見分けられるようにする */
 function myCalItemsFor(y,m){
   const list=ensureMyCal(y,m);
-  if(myCalHidden())return [];
   return list.map(e=>({
     id:'my_'+e.id,title:e.title,start:e.start,allDay:e.allDay,location:e.location,
     shared:true,mine:true,
@@ -2820,9 +2804,7 @@ function eventsSection(){
   shared.forEach(e=>{const k=ymd(sharedDate(e));(shByDay[k]=shByDay[k]||[]).push(e);});
 
   let body;
-  if(calMode==='list'){
-    body=agendaView(list,ivs,shared,y,m);
-  }else{
+  {
     const startDow=new Date(y,m,1).getDay();
     const daysInMonth=new Date(y,m+1,0).getDate();
     const todayKey=ymd(new Date());
@@ -2898,29 +2880,20 @@ function eventsSection(){
 
   /* 全社カレンダーそのものを見たいときのための出口。
      このアプリは読み取りだけなので、書き込みや細かい確認はGoogleカレンダー側で行う。
-     スタッフだけに見せ、連携できているときだけ出す */
+     スタッフだけに見せ、連携できているときだけ出す。
+     以前は縁も塗りも無い ghost ボタンで、押せることが伝わりにくかったため、
+     ふつうのボタンと同じ縁・背景にし、遷移を示す矢印を右に添えた */
   /* 隣に、自分の画面から全社の予定を隠すボタンを並べる。
      この設定はこの端末にだけ残るので、ほかの人の見え方は変わらない */
   const hidden=sharedCalHidden();
   const sharedBtn=(sharedCalOn()&&SHARED_CAL.configured&&SHARED_CAL.calendarId)
-    ? `<button class="btn ghost sm" onclick="openSharedCalendarSite()"
-        title="${esc(SHARED_CAL.name||'全社カレンダー')}をGoogleカレンダーで開く">${ic('calendar')}全社カレンダー</button>
+    ? `<button class="btn sm" onclick="openSharedCalendarSite()"
+        title="${esc(SHARED_CAL.name||'全社カレンダー')}をGoogleカレンダーで開く">${ic('calendar')}全社カレンダー${ic('chevron')}</button>
        <button class="btn ghost sm iconly ${hidden?'off':''}" onclick="toggleSharedCal()"
         title="${hidden?'全社カレンダーの予定を自分の画面に表示する':'全社カレンダーの予定を自分の画面から隠す'}"
         aria-label="${hidden?'全社カレンダーの予定を表示する':'全社カレンダーの予定を隠す'}">${ic(hidden?'eye-off':'eye')}</button>`
     : '';
-  /* 自分のGoogleカレンダーを重ねているときの、表示・非表示の切り替え。
-     連携していない人には出しても意味がないので出さない */
-  const myHidden=myCalHidden();
-  const myCalBtn=MY_CAL.connected
-    ? `<button class="btn ghost sm iconly ${myHidden?'off':''}" onclick="toggleMyCal()"
-        title="${myHidden?'自分のGoogleカレンダーの予定を表示する（自分だけに見えます）':'自分のGoogleカレンダーの予定を隠す'}"
-        aria-label="${myHidden?'自分の予定を表示する':'自分の予定を隠す'}">${ic(myHidden?'user-off':'user')}</button>`
-    : '';
-  const viewTabs=`${sharedBtn}${myCalBtn}<div class="calview-tabs">
-        <button class="${calMode==='month'?'on':''}" onclick="setCalMode('month')">月</button>
-        <button class="${calMode==='list'?'on':''}" onclick="setCalMode('list')">リスト</button>
-      </div>`;
+  const viewTabs=sharedBtn;
   const listBlock=`<div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
     ${cards}`;
 
@@ -2948,28 +2921,6 @@ function eventsSection(){
     ${cal}
     ${listBlock}`;
 }
-// リスト（アジェンダ）表示：当月のイベント＋面談を時系列で
-function agendaView(list,ivs,shared,y,m){
-  const items=[];
-  (shared||[]).forEach(e=>{const dt=sharedDate(e);
-    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,
-      sub:`${e.allDay?'終日':hm(e.start)}・${e.mine?'あなたのGoogleカレンダー':'全体予定表'}`,
-      key:ymd(dt),color:e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR});});
-  list.forEach(e=>{const dt=new Date(e.start_datetime);const clock=eventClock(e);
-    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'ev',title:e.title,sub:clock?`${clock}${e.location?'・'+e.location:''}`:(e.location||''),key:ymd(dt),color:e.color||EVENT_COLORS[0].v});});
-  ivs.forEach(iv=>{const dt=new Date(iv.confirmed_datetime);
-    if(dt.getFullYear()===y&&dt.getMonth()===m)items.push({dt,type:'iv',title:ivLabel(iv),sub:hm(iv.confirmed_datetime),key:ymd(dt)});});
-  items.sort((a,b)=>a.dt-b.dt);
-  if(!items.length)return `<div class="empty" style="padding:26px"><div class="ei">${ic('calendar')}</div><p>${m+1}月の予定はありません。</p></div>`;
-  return `<div class="agenda">`+items.map(it=>{
-    const w=WD_JP[it.dt.getDay()];
-    return `<div class="ag" ${it.type==='ev'?`style="cursor:pointer" onclick="calSelect('${it.key}')"`:''}>
-      <span class="agd"><span class="agn" style="${it.dt.getDay()===0?'color:var(--sun)':it.dt.getDay()===6?'color:var(--sat)':''}">${it.dt.getDate()}</span><span class="agw">${w}</span></span>
-      <span class="agbar ${it.type==='iv'?'iv':''}" ${it.type==='ev'?`style="background:${it.color}"`:''}></span>
-      <span style="flex:1"><span class="agt">${esc(it.title)}</span><br><span class="ags">${esc(it.sub)}</span></span>
-    </div>`;}).join('')+`</div>`;
-}
-function setCalMode(mode){calMode=mode;render();}
 function calShift(delta){let m=calYM.m+delta,y=calYM.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}calYM={y,m};calSel=null;render();}
 function calSelect(key){calSel=(key&&key!==calSel)?key:null;render();}
 /* 出欠の回答は専用APIで送る。DB全体を保存し直す方式だと、
@@ -4720,7 +4671,13 @@ function openRequestForm(kind){
    だけ。確定するとサーバー側でカレンダーに予定ができ、以後の○△×は
    そのカレンダー予定（イベント）の回答として集計される（attendResponses参照）。
    対象は支部の全スタッフに固定。インターン生は依頼を受け取る手段が無いため対象外 */
+/* 出欠確認の日付選び。日程調整のカレンダー（reqCalendarCells）をそのまま使うが、
+   なぞって複数選ぶ仕組みは要らないので、押した日を1つだけ選ぶ形にしてある
+   （もう一度押すと選び直しになる） */
+let RSVPCAL=null;
 function openRsvpForm(){
+  const now=new Date();
+  RSVPCAL={y:now.getFullYear(),m:now.getMonth(),date:''};
   openSheet(`<h3>出欠確認を送る</h3>
     <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の全スタッフに、参加・未定・不参加で答えてもらいます。</p>
     <label class="fl">予定の名前<span class="req">*</span></label>
@@ -4728,22 +4685,56 @@ function openRsvpForm(){
     <div class="field-err" id="rsvpTitleE"></div>
     <label class="fl">説明</label>
     <textarea id="rsvpBody" rows="4" placeholder="伝えたいことがあれば書いてください。"></textarea>
-    <label class="fl">日付<span class="req">*</span></label>
-    <input type="date" id="rsvpDate" min="${ymd(new Date())}">
+    <label class="fl" style="margin-top:16px">日付<span class="req">*</span></label>
+    <div id="rsvpCalWrap">${rsvpCalendarHTML()}</div>
     <div class="field-err" id="rsvpDateE"></div>
     <div class="field-err" id="rsvpErr"></div>
     <button class="btn pri block" style="margin-top:18px" id="rsvpBtn" onclick="submitRsvp()">出欠確認を送る</button>`);
 }
+function rsvpCalendarHTML(){
+  const today=ymd(new Date());
+  const cells=reqCalendarCells(RSVPCAL.y,RSVPCAL.m,RSVPCAL.date?[RSVPCAL.date]:[],today);
+  const head='日月火水木金土'.split('').map((w,i)=>
+    `<div class="rc-w${i===0?' sun':i===6?' sat':''}">${w}</div>`).join('');
+  const body=cells.map(c=>{
+    if(!c)return '<div class="rc-d blank"></div>';
+    if(c.past)return `<div class="rc-d past">${c.day}</div>`;
+    return `<div class="rc-d${c.on?' on':''}" data-date="${c.date}" role="button" tabindex="0"
+      aria-pressed="${c.on}" aria-label="${c.date}"
+      onclick="pickRsvpDate('${c.date}')"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();pickRsvpDate('${c.date}')}">${c.day}</div>`;
+  }).join('');
+  return `<div class="reqcal">
+      <div class="rc-head">
+        <button type="button" class="rc-nav" onclick="moveRsvpCal(-1)" aria-label="前の月">${ic('chevron-l')}</button>
+        <b>${RSVPCAL.y}年${RSVPCAL.m+1}月</b>
+        <button type="button" class="rc-nav" onclick="moveRsvpCal(1)" aria-label="次の月">${ic('chevron')}</button>
+      </div>
+      <div class="rc-grid">${head}${body}</div>
+    </div>
+    ${RSVPCAL.date?`<p class="page-sub" style="margin-top:8px">選んだ日：<b>${esc(reqDateLabel(RSVPCAL.date))}</b></p>`:''}`;
+}
+function moveRsvpCal(delta){
+  const d=new Date(RSVPCAL.y,RSVPCAL.m+delta,1);
+  RSVPCAL.y=d.getFullYear();RSVPCAL.m=d.getMonth();
+  document.getElementById('rsvpCalWrap').innerHTML=rsvpCalendarHTML();
+}
+/* もう一度同じ日を押したら選び直し（未選択）に戻す。1つしか選べないので
+   なぞる仕組みは無く、押した日がそのまま選択そのものになる */
+function pickRsvpDate(date){
+  RSVPCAL.date=RSVPCAL.date===date?'':date;
+  document.getElementById('rsvpCalWrap').innerHTML=rsvpCalendarHTML();
+}
 async function submitRsvp(){
   const title=document.getElementById('rsvpTitle').value.trim();
   const body=document.getElementById('rsvpBody').value.trim();
-  const date=document.getElementById('rsvpDate').value;
+  const date=RSVPCAL.date;
   const titleE=document.getElementById('rsvpTitleE'),dateE=document.getElementById('rsvpDateE');
   const err=document.getElementById('rsvpErr'),btn=document.getElementById('rsvpBtn');
   titleE.classList.remove('show');dateE.classList.remove('show');err.classList.remove('show');
   let valid=true;
   if(!title){titleE.textContent='予定の名前を入力してください';titleE.classList.add('show');valid=false;}
-  if(!date){dateE.textContent='日付を選んでください';dateE.classList.add('show');valid=false;}
+  if(!date){dateE.textContent='カレンダーから日付を選んでください';dateE.classList.add('show');valid=false;}
   if(!valid)return;
 
   const ids=branchStaff().filter(u=>u.id!==ME.id).map(u=>u.id);
