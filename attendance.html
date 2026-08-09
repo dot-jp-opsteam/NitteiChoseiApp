@@ -1,22 +1,13 @@
 <!doctype html>
-<html lang="ja">
+<!-- 配色は常にライト。ログインしていない人が開くページなので、アプリ本体の
+     テーマ設定（localStorage）は読まない。apply.html と同じ扱いにしている -->
+<html lang="ja" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#f7fafb">
 <title>出欠確認 | OPS日調</title>
-<!-- 配色はアプリ本体と同じ指定に従う。既定はダーク。
-     CSSより先に data-theme を確定させないと、一瞬だけ違う配色が見えてしまう -->
-<script>
-(function(){
-  var el=document.documentElement;
-  try{
-    var t=localStorage.getItem('ops_theme_v1');
-    el.setAttribute('data-theme',t==='light'?'light':'dark');
-  }catch(e){el.setAttribute('data-theme','dark');}
-})();
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"
@@ -27,12 +18,13 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<!-- アプリのシートをそのまま再現する。ログインしていない人が開くページなので、
-     掴みバーと「背景を押して閉じる」は付けない。閉じても戻る先がない -->
-<div class="scrim open">
-  <div class="sheet" id="sheet">
+<!-- アプリのシートの中身をそのまま再現する。ただしこれは重ねて出すシートではなく
+     1枚のページなので、掴みバーと「背景を押して閉じる」は付けない。
+     .atpage-in がボトムシートの制約を打ち消し、スマホでは画面いっぱいに広がる -->
+<div class="atpage">
+  <main class="sheet atpage-in" id="sheet">
     <p class="page-sub">出欠確認を読み込んでいます…</p>
-  </div>
+  </main>
 </div>
 
 <script>
@@ -145,8 +137,11 @@ function bestOptions(tally){
 
 function setSheet(html){
   const s=document.getElementById('sheet');
+  // ページを描き直すときに重ね表示が取り残されないようにする
+  closeOption();
   s.innerHTML=html;
-  s.scrollTop=0;
+  // シートではなくページなので、スクロール位置はウインドウ側にある
+  window.scrollTo(0,0);
 }
 
 /* 出欠の集計と回答欄。index.html の openAttendDetail と同じ並び・同じクラスで組む */
@@ -214,7 +209,8 @@ function render(){
 
 /* 日程1件の回答状況。○△× ごとに名前を並べる。
    誰があて先かをこのページは知らないので「まだ回答していない人」は出さない。
-   シートを重ねずに中身だけ入れ替える（index.html の openAttendOption と同じ） */
+   集計の上に重ねて出す。背後の集計が薄暗く透けるので、いま何の内訳を見ているかが
+   分かる。閉じ方は外側を押す・ESC・「出欠集計へ戻る」の3つ */
 function openOption(optId){
   const r=DATA.request;
   const o=(r.options||[]).find(x=>x.id===optId);
@@ -232,11 +228,38 @@ function openOption(optId){
       <div class="atppl">${list.map(x=>`<span class="atp"><span class="av">${esc(initials(x.name))}</span>
         <span>${esc(x.name)}</span></span>`).join('')}</div>
     </div>`).join('');
-  setSheet(`<button type="button" class="atback" onclick="render()">${ic('back')}出欠集計へ戻る</button>
-    <h3>${esc(fmtSlot(o))} の回答状況</h3>
+  setOptionModal(`<button type="button" class="atback" onclick="closeOption()">${ic('back')}出欠集計へ戻る</button>
+    <h3 id="atModalTitle">${esc(fmtSlot(o))} の回答状況</h3>
     <p class="page-sub" style="margin-top:0">${esc(r.subject)}</p>
     ${blocks||'<p class="atsum">まだ回答はありません</p>'}`);
 }
+
+/* 回答状況の重ね表示。開くたびに作り、閉じるときに丸ごと捨てる */
+function setOptionModal(html){
+  let m=document.getElementById('atModal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='atModal';
+    m.className='atmodal';
+    m.setAttribute('role','dialog');
+    m.setAttribute('aria-modal','true');
+    m.setAttribute('aria-labelledby','atModalTitle');
+    // カード自身を押したときは閉じない。外側（この入れ物）を押したときだけ閉じる
+    m.addEventListener('click',e=>{if(e.target===m)closeOption();});
+    document.body.appendChild(m);
+  }
+  // 読み上げとキー操作の起点をカードへ移す。戻るボタンに移すと、
+  // マウスで開いただけでも枠が光ってしまうので、カード自身を掴ませる
+  m.innerHTML=`<div class="atmodal-card" tabindex="-1">${html}</div>`;
+  document.body.classList.add('atmodal-lock');
+  m.firstElementChild.focus();
+}
+function closeOption(){
+  const m=document.getElementById('atModal');
+  if(m)m.remove();
+  document.body.classList.remove('atmodal-lock');
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeOption();});
 
 function pick(optId,v){
   PICKED[optId]=v;

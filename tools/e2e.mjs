@@ -546,16 +546,35 @@ async function testAttendance() {
   const attendHtml = fs.readFileSync(path.join(ROOT, 'attendance.html'), 'utf8');
   check('公開回答ページはアプリと同じ style.css を読む',
     attendHtml.includes('href="/style.css"') && !attendHtml.includes('<style>'), true);
-  check('公開回答ページはアプリのシートの中に出る',
-    attendHtml.includes('class="scrim open"') && attendHtml.includes('class="sheet"'), true);
-  check('公開回答ページの配色はアプリの設定に従う',
-    attendHtml.includes("localStorage.getItem('ops_theme_v1')"), true);
+  /* 重ねて出すシートではなく1枚のページ。ボトムシートのままだとスマホで
+     上に12vhぶんの黒い帯が残るので、.atpage-in で打ち消して画面いっぱいにする */
+  check('公開回答ページは1枚のページとして画面いっぱいに出る',
+    attendHtml.includes('class="atpage"')
+      && attendHtml.includes('class="sheet atpage-in"')
+      && !attendHtml.includes('class="scrim open"')
+      && styleSource.includes('.sheet.atpage-in{max-height:none;border-radius:0'), true);
+  /* ログインしていない人が開くページなので、アプリ本体のテーマ設定は読まない */
+  check('公開回答ページの配色は常にライト',
+    attendHtml.includes('<html lang="ja" data-theme="light">')
+      && !attendHtml.includes("localStorage.getItem('ops_theme_v1')"), true);
   check('公開回答ページに出欠集計がある',
     attendHtml.includes('出欠集計') && attendHtml.includes('日程を押すと、誰が何を答えたかが見られます'), true);
   check('いちばん人数の多い候補に最有力が付く',
     attendHtml.includes('class="atl ') && attendHtml.includes('最有力'), true);
-  check('集計の行を押すと回答状況に入れ替わる',
-    attendHtml.includes('function openOption(') && attendHtml.includes('出欠集計へ戻る'), true);
+  /* 集計は背後に残したまま、内訳を上に重ねて出す。
+     閉じ方は「外側を押す」「ESC」「出欠集計へ戻る」の3つとも残すこと */
+  check('集計の行を押すと回答状況が重なって出る',
+    attendHtml.includes('function openOption(')
+      && attendHtml.includes('function setOptionModal(')
+      && attendHtml.includes('出欠集計へ戻る')
+      && styleSource.includes('.atmodal{position:fixed;inset:0;z-index:60'), true);
+  check('回答状況は外側・ESC・戻るボタンの3つで閉じられる',
+    attendHtml.includes('if(e.target===m)closeOption();')
+      && attendHtml.includes("if(e.key==='Escape')closeOption();")
+      && attendHtml.includes('class="atback" onclick="closeOption()"'), true);
+  check('回答状況を開いている間は背後のページを動かさない',
+    attendHtml.includes("classList.add('atmodal-lock')")
+      && styleSource.includes('body.atmodal-lock{overflow:hidden}'), true);
   check('あなたの回答が候補ごとに並ぶ',
     attendHtml.includes('あなたの回答') && attendHtml.includes('候補ごとに選んでください'), true);
   /* この2つは消してはいけない。名前が無いと誰の回答か分からなくなり、
