@@ -1,6 +1,5 @@
 /* =========================================================
    認証ヘルパー
-   - パスワードのハッシュ化・検証（scrypt）
    - セッショントークンの生成・検証（DBには sha256(token) のみ保存）
    - リクエストからの Bearer トークン取り出し
    すべてNode標準のcrypto/utilのみで実装（追加npm依存なし）
@@ -11,8 +10,6 @@
      sessionStorage（タブごとに独立）に任せている。Cookieは一切使わない。
    ========================================================= */
 const crypto = require('node:crypto');
-const { promisify } = require('node:util');
-const scrypt = promisify(crypto.scrypt);
 
 /* 「次回から自動ログイン」にチェックを入れた場合の有効期限。
    出欠確認のリンクを配ってから回答が集まるまで数週間空くことがあり、
@@ -20,21 +17,6 @@ const scrypt = promisify(crypto.scrypt);
 const SESSION_TTL_REMEMBER_MS = 90 * 24 * 60 * 60 * 1000; // 90日（約3か月）
 /* チェックなしの場合。タブを閉じればトークンごと消えるので、長く持たせる意味がない */
 const SESSION_TTL_TAB_MS = 12 * 60 * 60 * 1000; // 12時間
-
-/* ---------- パスワードハッシュ ---------- */
-async function hashPassword(password) {
-  const salt = crypto.randomBytes(16);
-  const hash = await scrypt(password, salt, 64);
-  return `${salt.toString('hex')}:${hash.toString('hex')}`;
-}
-async function verifyPassword(password, stored) {
-  const [saltHex, hashHex] = String(stored || '').split(':');
-  if (!saltHex || !hashHex) return false;
-  const salt = Buffer.from(saltHex, 'hex');
-  const expected = Buffer.from(hashHex, 'hex');
-  const actual = await scrypt(password, salt, expected.length);
-  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
-}
 
 /* ---------- セッショントークン ---------- */
 function newSessionToken() {
@@ -57,6 +39,5 @@ function getSessionTokenFromReq(req) {
 }
 
 module.exports = {
-  hashPassword, verifyPassword,
   newSessionToken, hashToken, sessionExpiry, getSessionTokenFromReq,
 };

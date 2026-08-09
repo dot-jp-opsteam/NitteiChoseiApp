@@ -61,6 +61,9 @@
 <main id="main"></main>
 <div id="toast"></div>
 
+<!-- 祝日。アプリ本体と同じ共通ファイルを読む。ここで holidayName() が定義される -->
+<script src="/holidays.js"></script>
+
 <script>
 /* アカウントを作らずに面談を申請するためのページ。
    URLに入っている合言葉だけが入場条件で、ログインは一切通らない。
@@ -86,6 +89,10 @@ var APPLY = {
   allDay: {},        // 「終日OK」になっている日 {'2026-08-06':true}
   note: '',
   sending: false,
+  /* 画面の段階。'form'（書く）→'confirm'（確かめる）→'done'（控えを見る）。
+     送ってしまうと取り消せないので、あいだに必ず確認を挟む */
+  step: 'form',
+  receipt: null,     // 送った内容の控え。送信が成功した時点で作る
 };
 
 /* ---------- アプリ本体から持ってきた道具 ---------- */
@@ -93,20 +100,22 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function pad(n){return String(n).padStart(2,'0');}
 var WD_JP=['日','月','火','水','木','金','土'];
-// 日本の祝日（2026年）。翌年以降は要更新。key='YYYY-M-D'
-var HOLIDAYS={
-  '2026-1-1':'元日','2026-1-12':'成人の日','2026-2-11':'建国記念の日','2026-2-23':'天皇誕生日',
-  '2026-3-20':'春分の日','2026-4-29':'昭和の日','2026-5-3':'憲法記念日','2026-5-4':'みどりの日',
-  '2026-5-5':'こどもの日','2026-5-6':'振替休日','2026-7-20':'海の日','2026-8-11':'山の日',
-  '2026-9-21':'敬老の日','2026-9-22':'国民の休日','2026-9-23':'秋分の日','2026-10-12':'スポーツの日',
-  '2026-11-3':'文化の日','2026-11-23':'勤労感謝の日'};
-function holidayName(y,m,d){return HOLIDAYS[y+'-'+(m+1)+'-'+d];} // m=0-11
+/* 祝日は holidays.js の holidayName(y,m,d) を使う。m=0-11。
+   アプリ本体と同じファイルを読んでいるので、両方の画面で祝日がずれることはない */
 function hm(iso){var d=new Date(iso);return pad(d.getHours())+':'+pad(d.getMinutes());}
 function fmtDT(iso){if(!iso)return '—';var d=new Date(iso);
   return (d.getMonth()+1)+'/'+d.getDate()+'('+WD_JP[d.getDay()]+') '+pad(d.getHours())+':'+pad(d.getMinutes());}
 // 'YYYY-MM-DD' を、その端末の暦の日付に直す。ISOのまま new Date すると UTC 扱いでずれる
 function parseYmd(s){var p=String(s).split('-');
   return new Date(Number(p[0]),Number(p[1])-1,Number(p[2]));}
+
+/* 選んだ枠の意味を取り違えられないための一文。
+   「10:00〜10:30」を面談の長さと読まれることがあったので、
+   ここで選ぶのはあくまで空いている時間帯だと明記する。
+   スタッフ側（index.html の AVAIL_NOTE）と対になる文言 */
+var AVAIL_NOTE_SELF='ここで選ぶのは、あなたが空いている時間帯です。面談の長さではありません。担当スタッフがこの中から開始時刻を決めます。';
+// 送り終わったあとの控えに出す言い方
+var AVAIL_NOTE_SENT='上に出ているのは、あなたが空いている時間帯です。面談の長さではありません。担当スタッフがこの中から開始時刻を決めます。';
 
 var SLOT_MS=30*60*1000;
 // その枠が何日のものか。ISOのままだと日付がUTC基準になるので、必ずここを通す
@@ -155,8 +164,8 @@ function applyGroups(){
    枠が2つ以上あるときは最後の枠の開始時刻、1つだけのときは開始＋30分。
 
    表の1行は「その時刻から30分の枠」だが、申請する人は行の見出しを読んで
-   「17:00から18:00まで選んだ」と受け取る。その読み方に合わせている。
-   面談そのものは30分なので、ここに出る終了時刻より30分あとに終わることがある
+   「17:00から18:00まで空けた」と受け取る。その読み方に合わせている。
+   ここに出るのは空いている時間の終わりであって、面談が終わる時刻ではない
    （設計書 _specs/2026-08-06-面談まわりの改善-design.md の 1.4）*/
 function runEnd(run){
   var last=run[run.length-1];
@@ -242,7 +251,11 @@ function fatal(message){
 }
 
 function render(){
-  document.getElementById('main').innerHTML=viewApply();
+  var html;
+  if(APPLY.step==='done')html=viewDone();
+  else if(APPLY.step==='confirm')html=viewConfirm();
+  else html=viewApply();
+  document.getElementById('main').innerHTML=html;
 }
 
 function viewApply(){
@@ -284,7 +297,8 @@ function viewApply(){
          インターン生はこの画面に初めて来るので、表が出てから読むのでは遅い。
          色を付けた囲み（.hint）ではなく本文と同じ黒字にしてある。
          囲みにすると「補足」に見えて読み飛ばされるため */
-      +'<div class="guide">下のカレンダーから、面談可能な時間帯を選択してください。<br>'
+      +'<div class="guide">下のカレンダーから、<b>あなたが空いている時間帯</b>を選択してください。<br>'
+        +'面談の長さを決めるものではありません。担当スタッフがこの中から開始時刻を決めます。<br>'
         +'選べる時間が多いほど日程が決まりやすくなります。</div>'
       +weekBlock(groups)
       +'<div class="divider"></div>'
@@ -292,10 +306,146 @@ function viewApply(){
       +'<textarea placeholder="担当スタッフへのメッセージがあれば記入してください（例：オンラインを希望します）"'
         +' style="min-height:90px" oninput="APPLY.note=this.value">'+esc(APPLY.note)+'</textarea>'
       +'<button class="btn pri block" style="margin-top:20px" id="applybtn"'
-        +(groups.length&&!APPLY.sending?'':' disabled')+' onclick="submitApply()">'
-        +(APPLY.sending?'送信しています…':(groups.length?'この'+groups.length+'件で申請する':'枠を選んでください'))
+        +(groups.length?'':' disabled')+' onclick="goConfirm()">'
+        +(groups.length?'この'+groups.length+'件の内容を確認する':'枠を選んでください')
       +'</button>'
+      +'<p class="fine" style="margin-top:8px;text-align:center">この時点ではまだ送信されません。次の画面で内容を確かめてから申請します。</p>'
     +'</div></div>';
+}
+
+/* ---------- 申請内容のまとめ ----------
+   確認画面と、送ったあとの控えで同じものを使う。
+   画面を出し直しても中身が変わらないよう、値をここで文字列に固めておく */
+function applySummary(){
+  var staffName='';
+  APPLY.staffList.forEach(function(s){if(s.id===APPLY.staff)staffName=s.nickname;});
+  return {
+    branch:BRANCH_NAME,
+    name:(APPLY.name||'').trim(),
+    staffName:staffName,
+    note:(APPLY.note||'').trim(),
+    groups:applyGroups().map(function(g){
+      return {day:fmtDay(g.slots[0]),time:fmtRanges(g.slots),allDay:!!g.allDay};
+    }),
+  };
+}
+/* 希望の一覧。入力画面の一覧と同じ見た目にして、
+   「さっき並べたもの」と同じものを確かめていると分かるようにする。
+   こちらは読むだけなので、並べ替えのドラッグは付けない */
+function summaryRowsHTML(sum){
+  return sum.groups.map(function(g,i){
+    return '<div class="sr">'
+      +'<span class="'+rankCls(i+1)+'">第'+(i+1)+'希望</span>'
+      +'<span class="st">'
+        +'<span class="sday">'+esc(g.day)+(g.allDay?'<span class="stag">終日OK</span>':'')+'</span>'
+        +'<span class="stime">'+esc(g.time)+'</span>'
+      +'</span>'
+    +'</div>';
+  }).join('');
+}
+/* 確認画面と控えに共通の中身。
+   注記だけは、これから送るのか送り終わったのかで言い方を変える */
+function summaryCardHTML(sum,note){
+  return '<dl class="kv" style="margin-bottom:14px">'
+      +'<dt>支部</dt><dd>'+esc(sum.branch||'—')+'</dd>'
+      +'<dt>お名前</dt><dd>'+esc(sum.name)+'</dd>'
+      +'<dt>担当スタッフ</dt><dd>'+esc(sum.staffName||'—')+'</dd>'
+    +'</dl>'
+    +'<div class="divider"></div>'
+    +'<label class="fl">希望日時（空いている時間・'+sum.groups.length+'件）</label>'
+    +'<div class="selsummary">'+summaryRowsHTML(sum)+'</div>'
+    +'<p class="fine" style="margin-top:8px">'+esc(note)+'</p>'
+    +(sum.note?'<div class="divider"></div>'
+      +'<label class="fl">その他</label>'
+      +'<p style="margin:4px 0 0;white-space:pre-wrap">'+esc(sum.note)+'</p>':'');
+}
+
+/* ---------- 確認画面 ---------- */
+function goConfirm(){
+  var name=(APPLY.name||'').trim();
+  if(!name){
+    toast('お名前を入力してください');
+    var f=document.getElementById('applyname');
+    if(f)f.focus();
+    return;
+  }
+  if(!APPLY.staff){toast('担当スタッフを選んでください');return;}
+  if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
+  APPLY.step='confirm';
+  render();
+  window.scrollTo(0,0);
+}
+function backToForm(){
+  APPLY.step='form';
+  render();
+  window.scrollTo(0,0);
+}
+function viewConfirm(){
+  var sum=applySummary();
+  return '<div class="applyhead"><h1 class="page">内容の確認</h1>'
+      +'<span class="brand">'+esc(sum.branch)+'</span></div>'
+    +'<p class="page-sub">まだ送信していません。下の内容でよければ「この内容で申請する」を押してください。</p>'
+    +'<div class="card"><div class="cb">'
+      +summaryCardHTML(sum,AVAIL_NOTE_SELF)
+      +'<button class="btn pri block" style="margin-top:22px" id="applybtn"'
+        +(APPLY.sending?' disabled':'')+' onclick="submitApply()">'
+        +(APPLY.sending?'送信しています…':'この内容で申請する')+'</button>'
+      +'<button class="btn ghost block" style="margin-top:8px"'
+        +(APPLY.sending?' disabled':'')+' onclick="backToForm()">書き直す</button>'
+    +'</div></div>';
+}
+
+/* ---------- 送ったあとの控え ---------- */
+function viewDone(){
+  var r=APPLY.receipt||{groups:[]};
+  return '<div class="applyhead"><h1 class="page">申請しました</h1>'
+      +'<span class="brand">'+esc(r.branch||'')+'</span></div>'
+    +'<div class="card"><div class="cb">'
+      +'<div class="hint" style="margin-bottom:16px">'+ic('check')+'<span><b>'
+        +esc(r.staffName)+'</b>さんに届きました。日程が決まりましたら、担当者からご連絡します。</span></div>'
+      +'<label class="fl">申請した内容（控え）</label>'
+      +'<p class="fine" style="margin:2px 0 12px">申請日時：'+esc(r.sentAt)+'</p>'
+      +summaryCardHTML(r,AVAIL_NOTE_SENT)
+      +'<button class="btn block" style="margin-top:20px" onclick="copyReceipt()">この内容をコピーする</button>'
+      +'<p class="fine" style="margin-top:8px">コピーしてLINEなどに貼っておくと、あとから確かめられます。'
+        +'この画面は閉じていただいて構いません。</p>'
+    +'</div></div>';
+}
+/* 控えを文にして書き出す。LINEにそのまま貼れる形にしてある */
+function receiptText(){
+  var r=APPLY.receipt;
+  if(!r)return '';
+  var lines=['【面談の申請内容】','申請日時：'+r.sentAt];
+  if(r.branch)lines.push('支部：'+r.branch);
+  lines.push('お名前：'+r.name);
+  lines.push('担当スタッフ：'+r.staffName);
+  lines.push('');
+  lines.push('空いている時間（面談の長さではありません）');
+  r.groups.forEach(function(g,i){
+    lines.push('　第'+(i+1)+'希望：'+g.day+' '+g.time+(g.allDay?'（終日OK）':''));
+  });
+  if(r.note){lines.push('');lines.push('その他：'+r.note);}
+  return lines.join('\n');
+}
+function copyReceipt(){
+  var text=receiptText();
+  if(!text)return;
+  var done=function(){toast('コピーしました');};
+  /* navigator.clipboard は https でないと使えない端末があるので、
+     使えなかったときは隠した入力欄を経由して従来のやり方で写す */
+  var fallback=function(){
+    var ta=document.createElement('textarea');
+    ta.value=text;
+    ta.style.position='fixed';ta.style.left='-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try{document.execCommand('copy');done();}
+    catch(e){toast('コピーできませんでした。画面を長押しして選択してください');}
+    document.body.removeChild(ta);
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  }else fallback();
 }
 
 /* スタッフを選ぶ前・読み込み中・取れなかったときで出し分ける。
@@ -434,9 +584,10 @@ function syncAllDay(){
    なぞっている最中もここを書き換えるため、0件のときも枠だけ置いて隠しておく */
 function selSummaryBlock(groups){
   return '<div id="selwrap"'+(groups.length?'':' hidden')+'><div class="divider"></div>'
-    +'<label class="fl"><span id="sellabel">選んだ希望日時（'+groups.length+'件）</span>'
+    +'<label class="fl"><span id="sellabel">選んだ希望日時（空いている時間・'+groups.length+'件）</span>'
     +'<span class="fl-sub">上から第1希望です。ドラッグで並べ替えられます</span></label>'
-    +'<div class="selsummary" id="selsummary">'+selSummaryRows()+'</div></div>';
+    +'<div class="selsummary" id="selsummary">'+selSummaryRows()+'</div>'
+    +'<p class="fine" style="margin-top:8px">'+esc(AVAIL_NOTE_SELF)+'</p></div>';
 }
 
 /* 必須の赤い＊。入っていれば hidden を付けて消す */
@@ -660,13 +811,12 @@ function refreshApplyLive(){
   var box=document.getElementById('selsummary');
   if(box)box.innerHTML=selSummaryRows();
   var lab=document.getElementById('sellabel');
-  if(lab)lab.textContent='選んだ希望日時（'+groups.length+'件）';
+  if(lab)lab.textContent='選んだ希望日時（空いている時間・'+groups.length+'件）';
   var slab=document.getElementById('slotlabel');
   if(slab)slab.textContent='日時を選ぶ（'+groups.length+'件選択中）';
   var btn=document.getElementById('applybtn');
-  if(btn){btn.disabled=!groups.length||APPLY.sending;
-    btn.textContent=APPLY.sending?'送信しています…'
-      :(groups.length?'この'+groups.length+'件で申請する':'枠を選んでください');}
+  if(btn){btn.disabled=!groups.length;
+    btn.textContent=groups.length?'この'+groups.length+'件の内容を確認する':'枠を選んでください';}
 }
 function applyDragEnd(){
   document.removeEventListener('pointermove',applyDragMove);
@@ -791,17 +941,16 @@ function selDragEnd(){
 }
 
 /* ---------- 申請 ---------- */
+/* 確認画面の「この内容で申請する」から呼ぶ。ここではじめてサーバーへ送る */
 function submitApply(){
   if(APPLY.sending)return;
-  var name=(APPLY.name||'').trim();
-  if(!name){
-    toast('お名前を入力してください');
-    var f=document.getElementById('applyname');
-    if(f)f.focus();
+  var sum=applySummary();
+  if(!sum.name||!APPLY.staff||!APPLY.sel.length){
+    // 確認画面へ進む時点で確かめてあるので、ふつうはここへ来ない
+    toast('入力に不足があります。書き直してください');
+    backToForm();
     return;
   }
-  if(!APPLY.staff){toast('担当スタッフを選んでください');return;}
-  if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
 
   /* まとめた順がそのまま第1希望・第2希望…になる。
      まとめ直したものを送ることで、重複や並びの乱れが残らないようにする。
@@ -809,31 +958,37 @@ function submitApply(){
   var groups=applyGroups();
   var choices=groups.reduce(function(a,g){return a.concat(g.slots);},[]);
   var allDay=groups.filter(function(g){return g.allDay;}).map(function(g){return g.key;});
-  APPLY.sending=true;refreshApplyLive();
+  APPLY.sending=true;render();
 
   api('/api/apply/'+encodeURIComponent(TOKEN),{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:name,staff_id:APPLY.staff,choices:choices,
-      all_day:allDay,note:(APPLY.note||'').trim()}),
+    body:JSON.stringify({name:sum.name,staff_id:APPLY.staff,choices:choices,
+      all_day:allDay,note:sum.note}),
   }).then(function(data){
-    document.getElementById('main').innerHTML=
-      '<h1 class="page">申請しました</h1>'
-      +'<div class="card"><div class="cb">'
-      +'<div class="empty" style="padding:28px"><div class="ei">'+ic('check')+'</div>'
-      +'<p><b>'+esc(data.staff_nickname)+'</b>さんに届きました。<br>'
-      +'日程が決まりましたら、担当者からご連絡します。</p>'
-      +'<p class="fine">この画面は閉じていただいて構いません。</p>'
-      +'</div></div></div>';
+    APPLY.sending=false;
+    /* 控えは送った時点の内容で固める。あとから画面を触っても変わらないようにするため。
+       担当スタッフ名はサーバーが返したものを優先する（画面の一覧が古い場合に備えて） */
+    sum.staffName=data.staff_nickname||sum.staffName;
+    sum.sentAt=fmtStamp(new Date());
+    APPLY.receipt=sum;
+    APPLY.step='done';
+    render();
     window.scrollTo(0,0);
   }).catch(function(e){
     APPLY.sending=false;
     /* 枠が埋まった場合は、古い枠を出したままにすると同じ失敗を繰り返す。
-       取り直してから、何が起きたかを伝える */
+       入力画面へ戻して取り直してから、何が起きたかを伝える */
     APPLY.sel=[];
+    APPLY.step='form';
     toast(e.message);
     loadGrid();
   });
+}
+// 控えに出す「2026/8/10(月) 14:23」
+function fmtStamp(d){
+  return d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()
+    +'('+WD_JP[d.getDay()]+') '+pad(d.getHours())+':'+pad(d.getMinutes());
 }
 
 /* ---------- 読み込み ---------- */

@@ -106,11 +106,15 @@
 
 <div id="toast"></div>
 
+<!-- 祝日。年をまたいでも自動で出るよう、規則を書いた共通ファイルから読む。
+     ここで holidayName() が定義される（apply.html も同じものを読んでいる） -->
+<script src="/holidays.js"></script>
+
 <script>
 /* =========================================================
    OPS日調アプリ
    - 単一ファイル / サーバーAPI（/api/db）+ localStorageキャッシュ
-   - 認証：メールアドレス＋パスワード（サーバー側でセッション管理）
+   - 認証：Googleログイン（サーバー側でセッション管理）
    - メール送信は引き続きアプリ内履歴のみ（実際には送信されない）
    ========================================================= */
 
@@ -745,6 +749,13 @@ function fmtGroupRange(g){
   const times=runs.map(r=>`${hm(r[0])}〜${hm(runEnd(r))}`).join('＆');
   return `${fmtDate(g.slots[0])} ${times}`;
 }
+/* 希望日時の一覧に必ず添える一文。
+   「10:00〜10:30」を面談の長さと読み違えられることがあったため、
+   これは申請者が空けている時間帯であって、面談そのものの長さではないと明記する。
+   面談の長さは相手や内容によってまちまちなので、時間を書き添えることはしない。
+   スタッフ画面と申請画面で言い回しがずれないよう、文言はここ1か所で持つ */
+const AVAIL_NOTE='インターン生が空いている時間帯です。面談の長さではありません。';
+
 /* 「8/5(火) 12:00〜13:30」。終わりは最後の枠の30分後 */
 function fmtSlotRange(g){
   if(!g||!g.length)return '—';
@@ -1054,11 +1065,10 @@ function alertSheet(title,message){
 
 /* =========================================================
    LOGIN
-   - 画面上半分：メールアドレス＋パスワード
-   - 画面下半分：Googleでログイン（ソーシャルログイン）
+   - ログインはGoogleアカウントの1本のみ。パスワードは扱わない
+   - 初めて使う人は「初回ログイン」→ /staff で氏名と所属支部を登録する
    ========================================================= */
-// 'login' | 'register-intern' | 'forgot' | 'reset' | 'profile'
-// | 'staff-start' | 'staff-form'
+// 'login' | 'profile' | 'staff-start' | 'staff-form'
 let LOGIN_VIEW='login';
 let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branchesから取得）
 /* スタッフ登録（/staff）で使う一時情報。Googleで確認できたメールアドレスと、
@@ -1066,7 +1076,7 @@ let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branches�
 let STAFF_SIGNUP={token:null,email:'',name:''};
 let STAFF_EMAIL_DOMAIN='dot-jp.or.jp'; // サーバー設定で上書きされる（/api/auth/config）
 let GOOGLE_LOGIN_AVAILABLE=false; // サーバー側でGoogleの資格情報が設定済みか（/api/auth/config）
-let PASSWORD_RESET_AVAILABLE=false; // サーバー側でメール送信が設定済みか（/api/auth/config）
+let MAIL_SEND_AVAILABLE=false;    // サーバー側でメール送信が設定済みか（システム設定の表示に使う）
 
 /* Googleブランドガイドラインに沿った公式ロゴ（外部読み込みなしで動くようSVGを直接埋め込む） */
 const GOOGLE_LOGO_SVG=`<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
@@ -1076,31 +1086,10 @@ const GOOGLE_LOGO_SVG=`<svg viewBox="0 0 48 48" width="18" height="18" aria-hidd
   <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/>
 </svg>`;
 
-/* 右カラム（スマホでは下段）の「外部IDでログイン」ブロック。
-   サーバー側でGoogleが未設定のときは丸ごと非表示にして、押しても動かないボタンを見せない */
-function socialLoginBlock(){
-  if(!GOOGLE_LOGIN_AVAILABLE)return '';
-  return `
-    <div class="login-col social-col">
-      <h3 class="col-title">外部IDでログイン</h3>
-      <div class="social-box">
-        <button class="btn social block" onclick="goGoogleLogin()">
-          <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
-          <span class="social-label">Googleでログイン</span>
-        </button>
-        <!-- スマホでは左右のカラムが縦に離れるため、メール側のチェックだけでは
-             Googleを押す人の目に入らない。この列にも同じ選択を置く -->
-        <label class="pw-toggle"><input type="checkbox" id="googleRemember"><span>次回から自動ログイン</span></label>
-        <p class="fine social-note">パスワードの入力は不要です。<br>普段お使いのGoogleアカウントで<br>そのまま始められます。</p>
-      </div>
-    </div>`;
-}
 /* 「次回から自動ログイン」の選択をサーバーに伝えてからGoogleへ送り出す。
    戻ってきたときはstateに預けた選択が復元され、トークンの有効期限に反映される */
 function goGoogleLogin(){
-  // Google側の欄と、メール側の欄。どちらにチェックが入っていても自動ログインにする
-  const remember=document.getElementById('googleRemember')?.checked
-              || document.getElementById('loginRemember')?.checked;
+  const remember=document.getElementById('googleRemember')?.checked;
   keepDeepLink();
   location.href='/api/auth/google/login'+(remember?'?remember=1':'');
 }
@@ -1114,54 +1103,16 @@ function keepDeepLink(){
   // このタブ限りで足りる。localStorage だと別のタブや翌日にも残ってしまう
   if(id)sessionStorage.setItem(DEEPLINK_KEY,id);
 }
-function toggleLoginPw(cb){
-  const el=document.getElementById('loginPassword');
-  if(el)el.type=cb.checked?'text':'password';
-}
-
 function branchOptions(selected){
   return LOGIN_BRANCHES.map(b=>`<option value="${b.id}" ${b.id===selected?'selected':''}>${esc(b.name)}</option>`).join('');
 }
 
-/* 招待URL（/?staff=xxx）で開かれたときの、招いたスタッフ。
-   ログイン画面の見た目は変えず、会員登録に進んだときだけ担当スタッフ欄に反映する */
-let INVITE_STAFF=null;
-async function loadInviteStaff(){
-  const id=new URLSearchParams(location.search).get('staff');
-  if(!id)return;
-  try{
-    const res=await api('/api/auth/invite?staff='+encodeURIComponent(id));
-    if(!res.ok)return;
-    const r=await res.json();
-    if(r&&r.staff)INVITE_STAFF=r.staff;
-  }catch(e){/* 招待の確認に失敗しても、ふつうに登録はできるので黙って続ける */}
-}
-function switchLoginView(view){LOGIN_VIEW=view;renderLogin();}
 function renderLogin(){
   const body=document.getElementById('loginBody');
-  /* ログイン画面かつGoogleが使えるときだけ2カラムに広げる。
-     登録画面などは1カラムのままの方が入力に集中できるのでカードを細いままにする */
-  const wide=(LOGIN_VIEW==='login'&&GOOGLE_LOGIN_AVAILABLE);
-  document.querySelector('.login-card').classList.toggle('wide',wide);
-  if(LOGIN_VIEW==='register-intern'){
-    // 招待URLから来たときは、その人の支部と担当スタッフを初めから入れておく（変更もできる）
-    const branchSel=INVITE_STAFF?INVITE_STAFF.branch_id:undefined;
-    body.innerHTML=`
-      ${INVITE_STAFF?`<div class="hint" style="margin-bottom:12px">${ic('staff')}<span>
-        <b>${esc(INVITE_STAFF.nickname)}</b>さんからの登録リンクです。担当スタッフに設定されます。</span></div>`:''}
-      <label class="fl">メールアドレス<span class="req">*</span></label>
-      <input id="regEmail" type="email" autocomplete="username" placeholder="example@gmail.com">
-      <label class="fl">パスワード<span class="req">*</span></label>
-      <input id="regPassword" type="password" autocomplete="new-password" placeholder="8文字以上">
-      <label class="fl">ニックネーム<span class="req">*</span></label>
-      <input id="regNick" autocomplete="off" placeholder="例：たろう">
-      <label class="fl">所属支部</label>
-      <select id="regBranch">${branchOptions(branchSel)}</select>
-      <p class="fine" style="margin-top:6px">担当スタッフはスタッフ側で登録します。招待リンクから登録した場合は自動で設定されます。</p>
-      <div class="field-err" id="regErr"></div>
-      <button class="btn pri block" style="margin-top:20px" onclick="doRegisterIntern()">登録してはじめる</button>
-      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">${ic('back')}ログイン画面に戻る</button>`;
-  }else if(LOGIN_VIEW==='staff-start'){
+  /* 入力欄がひとつも無い画面なのでカードは常に細いまま。
+     広げると「Googleでログイン」だけが真ん中に浮いて、押す場所が分かりにくくなる */
+  document.querySelector('.login-card').classList.remove('wide');
+  if(LOGIN_VIEW==='staff-start'){
     // スタッフ登録の1画面目。ドット配布のGoogleアカウントで本人確認してもらう
     body.innerHTML=`
       <h3 style="margin:0 0 6px;font-size:17px;text-align:center">スタッフ登録</h3>
@@ -1188,118 +1139,30 @@ function renderLogin(){
       <div class="field-err" id="ssErr"></div>
       <button class="btn pri block" style="margin-top:20px" id="ssBtn" onclick="doStaffSignup()">登録する</button>
       <p class="fine" style="margin-top:10px;text-align:center">登録するとすぐに利用できます。</p>`;
-  }else if(LOGIN_VIEW==='forgot'){
-    body.innerHTML=`
-      <p class="page-sub" style="margin-top:0">ご登録のメールアドレスに、パスワード再設定用のリンクをお送りします。</p>
-      <label class="fl">メールアドレス<span class="req">*</span></label>
-      <input id="forgotEmail" type="email" autocomplete="username" placeholder="example@gmail.com">
-      <div class="field-err" id="forgotErr"></div>
-      <div class="hint hidden" id="forgotDone" style="margin-top:14px">${ic('send')}<span></span></div>
-      <button class="btn pri block" style="margin-top:18px" id="forgotBtn" onclick="doForgotPassword()">再設定メールを送る</button>
-      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">${ic('back')}ログイン画面に戻る</button>`;
   }else{
+    /* ふだんのログイン画面。押す場所はGoogleの1つだけにしてある。
+       その下に「初回ログイン」を置き、まだアカウントの無い人を /staff へ送る */
     body.innerHTML=`
-      <div class="login-cols">
-        <div class="login-col">
-          <div class="login-panel">
-            <h3 class="col-title">メールアドレスでログイン</h3>
-            <label class="fl" for="loginEmail">メールアドレス<span class="req">*</span></label>
-            <input id="loginEmail" type="email" autocomplete="username" placeholder="example@gmail.com">
-            <label class="fl" for="loginPassword">パスワード<span class="req">*</span></label>
-            <input id="loginPassword" type="password" autocomplete="current-password">
-            <label class="pw-toggle"><input type="checkbox" onchange="toggleLoginPw(this)"><span>パスワードを表示する</span></label>
-            <label class="pw-toggle"><input type="checkbox" id="loginRemember"><span>次回から自動ログイン</span></label>
-            <div class="field-err" id="loginErr"></div>
-            <button class="btn pri block" style="margin-top:14px" onclick="doLoginAuth()">ログインする</button>
-          </div>
-          <div class="signup-box">
-            <p class="signup-title">アカウントをお持ちでない方</p>
-            <button class="btn signup block" onclick="switchLoginView('register-intern')">メールアドレスで会員登録する</button>
-            <button class="btn ghost block" style="margin-top:8px" onclick="location.href='/staff'">スタッフの方はこちら</button>
-          </div>
-        </div>
-        ${socialLoginBlock()}
-      </div>`;
-  }
-  // Enterキーでログインできるようにする（スマホのキーボードの「完了」でも送信される）
-  const emailInput=document.getElementById('loginEmail');
-  const passInput=document.getElementById('loginPassword');
-  if(emailInput&&passInput){
-    [emailInput,passInput].forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter')doLoginAuth();}));
+      <div class="login-panel">
+        <h3 class="col-title">ログイン</h3>
+        ${GOOGLE_LOGIN_AVAILABLE?`
+          <button class="btn social block" onclick="goGoogleLogin()">
+            <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
+            <span class="social-label">Googleでログイン</span>
+          </button>
+          <label class="pw-toggle"><input type="checkbox" id="googleRemember"><span>次回から自動ログイン</span></label>
+          <p class="fine social-note">パスワードはありません。ドットジェイピーから配布された
+            <b>@${esc(STAFF_EMAIL_DOMAIN)}</b> のGoogleアカウントでそのまま入れます。</p>`
+        :`<div class="hint mock">${ic('alert')}<span>ただいまログインを受け付けられません。管理者にお問い合わせください。</span></div>`}
+      </div>
+      ${GOOGLE_LOGIN_AVAILABLE?`
+      <div class="signup-box">
+        <p class="signup-title">はじめて使う方</p>
+        <button class="btn signup block" onclick="location.href='/staff'">初回ログイン</button>
+        <p class="fine" style="margin-top:8px">氏名と所属支部を一度だけ登録します。次回からは上の「Googleでログイン」だけです。</p>
+      </div>`:''}`;
   }
   bindReveal(document.getElementById('login'));
-}
-
-async function doForgotPassword(){
-  const email=document.getElementById('forgotEmail').value.trim();
-  const err=document.getElementById('forgotErr');
-  const btn=document.getElementById('forgotBtn');
-  const done=document.getElementById('forgotDone');
-  err.classList.remove('show');
-  if(!email){err.textContent='メールアドレスを入力してください';err.classList.add('show');return;}
-  btn.disabled=true;btn.textContent='送信中…';
-  try{
-    const res=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});
-    const data=await res.json();
-    if(!res.ok){
-      err.textContent=data.error||'送信に失敗しました';err.classList.add('show');
-      btn.disabled=false;btn.textContent='再設定メールを送る';return;
-    }
-    // 連打で何通も送られないよう、送信後はボタンを戻さない
-    done.querySelector('span:last-child').textContent=data.message;
-    done.classList.remove('hidden');
-    btn.textContent='送信しました';
-  }catch(e){
-    err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');
-    btn.disabled=false;btn.textContent='再設定メールを送る';
-  }
-}
-
-/* メールのリンク（?reset=...）から開く新パスワード設定画面 */
-async function renderResetPassword(token){
-  document.getElementById('app').classList.add('hidden');
-  document.getElementById('login').classList.remove('hidden');
-  LOGIN_VIEW='reset';
-  document.querySelector('.login-card').classList.remove('wide');
-  const body=document.getElementById('loginBody');
-  body.innerHTML='<p class="page-sub" style="margin-top:0">確認しています…</p>';
-
-  let info={valid:false};
-  try{
-    const res=await api('/api/auth/reset-check?token='+encodeURIComponent(token));
-    if(res.ok)info=await res.json();
-  }catch(e){/* 通信できないときは無効扱いにする */}
-
-  if(!info.valid){
-    body.innerHTML=`<div class="hint">${ic('alert')}<span>このリンクは期限切れか、既に使用済みです。お手数ですが、もう一度お手続きください。</span></div>
-      <button class="btn pri block" style="margin-top:16px" onclick="switchLoginView('forgot')">再設定メールを送り直す</button>
-      <button class="btn ghost block" style="margin-top:8px" onclick="switchLoginView('login')">${ic('back')}ログイン画面に戻る</button>`;
-    return;
-  }
-  body.innerHTML=`
-    <div class="hint" style="margin-bottom:4px">${ic('key')}<span>${esc(info.nickname)}さんの新しいパスワードを設定してください。</span></div>
-    <label class="fl">新しいパスワード<span class="req">*</span></label>
-    <input id="rsNew" type="password" autocomplete="new-password" placeholder="8文字以上">
-    <label class="fl">新しいパスワード（確認）<span class="req">*</span></label>
-    <input id="rsNew2" type="password" autocomplete="new-password">
-    <div class="field-err" id="rsErr"></div>
-    <button class="btn pri block" style="margin-top:18px" onclick="doResetPassword('${esc(token)}')">この内容で設定する</button>`;
-}
-async function doResetPassword(token){
-  const np=document.getElementById('rsNew').value;
-  const np2=document.getElementById('rsNew2').value;
-  const err=document.getElementById('rsErr');
-  err.classList.remove('show');
-  const fail=m=>{err.textContent=m;err.classList.add('show');};
-  if(np.length<8)return fail('パスワードは8文字以上で入力してください');
-  if(np!==np2)return fail('パスワードが一致しません');
-  try{
-    const res=await api('/api/auth/reset-password',{method:'POST',body:JSON.stringify({token,new_password:np})});
-    const data=await res.json();
-    if(!res.ok)return fail(data.error||'再設定に失敗しました');
-    switchLoginView('login');
-    toast('パスワードを設定しました。新しいパスワードでログインしてください');
-  }catch(e){fail('通信に失敗しました。時間をおいて再度お試しください。');}
 }
 
 /* Googleで初回ログインした人にニックネームと所属支部を設定してもらう画面 */
@@ -1329,42 +1192,6 @@ async function doCompleteProfile(){
     if(!res.ok){err.textContent=data.error||'保存に失敗しました';err.classList.add('show');return;}
     ME=data.user;
     enterApp();
-  }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
-}
-async function doLoginAuth(){
-  const email=document.getElementById('loginEmail').value.trim();
-  const password=document.getElementById('loginPassword').value;
-  const err=document.getElementById('loginErr');
-  err.classList.remove('show');
-  if(!email||!password){err.textContent='メールアドレスとパスワードを入力してください';err.classList.add('show');return;}
-  const remember=!!document.getElementById('loginRemember')?.checked;
-  try{
-    const res=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password,remember})});
-    const data=await res.json();
-    if(!res.ok){err.textContent=data.error||'ログインに失敗しました';err.classList.add('show');return;}
-    setToken(data.token,remember);
-    await afterLogin();
-  }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
-}
-async function doRegisterIntern(){
-  const email=document.getElementById('regEmail').value.trim();
-  const password=document.getElementById('regPassword').value;
-  const nickname=document.getElementById('regNick').value.trim();
-  const branch_id=document.getElementById('regBranch').value;
-  /* 担当スタッフはインターン生には選ばせない。招待リンク（/?staff=xxx）から来たときだけ、
-     リンクを配ったスタッフが自動で担当になる。それ以外は担当なしで登録し、スタッフ側で設定する */
-  const staff_id=INVITE_STAFF?INVITE_STAFF.id:null;
-  const err=document.getElementById('regErr');
-  err.classList.remove('show');
-  if(!email||!password||!nickname){err.textContent='メールアドレス・パスワード・ニックネームは必須です';err.classList.add('show');return;}
-  if(password.length<8){err.textContent='パスワードは8文字以上で入力してください';err.classList.add('show');return;}
-  try{
-    const res=await api('/api/auth/register-intern',{method:'POST',body:JSON.stringify({email,password,nickname,branch_id,staff_id})});
-    const data=await res.json();
-    if(!res.ok){err.textContent=data.error||'登録に失敗しました';err.classList.add('show');return;}
-    // 登録直後はこのタブ限りのログイン。自動ログインはログイン画面のチェックで選んでもらう
-    setToken(data.token,false);
-    await afterLogin();
   }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');}
 }
 /* 署名付きトークンから、画面に出すためのメールアドレスと氏名を取り出す。
@@ -1535,39 +1362,8 @@ function bindReveal(root){
   });
 }
 
-/* パスワード変更。Googleだけで登録した人はまだパスワードを持たないので、
-   その場合は「現在のパスワード」欄を出さずに新規設定として扱う */
-function openPasswordChange(){
-  const hasPassword=ME.has_password!==false;
-  openSheet(`<h3>${hasPassword?'パスワードを変更':'パスワードを設定'}</h3>
-    <p class="page-sub">${hasPassword?'変更すると、他の端末のログインは解除されます。':'設定すると、Googleを使わずメールアドレスでもログインできるようになります。'}</p>
-    ${hasPassword?`<label class="fl">現在のパスワード<span class="req">*</span></label>
-    <input id="pwCur" type="password" autocomplete="current-password">`:''}
-    <label class="fl">新しいパスワード<span class="req">*</span></label>
-    <input id="pwNew" type="password" autocomplete="new-password" placeholder="8文字以上">
-    <label class="fl">新しいパスワード（確認）<span class="req">*</span></label>
-    <input id="pwNew2" type="password" autocomplete="new-password">
-    <div class="field-err" id="pwErr"></div>
-    <button class="btn pri block" style="margin-top:18px" onclick="doChangePassword()">変更する</button>`);
-}
-async function doChangePassword(){
-  const cur=document.getElementById('pwCur');
-  const np=document.getElementById('pwNew').value;
-  const np2=document.getElementById('pwNew2').value;
-  const err=document.getElementById('pwErr');
-  err.classList.remove('show');
-  const fail=m=>{err.textContent=m;err.classList.add('show');};
-  if(np.length<8)return fail('新しいパスワードは8文字以上で入力してください');
-  if(np!==np2)return fail('新しいパスワードが一致しません');
-  try{
-    const res=await api('/api/auth/change-password',{method:'POST',
-      body:JSON.stringify({current_password:cur?cur.value:'',new_password:np})});
-    const data=await res.json();
-    if(!res.ok)return fail(data.error||'変更に失敗しました');
-    closeSheet();
-    toast('パスワードを変更しました');
-  }catch(e){fail('通信に失敗しました。時間をおいて再度お試しください。');}
-}
+/* パスワードの変更・設定はこの画面には無い。
+   ログインはGoogleアカウントだけで、パスワードそのものを扱わなくなったため */
 
 /* =========================================================
    NAVIGATION
@@ -1583,14 +1379,12 @@ const NAV={
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'myinterns',label:'担当一覧',ic:'staff'},
     {id:'requests',label:'依頼',ic:'megaphone'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'myinterns',label:'担当一覧',ic:'staff'},
     {id:'requests',label:'依頼',ic:'megaphone'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
@@ -1619,14 +1413,8 @@ let IVFILTER={status:'all',branch:'all',q:''}; // 面談一覧フィルタ
 let AVSET=null;              // スタッフ不可時間エディタの一時状態
 let BLKFORM=null;            // 「日時でまとめて追加」フォームの状態
 
-// 日本の祝日（2026年）。翌年以降は要更新。key='YYYY-M-D'
-const HOLIDAYS={
-  '2026-1-1':'元日','2026-1-12':'成人の日','2026-2-11':'建国記念の日','2026-2-23':'天皇誕生日',
-  '2026-3-20':'春分の日','2026-4-29':'昭和の日','2026-5-3':'憲法記念日','2026-5-4':'みどりの日',
-  '2026-5-5':'こどもの日','2026-5-6':'振替休日','2026-7-20':'海の日','2026-8-11':'山の日',
-  '2026-9-21':'敬老の日','2026-9-22':'国民の休日','2026-9-23':'秋分の日','2026-10-12':'スポーツの日',
-  '2026-11-3':'文化の日','2026-11-23':'勤労感謝の日'};
-function holidayName(y,m,d){return HOLIDAYS[`${y}-${m+1}-${d}`];} // m=0-11
+/* 祝日は holidays.js（<head>より下で読み込み済み）の holidayName(y,m,d) を使う。m=0-11。
+   以前はここに2026年ぶんを手打ちしていたが、年が変わると全部消えるため規則から作る方式にした */
 function defaultTab(){return 'home';}
 /* 左メニューの中身を組み立てる。
    上段＝画面ナビ、下段＝設定系。畳んだときはアイコンだけになるので、
@@ -1637,20 +1425,18 @@ function buildNav(){
       <span class="si">${ic(t.ic)}</span><span class="sl">${t.label}</span></button>`).join('');
 
   /* 下段は「日常的に使う道具」だけを置く。
-     設定まわり（所属部署・テーマ・パスワード・ログアウト）は
+     設定まわり（所属部署・テーマ・ログアウト）は
      プロフィールの「ほかの設定」に集約したので、ここには出さない */
   document.getElementById('sbAct').innerHTML=`
-    ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す登録リンクを作る">
+    ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す申請リンクを作る">
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
     ${ME.role==='intern'?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
       <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`:''}`;
 }
-/* インターン生が自分の担当スタッフを選び直す */
 /* インターン生から見た担当スタッフ。見るだけで、変更はできない。
-   本人が付け替えると、スタッフ側が知らないうちに担当から外れてしまうため。
-   会員登録のときだけは自分で選べる */
+   本人が付け替えると、スタッフ側が知らないうちに担当から外れてしまうため */
 function openMyStaffForm(){
   const s=findUser(ME.staff_id);
   openSheet(`<h3>担当スタッフ</h3>
@@ -1664,8 +1450,9 @@ function openMyStaffForm(){
     <div class="hint" style="margin-top:12px">${ic('alert')}<span>担当スタッフの変更はスタッフ側で行います。変えたいときは担当スタッフか支部の運営にご相談ください。</span></div>`);
 }
 
-/* インターン生に渡す登録リンクを出す。
-   自分のIDを付けただけのURLなので、何人にでも、何度でも使える */
+/* インターン生に渡す申請リンクを出す。
+   支部ごとに1本の共通URLで、何人にでも、何度でも使える。
+   「登録」リンクではない（会員登録は廃止した）ので、担当が決まることもない */
 async function openInternInviteLink(){
   openSheet(`<h3>インターン生に渡すリンク</h3>
     <p class="page-sub" style="margin-top:0">読み込んでいます…</p>`);
@@ -1732,7 +1519,7 @@ function go(tab){
 /* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
    そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
 const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',
-  myinterns:'a2',avset:'a2',branches:'a4',users:'a3'};
+  avset:'a2',branches:'a4',users:'a3'};
 /* ホーム以外の画面の右上に置く「ホームへ戻る」。
    スマホでは左メニューが隠れていて、行った先から戻れなくなるため */
 function homeBackBtn(){
@@ -1747,7 +1534,6 @@ function viewFor(t){
   if(t==='my')return viewMyInterviews();
   if(t==='interviews')return viewStaffInterviews();
   if(t==='requests')return viewRequests();
-  if(t==='myinterns')return viewMyInterns();
   if(t==='avset')return viewAvailSet();
   if(t==='branches')return viewBranches();
   if(t==='users')return viewUsers();
@@ -1863,7 +1649,7 @@ function viewHome(){
     /* 所属部署はプロフィールの「ほかの設定」、カレンダー連携は左メニューへ移した。
        「面談できない時間」は面談可能時間帯の中から開く（前提関係にあるため） */
     items.push(
-      hex("go('interviews')",'list','面談一覧・確定','担当インターン生の面談',pend),
+      hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
       hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread),
       hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごと・不可時間も'),
       hex('openMailHistory()','mail','メール履歴','送信・受信の記録'),
@@ -1872,7 +1658,7 @@ function viewHome(){
        毎日使うものではないので、六角形の上に控えめな帯として置く */
     const linkBtn=`<button class="flatbtn" onclick="openInternInviteLink()">
       <span class="fb-ic">${ic('link')}</span>
-      <span class="fb-tx"><b>インターン生に渡すリンクを作る</b><small>登録リンクを渡すと、あなたが担当になります</small></span>
+      <span class="fb-tx"><b>インターン生に渡すリンクを作る</b><small>支部で共通のリンクです。開くと面談を申請できます</small></span>
       <span class="fb-go">${ic('chevron')}</span></button>`;
     return hi+dueNotice+
       (pend?`<div class="hint">${ic('bell')}<span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
@@ -1891,7 +1677,7 @@ function openSystemSettings(){
     <dl class="kv" style="margin-top:14px">
       <dt>Googleカレンダー</dt><dd>スタッフごとに個別設定（スタッフのホーム画面から連携）</dd>
       <dt>全体予定表</dt><dd>${SHARED_CAL.configured?esc(SHARED_CAL.name||'設定済み')+'（スタッフ全員に表示）':'未設定（ホームの「全体予定表」から設定）'}</dd>
-      <dt>メール送信</dt><dd>${PASSWORD_RESET_AVAILABLE
+      <dt>メール送信</dt><dd>${MAIL_SEND_AVAILABLE
         ?'面談の確定・不成立は実際に送信されます（その他は履歴のみ）'
         :'未設定のため履歴のみ（Renderの SMTP_USER / SMTP_PASS を確認してください）'}</dd>
       <dt>登録支部数</dt><dd>${DB.branches.length}</dd>
@@ -2232,7 +2018,8 @@ function viewMyInterviews(){
         : iv.status==='failed'
         ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>`
         : `<dl class="kv" style="margin-top:8px">
-             ${groupSlots(ivChoices(iv)).map((g,i)=>`<dt>第${i+1}希望</dt><dd>${fmtSlotRange(g)}</dd>`).join('')}</dl>`}
+             ${groupSlots(ivChoices(iv)).map((g,i)=>`<dt>第${i+1}希望（空いている時間）</dt><dd>${fmtSlotRange(g)}</dd>`).join('')}</dl>
+           <p class="fine" style="margin-top:6px">${AVAIL_NOTE}</p>`}
       ${iv.note?`<div class="hint" style="margin-top:8px">${ic('message')}<span>${esc(iv.note).replace(/\n/g,'<br>')}</span></div>`:''}
     </div></div>`;}).join('');
   return `<h1 class="page">面談状況</h1><p class="page-sub">あなたの面談申請の状況です。</p>${rows}`;
@@ -2416,7 +2203,8 @@ function openInterview(id){
   };
   let actions='';
   if(iv.status==='applied'){
-    actions=`<div class="choice-list">
+    actions=`<div class="hint" style="margin-top:12px">${ic('bulb')}<span>下は<b>${internName?esc(internName)+'さんが':'相手が'}空けている時間</b>です。面談の長さではありません。この中から開始時刻を決めてください。</span></div>
+      <div class="choice-list">
         ${groups.map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
       <div class="btn-row" style="margin-top:14px">
         <button class="btn" style="flex:1" onclick="openCustomConfirm('${id}')">別日時で確定</button>
@@ -3853,84 +3641,10 @@ function openNotifications(){
   updateBell();
 }
 
-/* =========================================================
-   担当一覧（スタッフ・支部管理者）
-   ---------------------------------------------------------
-   自分が担当しているインターン生を並べ、担当を引き継げる。
-   引き継げるのは「自分が担当している人」だけ（サーバー側でも同じ判定）。
-   ========================================================= */
-function myInterns(){
-  return DB.users.filter(u=>u.role==='intern'&&u.staff_id===ME.id)
-    .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
-}
-
-function viewMyInterns(){
-  const list=myInterns();
-  if(!list.length){
-    return `<h1 class="page">担当一覧</h1>
-      <p class="page-sub">あなたが担当しているインターン生です。</p>
-      <div class="empty" style="padding:30px"><div class="ei">${ic('staff')}</div>
-        <p>担当しているインターン生はいません。<br>
-        左メニューの「リンク作成」から登録リンクを渡すと、あなたが担当になります。</p></div>`;
-  }
-  const rows=list.map(u=>{
-    const pend=(DB.interviews||[]).filter(i=>i.intern_id===u.id&&i.status==='applied').length;
-    const staff=findUser(u.staff_id);
-    return `<div class="row" style="cursor:pointer" onclick="openInternCard('${u.id}')">
-      <span class="av hexav ${accOf(u.id)}">${esc(initials(u.nickname))}</span>
-      <span class="rmain"><span class="rt">${esc(u.nickname)}
-        ${pend?`<span class="tag" style="background:var(--warn-soft);color:var(--warn)">申請 ${pend}件</span>`:''}</span>
-      <span class="rs">${staff?'担当：'+esc(staff.nickname):'担当なし'}</span></span>
-      <span class="tile-arrow">${ic('chevron')}</span></div>`;
-  }).join('');
-  return `<h1 class="page">担当一覧</h1>
-    <p class="page-sub">あなたが担当しているインターン生です（${list.length}名）。</p>
-    <div class="card"><div class="rowlist">${rows}</div></div>`;
-}
-
-function openInternCard(id){
-  const u=findUser(id);
-  if(!u)return;
-  const others=DB.users.filter(s=>(s.role==='staff'||s.role==='branch_admin')&&s.branch_id===u.branch_id)
-    .sort((a,b)=>String(a.nickname).localeCompare(String(b.nickname),'ja'));
-  const staffOpts=`<option value="">担当を外す</option>`
-    +others.map(s=>`<option value="${s.id}" ${s.id===u.staff_id?'selected':''}>${esc(s.nickname)}${s.id===ME.id?'（あなた）':''}</option>`).join('');
-  openSheet(`<h3>${esc(u.nickname)}さん</h3>
-    <dl class="kv" style="margin:12px 0">
-      <dt>所属支部</dt><dd>${esc(branchName(u.branch_id))}</dd>
-      <dt>メール</dt><dd>${esc(u.email||'—')}</dd>
-    </dl>
-    <div class="divider"></div>
-
-    <label class="fl" style="margin-top:14px">担当スタッフ</label>
-    <select id="icStaff">${staffOpts}</select>
-    <p class="fine" style="margin-top:6px">ほかのスタッフに引き継げます。引き継ぐと、この一覧からは消えます。</p>
-
-    <div class="field-err" id="icErr"></div>
-    <button class="btn pri block" style="margin-top:18px" onclick="saveInternCard('${u.id}')">保存する</button>`);
-}
-
-async function saveInternCard(id){
-  const staff_id=document.getElementById('icStaff').value||null;
-  const err=document.getElementById('icErr');
-  err.classList.remove('show');
-  const before=findUser(id);
-  const staffChanged=staff_id!==(before?before.staff_id||null:null);
-
-  if(staffChanged){
-    try{
-      const res=await api(`/api/staff/interns/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({staff_id})});
-      const data=await res.json().catch(()=>({}));
-      if(!res.ok){err.textContent=data.error||'変更に失敗しました';err.classList.add('show');return;}
-    }catch(e){err.textContent='通信に失敗しました。時間をおいて再度お試しください。';err.classList.add('show');return;}
-  }
-  closeSheet();
-  // 担当が変わるとユーザー一覧の中身も変わるので、サーバーから取り直す
-  if(staffChanged)await refreshUsersAfterAdminChange();
-  render();
-  toast(staffChanged&&staff_id!==ME.id?'担当を引き継ぎました':'保存しました');
-}
-
+/* 担当一覧（自分が担当するインターン生の一覧と、担当の引き継ぎ）はここにあったが削除した。
+   インターン生はアカウントを持たず、申請ごとに名前を書く方式になったため、
+   「担当している人の一覧」という単位が実態と合わなくなっていた。
+   担当の付け替えが必要なときは、ユーザー管理から行う。 */
 /* =========================================================
    プロフィール
    ---------------------------------------------------------
@@ -3985,7 +3699,6 @@ function profileLinks(){
   const themeVal=`<span id="profThemeVal" style="color:var(--mut);font-size:13px;font-weight:700">${currentTheme()==='light'?'ライト':'ダーク'}</span>`;
   return [
     canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
-    ['key','パスワードを変更','openPasswordChange()'],
     ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
     ['calendar','カレンダーに登録','openCalendarSubscriptionSettings()'],
     // テーマだけは押しても画面が変わらないので、右端に「いまどちらか」を出す
@@ -4249,7 +3962,7 @@ function viewRequests(){
       <span class="segb">完了済みの依頼</span></label>
   </div>`;
   return `<h1 class="page">依頼</h1>
-    <p class="page-sub">${canSend?`${branchName(ME.branch_id)}のスタッフ・インターン生に、連絡や出欠確認を出せます。`:'スタッフから届いた連絡・依頼です。'}</p>
+    <p class="page-sub">${canSend?`${branchName(ME.branch_id)}のスタッフに、連絡や出欠確認を出せます。`:'スタッフから届いた連絡・依頼です。'}</p>
     ${canSend?`<div class="btn-row" style="margin-bottom:16px">
       <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">＋ 日程調整</button>
       <button class="btn pri" style="flex:1" onclick="openRsvpForm()">＋ 出欠確認</button>
@@ -5371,13 +5084,9 @@ function consumeTokenFromHash(){
       if(bRes.ok)boot=await bRes.json();
     }catch(e){/* 取得できないときは既定値のまま（Googleボタンは出さない） */}
     GOOGLE_LOGIN_AVAILABLE=!!boot.config.googleLogin;
-    PASSWORD_RESET_AVAILABLE=!!boot.config.passwordReset;
+    MAIL_SEND_AVAILABLE=!!boot.config.mailSend;
     STAFF_EMAIL_DOMAIN=boot.config.staffEmailDomain||STAFF_EMAIL_DOMAIN;
     LOGIN_BRANCHES=boot.branches||(boot.db&&boot.db.branches)||[];
-
-    /* スタッフの招待URL（/?staff=xxx）で開かれたときは、誰の紹介かを控えておく。
-       ログイン画面の見た目はふつうのままで、会員登録に進んだときに担当スタッフへ反映する */
-    if(params.get('staff'))await loadInviteStaff();
 
     // スタッフ登録ページ（/staff）は、ログイン状態に関わらず専用画面を出す
     if(isStaffPage){
@@ -5398,16 +5107,6 @@ function consumeTokenFromHash(){
       }
       renderLogin();
       if(staffErr)toast(STAFF_ERR_MSG[staffErr]||'登録に失敗しました');
-      return;
-    }
-
-    // メールのリンクから来た場合は、ログイン状態を見る前に再設定画面を出す
-    const resetToken=params.get('reset');
-    if(resetToken){
-      params.delete('reset');
-      const q=params.toString();
-      history.replaceState(null,'',location.pathname+(q?`?${q}`:''));
-      await renderResetPassword(resetToken);
       return;
     }
 

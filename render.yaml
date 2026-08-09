@@ -48,9 +48,9 @@ services:
         sync: false
       - key: PUBLIC_BASE_URL
         value: https://ops-nittyou-app.onrender.com
+      # 初期管理者のメールアドレス。このアドレスでGoogleログインすると管理者になる
+      # （パスワードは使わないので SEED_ADMIN_PASSWORD は不要）
       - key: SEED_ADMIN_EMAIL
-        sync: false
-      - key: SEED_ADMIN_PASSWORD
         sync: false
       # ログイン用リダイレクトURI（/api/auth/google/login/callback）は
       # 2026-07-27 に Google Cloud Console へ登録済み。OAuth同意画面も公開済みのため有効化

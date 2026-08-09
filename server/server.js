@@ -45,8 +45,6 @@ const slots = require('./slots');
 const { buildICalendar } = require('./ical');
 
 const PORT = process.env.PORT || 8080;
-/* パスワード再設定リンクの有効時間。長すぎると危険、短すぎるとメール到着前に切れるため60分 */
-const RESET_TOKEN_MINUTES = 60;
 const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.TOKEN_ENCRYPTION_KEY && process.env.PUBLIC_BASE_URL);
 /* 「Googleでログイン」はカレンダー連携と同じ資格情報を使うが、Google Cloud Console 側に
    ログイン用のリダイレクトURI（/api/auth/google/login/callback）を登録し終えるまでは
@@ -56,8 +54,10 @@ const GOOGLE_LOGIN_ENABLED = GOOGLE_ENABLED && process.env.GOOGLE_LOGIN_ENABLED 
 /* スタッフ登録を許可するメールアドレスのドメイン。ドットジェイピーから配布される
    Googleアカウント（例: reandoro_azuma@dot-jp.or.jp）だけがスタッフになれる */
 const STAFF_EMAIL_DOMAIN = process.env.STAFF_EMAIL_DOMAIN || 'dot-jp.or.jp';
+/* まっさらなDBに1人だけ作る管理者。ログインはGoogleなので、ここに入れるのは
+   「そのGoogleアカウントのメールアドレス」。同じアドレスでGoogleログインすると
+   この行に紐づき、管理者として入れる（google.js の login 側で紐付けている） */
 const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@example.com';
-const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'change-me-immediately';
 
 const client = createClient(
   process.env.TURSO_DATABASE_URL
@@ -324,16 +324,16 @@ async function initDB() {
 
   const countRs = await client.execute('SELECT COUNT(*) as c FROM users');
   if (Number(countRs.rows[0].c) === 0) {
-    if (!process.env.SEED_ADMIN_EMAIL || !process.env.SEED_ADMIN_PASSWORD) {
-      console.warn('SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD が未設定です。デフォルトの仮パスワードで初期管理者を作成します。必ずログイン後すぐにパスワードを変更するか、環境変数を設定して再デプロイしてください。');
+    if (!process.env.SEED_ADMIN_EMAIL) {
+      console.warn(`SEED_ADMIN_EMAIL が未設定です。仮の ${SEED_ADMIN_EMAIL} で初期管理者を作成します。実際に使うGoogleアカウントのメールアドレスを設定して再デプロイしてください。`);
     }
-    const passwordHash = await auth.hashPassword(SEED_ADMIN_PASSWORD);
+    // パスワードは持たせない。このメールアドレスでGoogleログインした人が管理者になる
     await client.execute({
       sql: `INSERT INTO users (id, email, password_hash, nickname, role, branch_id, status, created_at)
             VALUES (?,?,?,?,?,?,?,?)`,
-      args: ['u_' + crypto.randomBytes(6).toString('hex'), SEED_ADMIN_EMAIL.toLowerCase(), passwordHash, '管理者', 'admin', null, 'active', new Date().toISOString()],
+      args: ['u_' + crypto.randomBytes(6).toString('hex'), SEED_ADMIN_EMAIL.toLowerCase(), '', '管理者', 'admin', null, 'active', new Date().toISOString()],
     });
-    console.log(`初期管理者アカウントを作成しました（email: ${SEED_ADMIN_EMAIL}）`);
+    console.log(`初期管理者アカウントを作成しました（email: ${SEED_ADMIN_EMAIL} / Googleでログインしてください）`);
   }
 }
 
@@ -835,8 +835,6 @@ function toPublicUser(row) {
     // Googleでログインしたばかりで所属支部が未設定のとき、フロント側で初回設定画面を出すための目印。
     // 管理者は特定の支部に属さない運用のため対象外
     needs_profile: row.role !== 'admin' && !row.branch_id,
-    // パスワード変更画面で「現在のパスワード」欄を出すかの判定に使う（値そのものは返さない）
-    has_password: !!row.password_hash,
   };
 }
 async function findUserByEmail(email) {
@@ -1399,25 +1397,6 @@ app.get('/api/auth/staff-options', async (req, res) => {
   }
 });
 
-/* 招待URL（?staff=xxx）を開いたときに、誰の紹介かを表示するために引く。
-   見つからないときもエラーにせず空で返し、登録自体は続けられるようにする */
-app.get('/api/auth/invite', async (req, res) => {
-  const staffId = req.query.staff;
-  if (!staffId) return res.json({ staff: null });
-  try {
-    const rs = await client.execute({
-      sql: `SELECT id, nickname, branch_id FROM users
-            WHERE id = ? AND status = 'active' AND role IN ('staff','branch_admin')`,
-      args: [String(staffId)],
-    });
-    const r = rs.rows[0];
-    res.json({ staff: r ? { id: r.id, nickname: r.nickname, branch_id: r.branch_id } : null });
-  } catch (e) {
-    console.error('招待リンクの確認に失敗しました', e);
-    res.status(500).json({ error: '取得に失敗しました' });
-  }
-});
-
 /* 担当スタッフとして指定してよい相手かを確かめる。
    でたらめなIDや、他支部の人・インターン生が入るのを防ぐ */
 async function validStaffIdFor(staffId, branchId) {
@@ -1433,52 +1412,12 @@ async function validStaffIdFor(staffId, branchId) {
   return row.id;
 }
 
-/* 旧・インターン生の会員登録。
-   支部ごとのリンクから、本名だけで面談を申請する方式に切り替えたため廃止した。
-   古いURLがLINEやブックマークに残っていても、行き先を案内できるように残してある */
-app.post('/api/auth/register-intern', async (req, res) => {
-  return res.status(410).json({
-    error: '会員登録は不要になりました。支部の担当者から届いた申請用リンクから、お名前を入れるだけで面談を申し込めます。',
-  });
-});
-
-/* 旧・秘密キー付き招待URL（?staff=...）による登録。
-   スタッフ登録は /staff のGoogle確認方式に一本化したため廃止した。
-   古いURLがブックマークやLINEに残っていても、新しい手順へ案内できるように残してある */
-app.post('/api/auth/register-staff', async (req, res) => {
-  return res.status(410).json({
-    error: 'スタッフ登録の方法が変わりました。ドットから配布されたGoogleアカウントで、スタッフ登録ページからお手続きください。',
-    staffSignupUrl: `${process.env.PUBLIC_BASE_URL || ''}/staff`,
-  });
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  const { email, password, remember } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'email・passwordは必須です' });
-  try {
-    const row = await findUserByEmail(email);
-    // Googleでのみ登録したアカウントはパスワードを持たない。原因が分かる案内を返す
-    if (row && !row.password_hash) {
-      return res.status(401).json({ error: 'このアカウントはGoogleで登録されています。下の「Googleでログイン」からお進みください。' });
-    }
-    if (!row || !(await auth.verifyPassword(password, row.password_hash))) {
-      return res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' });
-    }
-    if (row.status !== 'active') return res.status(403).json({ error: 'このアカウントではログインできません' });
-    /* インターン生のログインは廃止した。行と過去の面談は消していないので、
-       スタッフ側からは今までどおり見える。本人が入る必要がなくなっただけ */
-    if (row.role === 'intern') {
-      return res.status(403).json({
-        error: 'インターン生のログインは不要になりました。支部の担当者から届いた申請用リンクから、お名前を入れるだけで面談を申し込めます。',
-      });
-    }
-    const token = await createSessionRow(row.id, remember === true);
-    res.json({ ok: true, token, user: toPublicUser(row) });
-  } catch (e) {
-    console.error('ログインに失敗しました', e);
-    res.status(500).json({ error: 'ログインに失敗しました' });
-  }
-});
+/* パスワードによるログインと会員登録は廃止した。
+   入口はGoogleアカウントの1本だけで、パスワードそのものを扱わない。
+   - スタッフ：/staff で @dot-jp.or.jp のGoogleアカウントを確認して登録（下の staff-signup）
+   - インターン生：アカウント自体が不要。支部ごとの合言葉リンク（/i/<合言葉>）から申請する
+   users.password_hash 列と password_resets テーブルは、既存のDBを壊さないため残してあるが
+   もう読み書きしていない。 */
 
 app.post('/api/auth/logout', requireAuth, async (req, res) => {
   await deleteSessionByToken(auth.getSessionTokenFromReq(req));
@@ -1493,7 +1432,8 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 function authConfig() {
   return {
     googleLogin: GOOGLE_LOGIN_ENABLED,
-    passwordReset: mail.MAIL_ENABLED,
+    // 面談の確定・不成立メールを実際に送れるか。管理者の「システム設定」に出す
+    mailSend: mail.MAIL_ENABLED,
     staffEmailDomain: STAFF_EMAIL_DOMAIN,
   };
 }
@@ -1671,128 +1611,9 @@ app.post('/api/auth/complete-profile', requireAuth, async (req, res) => {
   }
 });
 
-/* パスワード変更。Googleだけで登録した人はパスワードを持たないため、
-   その場合に限り現在のパスワードなしで初回設定できるようにしている */
-app.post('/api/auth/change-password', requireAuth, async (req, res) => {
-  const { current_password, new_password } = req.body || {};
-  if (!new_password || String(new_password).length < 8) {
-    return res.status(400).json({ error: '新しいパスワードは8文字以上で入力してください' });
-  }
-  try {
-    const row = await findUserById(req.authUser.id);
-    if (!row) return res.status(404).json({ error: 'ユーザーが見つかりません' });
-    if (row.password_hash) {
-      if (!current_password) return res.status(400).json({ error: '現在のパスワードを入力してください' });
-      if (!(await auth.verifyPassword(current_password, row.password_hash))) {
-        return res.status(401).json({ error: '現在のパスワードが正しくありません' });
-      }
-    }
-    await client.execute({
-      sql: 'UPDATE users SET password_hash = ? WHERE id = ?',
-      args: [await auth.hashPassword(String(new_password)), req.authUser.id],
-    });
-    // 変更前に発行済みのセッションを無効化する（漏れていた場合に他の端末を追い出すため）。
-    // 今使っている端末だけは残し、ログインし直さずに済むようにする
-    await client.execute({
-      sql: 'DELETE FROM sessions WHERE user_id = ? AND token_hash != ?',
-      args: [req.authUser.id, req.authSessionTokenHash || ''],
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('パスワード変更に失敗しました', e);
-    res.status(500).json({ error: '変更に失敗しました' });
-  }
-});
-
-/* ---------- パスワードを忘れたとき ---------- */
-/* 申請。メールアドレスが登録済みかどうかに関わらず必ず同じ応答を返す。
-   「そのアドレスは登録されていません」と答えると、誰が登録しているかを外部から
-   調べられてしまうため */
-app.post('/api/auth/forgot-password', async (req, res) => {
-  const { email } = req.body || {};
-  if (!email) return res.status(400).json({ error: 'メールアドレスを入力してください' });
-  if (!mail.MAIL_ENABLED) {
-    return res.status(503).json({ error: 'メール送信が未設定のため、この機能は現在ご利用いただけません。管理者にお問い合わせください。' });
-  }
-  const ok = { ok: true, message: 'ご入力のメールアドレス宛に再設定用のメールをお送りしました。届かない場合は迷惑メールフォルダもご確認ください。' };
-  try {
-    const row = await findUserByEmail(email);
-    if (!row || row.status !== 'active') return res.json(ok);
-
-    // 同じ人の未使用リンクは無効化してから新しく発行する（古いリンクが生き続けないように）
-    await client.execute({ sql: 'DELETE FROM password_resets WHERE user_id = ?', args: [row.id] });
-
-    const token = auth.newSessionToken();
-    const now = new Date();
-    await client.execute({
-      sql: 'INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
-      args: [
-        auth.hashToken(token), row.id, now.toISOString(),
-        new Date(now.getTime() + RESET_TOKEN_MINUTES * 60 * 1000).toISOString(),
-      ],
-    });
-
-    const base = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
-    await mail.sendPasswordResetMail({
-      to: row.email,
-      nickname: row.nickname,
-      url: `${base}/?reset=${token}`,
-      minutes: RESET_TOKEN_MINUTES,
-    });
-    res.json(ok);
-  } catch (e) {
-    console.error('パスワード再設定メールの送信に失敗しました', e);
-    res.status(500).json({ error: 'メールの送信に失敗しました。時間をおいて再度お試しください。' });
-  }
-});
-
-/* リンクを開いた時点での有効性チェック。無効なら入力画面を出さずに済ませる */
-app.get('/api/auth/reset-check', async (req, res) => {
-  const row = await findValidReset(req.query.token);
-  res.json({ valid: !!row, nickname: row ? row.nickname : null });
-});
-
-app.post('/api/auth/reset-password', async (req, res) => {
-  const { token, new_password } = req.body || {};
-  if (!new_password || String(new_password).length < 8) {
-    return res.status(400).json({ error: 'パスワードは8文字以上で入力してください' });
-  }
-  try {
-    const row = await findValidReset(token);
-    if (!row) {
-      return res.status(400).json({ error: 'このリンクは期限切れか、既に使用済みです。お手数ですが再度お手続きください。' });
-    }
-    await client.execute({
-      sql: 'UPDATE users SET password_hash = ? WHERE id = ?',
-      args: [await auth.hashPassword(String(new_password)), row.user_id],
-    });
-    // リンクは使い捨て。同時に全端末のログインを解除する（乗っ取られていた場合に締め出すため）
-    await client.execute({
-      sql: 'UPDATE password_resets SET used_at = ? WHERE token_hash = ?',
-      args: [new Date().toISOString(), row.token_hash],
-    });
-    await client.execute({ sql: 'DELETE FROM sessions WHERE user_id = ?', args: [row.user_id] });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('パスワード再設定に失敗しました', e);
-    res.status(500).json({ error: '再設定に失敗しました' });
-  }
-});
-
-/* 有効な再設定リンクを1件返す。期限切れ・使用済み・存在しないときはnull */
-async function findValidReset(token) {
-  if (!token) return null;
-  const rs = await client.execute({
-    sql: `SELECT r.token_hash, r.user_id, r.expires_at, u.nickname
-            FROM password_resets r JOIN users u ON u.id = r.user_id
-           WHERE r.token_hash = ? AND r.used_at IS NULL`,
-    args: [auth.hashToken(String(token))],
-  });
-  const row = rs.rows[0];
-  if (!row) return null;
-  if (new Date(row.expires_at).getTime() < Date.now()) return null;
-  return row;
-}
+/* パスワードの変更・再設定のAPIはここにあったが、パスワードそのものを扱わなくなったため削除した。
+   ログインできなくなった人への対応は、管理者がユーザー管理からアカウントを直すか、
+   Googleアカウント側の問題なので、このアプリの外で解決する。 */
 
 /* ---------- 管理者：スタッフ登録URL ----------
    秘密キー付きの招待URLは廃止。@dot-jp.or.jp のGoogleアカウントを持っている人だけが
@@ -1903,36 +1724,9 @@ app.patch('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, r
   }
 });
 
-/* インターン生が自分の担当スタッフを自分で変える */
-/* 担当スタッフの引き継ぎ。
-   変更できるのは、いま担当しているスタッフ本人だけ。
-   インターン生が自分で付け替えると、スタッフ側が把握しないまま
-   担当から外れてしまうため、本人には触らせない（会員登録のときだけ選べる）。 */
-app.patch('/api/staff/interns/:id', requireAuth, async (req, res) => {
-  const me = req.authUser;
-  if (me.role !== 'staff' && me.role !== 'branch_admin') {
-    return res.status(403).json({ error: '権限がありません' });
-  }
-  try {
-    const target = await findUserById(req.params.id);
-    if (!target || target.role !== 'intern') {
-      return res.status(404).json({ error: 'インターン生が見つかりません' });
-    }
-    if (target.staff_id !== me.id) {
-      return res.status(403).json({ error: 'あなたが担当しているインターン生ではありません' });
-    }
-    // 引き継ぎ先は、同じ支部のスタッフに限る（支部をまたぐ担当を作らない）
-    const staffId = await validStaffIdFor(req.body?.staff_id, target.branch_id);
-    if (req.body?.staff_id && !staffId) {
-      return res.status(400).json({ error: 'その担当スタッフは選べません' });
-    }
-    await client.execute({ sql: 'UPDATE users SET staff_id=? WHERE id=?', args: [staffId, target.id] });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('担当スタッフの変更に失敗しました', e);
-    res.status(500).json({ error: '変更に失敗しました' });
-  }
-});
+/* 担当スタッフの引き継ぎAPI（PATCH /api/staff/interns/:id）はここにあったが、
+   呼び出し元の「担当一覧」画面を撤去したため削除した。
+   担当の付け替えはユーザー管理（/api/admin/users）から行う。 */
 app.delete('/api/admin/users/:id', requireAuth, requireBranchAdmin, async (req, res) => {
   if (req.params.id === req.authUser.id) return res.status(400).json({ error: '自分自身は削除できません' });
   try {
@@ -3438,6 +3232,8 @@ const PUBLIC_FILES = {
   '/': 'index.html',
   '/index.html': 'index.html',
   '/style.css': 'style.css',
+  // 祝日の計算。index.html と apply.html の両方が読む
+  '/holidays.js': 'holidays.js',
   '/privacy.html': 'privacy.html',
   '/terms.html': 'terms.html',
   // スタッフ登録ページ。中身はアプリ本体と同じHTMLで、URLを見て画面を切り替えている

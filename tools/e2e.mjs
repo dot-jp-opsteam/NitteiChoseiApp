@@ -25,7 +25,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // server/ 側にインストールされている @libsql/client を借りる（tools用の依存は増やさない）
 const { createClient } = createRequire(path.join(ROOT, 'server', 'package.json'))('@libsql/client');
-const { hashPassword } = createRequire(path.join(ROOT, 'server', 'package.json'))('./auth');
 const PORT = 8123;
 const BASE = `http://localhost:${PORT}`;
 
@@ -92,8 +91,7 @@ async function setupDB(dbPath) {
   }
   const c = createClient({ url: 'file:' + dbPath });
   const now = new Date().toISOString();
-  const testPasswordHash = await hashPassword('e2e-browser-pass');
-  const exp = new Date(Date.now() + 3600e3).toISOString();
+  const exp =new Date(Date.now() + 3600e3).toISOString();
   const oneYearAgo = new Date(Date.now() - 365 * 24 * 3600e3).toISOString();
 
   // server.js の initDB() と同じ形。起動時にCREATE TABLE IF NOT EXISTSされるので最低限だけ先に作る
@@ -109,7 +107,8 @@ async function setupDB(dbPath) {
   for (const [id, email, role, branch] of USERS) {
     await c.execute({
       sql: 'INSERT OR REPLACE INTO users (id,email,password_hash,nickname,role,branch_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)',
-      args: [id, email, testPasswordHash, 'E2E-' + role, role, branch, 'active', now],
+      // パスワードは使わなくなったので空。列そのものは既存DBに合わせて残っている
+      args: [id, email, '', 'E2E-' + role, role, branch, 'active', now],
     });
   }
   for (const [key, token] of Object.entries(TOKENS)) {
@@ -1556,8 +1555,12 @@ async function run() {
        どこで何を選ぶのかが分かる一文が要る（設計書 2節） */
     {
       const applyHtml = fs.readFileSync(path.join(ROOT, 'apply.html'), 'utf8');
-      const GUIDE = '下のカレンダーから、面談可能な時間帯を選択してください。';
+      const GUIDE = '下のカレンダーから、<b>あなたが空いている時間帯</b>を選択してください。';
       check('申請画面にカレンダーで選ぶ旨の説明がある', applyHtml.includes(GUIDE), true);
+      /* 「10:00〜10:30」を面談の長さと読み違えられないよう、
+         選ぶのは空いている時間帯だと必ず書いておく（2026-08-10 の指摘） */
+      check('選ぶのは空き時間で面談の長さではないと書いてある',
+        applyHtml.includes('面談の長さを決めるものではありません'), true);
       check('説明は担当スタッフ欄とカレンダーの間にある',
         applyHtml.indexOf('のスタッフから選べます') < applyHtml.indexOf(GUIDE)
         && applyHtml.indexOf(GUIDE) < applyHtml.indexOf('weekBlock(groups)'), true);
@@ -1588,6 +1591,75 @@ async function run() {
         && css.includes('.apbook .bt-c.ok{touch-action:auto'), true);
       check('選び方の一言が日時欄に出る',
         applyHtml.includes('押したまま上下になぞるとまとめて選べます'), true);
+
+      /* 送信前の確認と、送信後の控え（2026-08-10 の指摘）。
+         押した瞬間に飛んでいくと、間違いに気づく機会がまったく無かった */
+      check('入力画面のボタンは送信ではなく確認へ進む',
+        applyHtml.includes('onclick="goConfirm()"')
+        && applyHtml.includes('件の内容を確認する'), true);
+      check('確認画面では送信していないと明記する',
+        applyHtml.includes('まだ送信していません。'), true);
+      check('確認画面から書き直せる',
+        applyHtml.includes('onclick="backToForm()"'), true);
+      /* 実際に送るのは確認画面のボタンだけ。入力画面から直接 submitApply を
+         呼ぶ口が復活すると、確認を挟まずに送れてしまう */
+      check('submitApply を呼ぶ場所は1か所だけ',
+        (applyHtml.match(/onclick="submitApply\(\)"/g) || []).length, 1);
+      check('確認画面のボタン文言は「この内容で申請する」',
+        applyHtml.includes('この内容で申請する'), true);
+      check('送信後に控えを残す',
+        applyHtml.includes('申請した内容（控え）') && applyHtml.includes('申請日時：'), true);
+      check('控えをコピーできる',
+        applyHtml.includes('onclick="copyReceipt()"') && applyHtml.includes('function receiptText('), true);
+      check('控えは送った時点の内容で固める',
+        applyHtml.includes('APPLY.receipt=sum;'), true);
+
+      // 祝日は年をまたいでも出るよう、共通の計算ファイルから読む
+      check('申請画面は祝日を手打ちしていない',
+        /var HOLIDAYS=\{/.test(applyHtml), false);
+      check('申請画面は共通の祝日ファイルを読む',
+        applyHtml.includes('<script src="/holidays.js"></script>'), true);
+    }
+
+    /* 祝日。2026年ぶんの手打ちを規則からの計算に置き換えた（2026-08-10）。
+       翌年以降も勝手に出ること、振替休日と国民の休日まで面倒を見ることを確かめる */
+    {
+      const holidayRes = await api(null, 'GET', '/holidays.js');
+      check('holidays.js が配信されている', holidayRes.status, 200);
+      const { holidaysOfYear } = createRequire(path.join(ROOT, 'server', 'package.json'))('../holidays.js');
+      const y2026 = holidaysOfYear(2026);
+      check('2026年の祝日は18件', Object.keys(y2026).length, 18);
+      check('2026年の山の日', y2026['8-11'], '山の日');
+      check('2026年の振替休日（5/3が日曜）', y2026['5-6'], '振替休日');
+      check('2026年の国民の休日（9/22）', y2026['9-22'], '国民の休日');
+      const y2027 = holidaysOfYear(2027);
+      check('2027年も祝日が出る（手打ち切れしない）', Object.keys(y2027).length > 0, true);
+      check('2027年の成人の日は1/11', y2027['1-11'], '成人の日');
+      check('2027年の春分の日は3/21', y2027['3-21'], '春分の日');
+      check('2027年の振替休日（3/21が日曜）', y2027['3-22'], '振替休日');
+      // 2032年は敬老の日と秋分の日が1日空くので、あいだが国民の休日になる
+      check('2032年の国民の休日（9/21）', holidaysOfYear(2032)['9-21'], '国民の休日');
+    }
+
+    /* ログインはGoogleだけ。パスワードの入力欄も会員登録も画面から消えていること（2026-08-10） */
+    {
+      const appHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+      check('ログイン画面にパスワード欄が無い', appHtml.includes('id="loginPassword"'), false);
+      check('会員登録の導線が無い', appHtml.includes('メールアドレスで会員登録する'), false);
+      check('パスワードを忘れたの導線が無い', appHtml.includes("switchLoginView('forgot')"), false);
+      check('パスワード変更の設定項目が無い', appHtml.includes('openPasswordChange()'), false);
+      check('初回ログインから /staff へ進む',
+        appHtml.includes('>初回ログイン</button>')
+        && appHtml.includes('onclick="location.href=\'/staff\'">初回ログイン'), true);
+      check('担当一覧のタブが無い', appHtml.includes("id:'myinterns'"), false);
+      check('依頼の説明からインターン生が消えている',
+        appHtml.includes('のスタッフ・インターン生に、連絡や出欠確認を出せます'), false);
+      check('希望日時は空いている時間だと書いてある',
+        appHtml.includes('第${i+1}希望（空いている時間）')
+        && appHtml.includes('面談の長さではありません'), true);
+      check('本体は共通の祝日ファイルを読む',
+        appHtml.includes('<script src="/holidays.js"></script>')
+        && !/const HOLIDAYS=\{/.test(appHtml), true);
     }
 
     /* スタッフの確定は、30分ボタンの一覧ではなく開始時刻の入力にする。
@@ -1725,10 +1797,16 @@ async function run() {
     const newOk = await api(null, 'GET', `/api/apply/${token2}`);
     check('新しい合言葉なら通る', newOk.status, 200);
 
-    // 廃止した入口
+    /* 廃止した入口。会員登録もパスワードログインも撤去したので、
+       ルート自体が無くなって404になる（410の案内も出さない） */
     const oldRegister = await api(null, 'POST', '/api/auth/register-intern',
       { email: 'x@example.com', password: 'password123', nickname: 'x' });
-    check('インターン生の会員登録は廃止されている', oldRegister.status, 410);
+    check('インターン生の会員登録は撤去されている', oldRegister.status, 404);
+    const oldLogin = await api(null, 'POST', '/api/auth/login',
+      { email: 'x@example.com', password: 'password123' });
+    check('パスワードログインは撤去されている', oldLogin.status, 404);
+    const oldForgot = await api(null, 'POST', '/api/auth/forgot-password', { email: 'x@example.com' });
+    check('パスワード再設定は撤去されている', oldForgot.status, 404);
     const oldApply = await api(TOKENS.staff, 'POST', '/api/interviews', { choices: ['2026-09-01T10:00:00.000Z'] });
     check('ログイン経由の面談申請は廃止されている', oldApply.status, 410);
     const internSession = await api(TOKENS.oldIntern, 'GET', '/api/db');
