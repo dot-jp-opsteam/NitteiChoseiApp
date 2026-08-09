@@ -42,6 +42,7 @@ const auth = require('./auth');
 const mail = require('./mail');
 const sharedCalFilter = require('./shared-cal-filter');
 const slots = require('./slots');
+const push = require('./push');
 const { buildICalendar } = require('./ical');
 
 const PORT = process.env.PORT || 8080;
@@ -294,6 +295,8 @@ async function initDB() {
       at TEXT NOT NULL, archived_at TEXT NOT NULL
     )
   `);
+  // ブラウザのプッシュ通知の購読先。中身は push.js が受け持つ
+  await push.initPushTable(client);
   for (const ddl of [
     'CREATE INDEX IF NOT EXISTS idx_requests_branch ON requests(branch_id)',
     'CREATE INDEX IF NOT EXISTS idx_request_reads_user ON request_reads(user_id)',
@@ -1435,9 +1438,47 @@ function authConfig() {
     // 面談の確定・不成立メールを実際に送れるか。管理者の「システム設定」に出す
     mailSend: mail.MAIL_ENABLED,
     staffEmailDomain: STAFF_EMAIL_DOMAIN,
+    /* ブラウザのプッシュ通知。公開鍵は名前のとおり誰に見られてもよいもので、
+       これが無いと画面側が購読を作れないため boot と一緒に配る */
+    push: push.PUSH_ENABLED,
+    pushPublicKey: push.PUSH_ENABLED ? push.PUBLIC_KEY : '',
   };
 }
 app.get('/api/auth/config', (req, res) => res.json(authConfig()));
+
+/* ---------- ブラウザのプッシュ通知 ----------
+   購読は端末ごとに1つ。オンオフも端末ごとに持つ（push.js の頭のコメント参照）。
+   どの口も自分の購読しか触れない */
+app.post('/api/push/state', requireAuth, async (req, res) => {
+  if (!push.PUSH_ENABLED) return res.json({ enabled: false, found: false });
+  try {
+    const state = await push.getSubscriptionState(client, req.authUser.id, (req.body || {}).endpoint);
+    res.json({ enabled: true, ...state });
+  } catch (e) {
+    console.error('通知設定の取得に失敗しました', e);
+    res.status(500).json({ error: '通知設定を読み込めませんでした' });
+  }
+});
+app.put('/api/push/subscribe', requireAuth, async (req, res) => {
+  if (!push.PUSH_ENABLED) return res.status(503).json({ error: '通知はいま使えません' });
+  try {
+    const saved = await push.saveSubscription(client, req.authUser.id, req.body || {});
+    if (!saved) return res.status(400).json({ error: '購読情報が正しくありません' });
+    res.json({ ok: true, ...saved });
+  } catch (e) {
+    console.error('通知の登録に失敗しました', e);
+    res.status(500).json({ error: '通知を登録できませんでした' });
+  }
+});
+app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
+  try {
+    await push.removeSubscription(client, req.authUser.id, (req.body || {}).endpoint);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('通知の解除に失敗しました', e);
+    res.status(500).json({ error: '通知を解除できませんでした' });
+  }
+});
 
 /* 起動時に必要な情報をまとめて返す。
    以前は config → me → db → branches を順番に呼んでおり、
@@ -2110,6 +2151,13 @@ app.post('/api/requests', requireAuth, async (req, res) => {
         ? `${actor.nickname}さんから出欠確認「${request.subject}」が届きました`
         : `${actor.nickname}さんから「${request.subject}」が届きました`,
     });
+    /* 端末の通知欄にも出す。送った本人は ids に含まれる（出欠は自分も回答者）ので、
+       自分の送信で自分の端末が鳴らないよう外しておく */
+    push.sendToUsers(client, ids.filter((id) => id !== actor.id), 'request', {
+      title: isAttend ? '参加確認が届きました' : '依頼が届きました',
+      body: `${actor.nickname}さんから「${request.subject}」`,
+      url: `/?req=${encodeURIComponent(request.id)}`, tag: 'request',
+    }).catch((e) => console.warn('依頼の通知に失敗しました', e));
     res.json({ ok: true, request, notification });
   } catch (e) {
     console.error('依頼の送信に失敗しました', e);
@@ -2604,6 +2652,13 @@ app.post('/api/apply/:token', async (req, res) => {
       type: '面談申請', branch_id: ctx.branch.id,
       msg: `${internName}さんが面談を申請しました`,
     });
+    /* 端末の通知欄にも出す。届くのは担当に選ばれたスタッフだけ。
+       申請の保存はもう済んでいるので、送れなくても申請は成立させる */
+    push.sendToUsers(client, [ctx.staff.id], 'interview', {
+      title: '面談の申請が届きました',
+      body: `${internName}さんから面談の申請が届きました`,
+      url: '/', tag: 'interview',
+    }).catch((e) => console.warn('面談申請の通知に失敗しました', e));
     res.json({ ok: true, staff_nickname: ctx.staff.nickname });
   } catch (e) {
     console.error('面談の申請に失敗しました', e);
@@ -3234,6 +3289,16 @@ const PUBLIC_FILES = {
   '/style.css': 'style.css',
   // 祝日の計算。index.html と apply.html の両方が読む
   '/holidays.js': 'holidays.js',
+  /* アプリのアイコン。/favicon.ico もこのPNGを返す（拡張子ではなく
+     実ファイルから型が決まるので image/png で配信される）。
+     いまは120×120しか素材が無く、ホーム画面用の180pxは拡大表示になる。
+     大きい原本が手に入ったら icon-120.png を差し替えてサイズ表記も直すこと */
+  '/icon-120.png': 'icon-120.png',
+  '/favicon.ico': 'icon-120.png',
+  '/manifest.webmanifest': 'manifest.webmanifest',
+  /* プッシュ通知の受け取り役。/ の直下から配らないとアプリ全体を
+     受け持てない（Service Workerは自分より下の階層しか担当できない） */
+  '/sw.js': 'sw.js',
   '/privacy.html': 'privacy.html',
   '/terms.html': 'terms.html',
   // スタッフ登録ページ。中身はアプリ本体と同じHTMLで、URLを見て画面を切り替えている

@@ -1,0 +1,17 @@
+{
+  "name": "OPS日調アプリ",
+  "short_name": "OPS日調",
+  "description": "ドットジェイピー OPSの日程調整アプリ。面談の申請・確定、イベントの出欠確認、スタッフ間の連絡をまとめて扱えます。",
+  "lang": "ja",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#dbe9e7",
+  "theme_color": "#dbe9e7",
+  "icons": [
+    { "src": "/icon-120.png", "sizes": "120x120", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-120.png", "sizes": "120x120", "type": "image/png", "purpose": "maskable" }
+  ]
+}

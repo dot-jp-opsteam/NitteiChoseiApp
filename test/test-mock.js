@@ -166,13 +166,16 @@
     },
   ];
 
+  /* 回答は 'ok' / 'may' / 'no' で持つ。○△× は画面に出すときの見た目でしかない。
+     ここに記号を入れると集計が全部0になり、本番と違う見え方になってしまう
+     （2026-08-10 に記号から直した） */
   var event_responses = [
-    { id: 'er_1', event_id: 'ev_1', user_id: 'u_int1', response: '○' },
-    { id: 'er_2', event_id: 'ev_1', user_id: 'u_int2', response: '△' },
-    { id: 'er_3', event_id: 'ev_1', user_id: 'u_int3', response: '×' },
-    { id: 'er_4', event_id: 'ev_1', user_id: 'u_staff1', response: '○' },
-    { id: 'er_5', event_id: 'ev_2', user_id: 'u_int1', response: '△' },
-    { id: 'er_6', event_id: 'ev_2', user_id: 'u_staff2', response: '○' },
+    { id: 'er_1', event_id: 'ev_1', user_id: 'u_int1', response: 'ok' },
+    { id: 'er_2', event_id: 'ev_1', user_id: 'u_int2', response: 'may' },
+    { id: 'er_3', event_id: 'ev_1', user_id: 'u_int3', response: 'no' },
+    { id: 'er_4', event_id: 'ev_1', user_id: 'u_staff1', response: 'ok' },
+    { id: 'er_5', event_id: 'ev_2', user_id: 'u_int1', response: 'may' },
+    { id: 'er_6', event_id: 'ev_2', user_id: 'u_staff2', response: 'ok' },
   ];
 
   /* ---------- メール履歴 ---------- */

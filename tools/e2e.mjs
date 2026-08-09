@@ -648,12 +648,33 @@ async function testAttendance() {
   check('完了済みの依頼は新しい順のまま',
     appHtml.includes('function myRequests(){')
       && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
-  /* 依頼を出す画面のボタンは「日程調整」「出欠確認」「依頼を出す」の順。
-     以前の「出欠を確認する」（複数候補から絞る機能）は「日程調整」に改名し、
-     いちばん左へ移した。「出欠確認」は別物の新機能で、その間に挟まる */
-  check('ボタンは日程調整→出欠確認→依頼を出すの順に並ぶ',
-    /＋ 日程調整[\s\S]*openRsvpForm\(\)[\s\S]*＋ 出欠確認[\s\S]*openRequestForm\(\)[\s\S]*＋ 依頼を出す/.test(appHtml), true);
+  /* 入口は「＋ 新しく送る」の1つだけ。
+     以前は「＋日程調整／＋出欠確認／＋依頼を出す」が同じ色・同じ大きさで
+     横に3つ並び、名前だけでは違いが分からなかった。
+     押すと openSendPicker() が説明付きの3択を出す */
+  check('依頼画面の入口は「新しく送る」1つだけ',
+    appHtml.includes('onclick="openSendPicker()">${ic(\'plus\')}新しく送る</button>')
+      && !appHtml.includes('＋ 日程調整')
+      && !appHtml.includes('＋ 出欠確認')
+      && !appHtml.includes('＋ 依頼を出す'), true);
+  /* 3択は「日程を決める」「参加を確認する」「連絡・お願い」の順。
+     それぞれ何をするものかと、あて先が誰かを言葉で書いてある */
+  check('送るものの3択が説明とあて先つきで並ぶ',
+    /openRequestForm\('attend'\)[\s\S]*日程を決める[\s\S]*openRsvpForm\(\)[\s\S]*参加を確認する[\s\S]*openRequestForm\(\)[\s\S]*連絡・お願い/.test(appHtml)
+      && appHtml.includes("${ic('send')}あて先：${to}")
+      && (appHtml.match(/'選んだ相手'\)/g) || []).length === 2
+      && appHtml.includes("'支部の全スタッフ')"), true);
   check('旧「出欠を確認する」の文言は残っていない', appHtml.includes('出欠を確認する'), false);
+  /* フォームの中の「送るもの」二重切り替えは撤去した。
+     外で選んだのに中でもう一度選ぶ形になっていて、しかも
+     「参加を確認する」だけがその切り替えに入っていなかった */
+  check('依頼フォームに「送るもの」の切り替えは無い',
+    appHtml.includes('<label class="fl">送るもの</label>'), false);
+  check('3状態の言い方は ○参加／△未定／×不参加 に統一されている',
+    appHtml.includes("const ATT_LABEL={ok:'参加',may:'未定',no:'不参加'}")
+      && attendHtml.includes("const ATT_LABEL={ok:'参加',may:'未定',no:'不参加'}")
+      && !attendHtml.includes('参加できる')
+      && !attendHtml.includes('参加できない'), true);
 
   /* ---- 出欠確認（1件だけの予定に○△×で答える新タブ） ----
      日程調整（候補を複数出して絞る）とは別物。中身は出欠確認（kind:'attend'）を
@@ -1660,6 +1681,107 @@ async function run() {
       check('本体は共通の祝日ファイルを読む',
         appHtml.includes('<script src="/holidays.js"></script>')
         && !/const HOLIDAYS=\{/.test(appHtml), true);
+    }
+
+    /* ---- 2026-08-10（2回目）の改修 ---- */
+    {
+      const appHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+      const styleCss = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+      const applySrc = fs.readFileSync(path.join(ROOT, 'apply.html'), 'utf8');
+      const attendSrc = fs.readFileSync(path.join(ROOT, 'attendance.html'), 'utf8');
+      const serverSource = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
+
+      /* 既定はライト。ダークだと六角形タイルの色分けが定義されておらず、
+         4つとも同じグレーになって情報が減るため */
+      check('既定のテーマはライト',
+        appHtml.includes("el.setAttribute('data-theme',t==='dark'?'dark':'light')")
+        && appHtml.includes("catch(e){el.setAttribute('data-theme','light');}"), true);
+      check('アドレスバーの色はライトの地色に合わせてある',
+        appHtml.includes('<meta name="theme-color" content="#dbe9e7">')
+        && appHtml.includes("t==='light'?'#dbe9e7':'#000000'"), true);
+      /* テーマの入口はプロフィールの奥だけだと深すぎる。左メニューにも出す */
+      check('テーマ切替が左メニューにもある',
+        appHtml.includes('id="sbTheme" onclick="toggleTheme()"')
+        && appHtml.includes('function themeSwitchLabel()')
+        && appHtml.includes('function syncThemeButton()'), true);
+
+      // アイコン。iPhoneはホーム画面に追加したときだけ通知が届くので、通知の前提でもある
+      check('3つの画面すべてにアイコンがある',
+        appHtml.includes('rel="apple-touch-icon" href="/icon-120.png"')
+        && applySrc.includes('rel="apple-touch-icon" href="/icon-120.png"')
+        && attendSrc.includes('rel="apple-touch-icon" href="/icon-120.png"'), true);
+      check('manifest を読んでいる', appHtml.includes('rel="manifest" href="/manifest.webmanifest"'), true);
+      check('検索結果用の説明文がある', appHtml.includes('<meta name="description"'), true);
+
+      /* 面談一覧。1件ずつ開かないと希望日が分からない状態をやめた */
+      check('面談一覧の行に第1希望を出す',
+        appHtml.includes('function ivRowSub(iv)')
+        && appHtml.includes('`第1希望 ${fmtGroupRange(g)} ・ 申請 ${fmtRel(iv.created_at)}`'), true);
+      check('面談一覧を希望日が近い順に並べ替えられる',
+        appHtml.includes("let IVSORT='new'")
+        && appHtml.includes('function ivWishTime(iv)')
+        && appHtml.includes('>希望日が近い順</button>'), true);
+
+      /* 本命の「第1希望どおり確定」がいちばん押しやすい形になっていること */
+      check('申請中の面談は第1希望を開いた状態で出す',
+        appHtml.includes("IV_OPEN=new Set(iv.status==='applied'&&groups.length?[1]:[])"), true);
+      check('不成立は確定の並びから外して最後に置く',
+        appHtml.includes('<div class="danger-zone">')
+        && appHtml.includes('>この申請を不成立にする</button>')
+        && styleCss.includes('.danger-zone{'), true);
+
+      /* 面談可能時間帯まわり。同じ画面で言葉が反転していたのを1つに揃えた */
+      check('受けられる時間の用語が統一されている',
+        appHtml.includes('<h3>面談を受けられる時間</h3>')
+        && appHtml.includes('<h1 class="page">この日は受けられない時間</h1>')
+        && !appHtml.includes('面談できない時間を登録'), true);
+      check('「ホームへ戻る」が二重に出ない',
+        appHtml.includes('ホームに戻る'), false);
+
+      /* リマインド。明日の面談はカレンダーを開かないと気づけなかった */
+      check('明日の面談をホームに出す',
+        appHtml.includes('function tomorrowInterviews()')
+        && appHtml.includes('function interviewHomeReminder()')
+        && appHtml.includes('明日は面談が${list.length}件あります'), true);
+
+      /* イベントカード。1件350pxのまま10件並ぶとホームが3,500px伸びていた */
+      check('回答済みの予定カードは畳む',
+        appHtml.includes('let EVOPEN=new Set()')
+        && appHtml.includes('function toggleEventVote(evId)')
+        && appHtml.includes('<div class="voted-row">'), true);
+      check('○△×のボタンに上限幅がある', styleCss.includes('.vote3{display:flex;gap:8px;max-width:420px}'), true);
+
+      // PCでは1カラムに縦積みせず、左右2列にしてスクロール量を減らす
+      check('広い画面ではシートを2カラムにする',
+        appHtml.includes('<div class="sheet2">')
+        && styleCss.includes('.sheet:has(.sheet2){max-width:880px}'), true);
+
+      /* プッシュ通知。受け取り役は /sw.js で、購読とオンオフは端末ごとに持つ */
+      check('Service Worker がある',
+        fs.existsSync(path.join(ROOT, 'sw.js'))
+        && serverSource.includes("'/sw.js': 'sw.js'"), true);
+      check('通知の設定は2種類を別々に切り替えられる',
+        appHtml.includes("row('interview','面談の申請が届いたとき'")
+        && appHtml.includes("row('request','依頼・参加確認が届いたとき'")
+        && appHtml.includes("document.getElementById('push_interview').checked")
+        && appHtml.includes("document.getElementById('push_request').checked")
+        && appHtml.includes('function pushSubscribe(prefs)'), true);
+      check('iPhoneにはホーム画面へ追加するよう案内する',
+        appHtml.includes('function isIOSBrowser()') || appHtml.includes('const isIOSBrowser='), true);
+      check('通知が使えるかはサーバーの鍵と端末の対応の両方で決まる',
+        appHtml.includes('PUSH_AVAILABLE=!!boot.config.push&&!!PUSH_PUBLIC_KEY&&pushSupported()'), true);
+      check('通知の口は自分の購読しか触れない',
+        serverSource.includes("app.put('/api/push/subscribe', requireAuth")
+        && serverSource.includes("app.post('/api/push/unsubscribe', requireAuth")
+        && serverSource.includes("app.post('/api/push/state', requireAuth"), true);
+      check('面談の申請は担当スタッフだけに通知する',
+        serverSource.includes("push.sendToUsers(client, [ctx.staff.id], 'interview'"), true);
+      check('依頼の通知は送った本人には飛ばない',
+        serverSource.includes("push.sendToUsers(client, ids.filter((id) => id !== actor.id), 'request'"), true);
+      // 鍵が無い環境では静かに無効のまま動くこと（ローカル開発で落ちないため）
+      check('鍵が未設定なら通知は使えないと返す',
+        serverSource.includes('push: push.PUSH_ENABLED')
+        && serverSource.includes("pushPublicKey: push.PUSH_ENABLED ? push.PUBLIC_KEY : ''"), true);
     }
 
     /* スタッフの確定は、30分ボタンの一覧ではなく開始時刻の入力にする。

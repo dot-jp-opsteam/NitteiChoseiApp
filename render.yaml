@@ -35,6 +35,13 @@ services:
         - apply.html
         # アカウント無しの公開出欠回答ページ
         - attendance.html
+        # 祝日の計算（index.html と apply.html の両方が読む）
+        - holidays.js
+        # プッシュ通知の受け取り役（Service Worker）
+        - sw.js
+        # アプリのアイコンと、ホーム画面に追加するための情報
+        - icon-120.png
+        - manifest.webmanifest
     envVars:
       - key: TURSO_DATABASE_URL
         sync: false
@@ -77,3 +84,18 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
+      # ブラウザのプッシュ通知（Web Push）。費用は0円で、外部サービスも要らない。
+      # VAPIDという鍵を1組作って、公開鍵と秘密鍵をここに入れる。
+      #   作り方（server/ で1回だけ）：
+      #     node -e "const w=require('web-push');const k=w.generateVAPIDKeys();console.log(k)"
+      # 秘密鍵はこのファイルにも、リポジトリのどこにも置かないこと（sync:false）。
+      # 両方そろったときだけ通知が有効になり、片方でも欠けると静かに無効のまま動く。
+      # 鍵を作り直すと、いま登録されている購読はすべて無効になり、
+      # 全員に設定し直してもらうことになるので注意。
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      # 通知の配信元として名乗る連絡先。mailto: か https: で始める
+      - key: VAPID_SUBJECT
+        value: mailto:ops@dot-jp.or.jp

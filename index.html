@@ -3,17 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#000000">
+<!-- スマホのアドレスバーの色。ライトの --bg（#dbe9e7）に合わせてある -->
+<meta name="theme-color" content="#dbe9e7">
+<meta name="description" content="ドットジェイピー OPSの日程調整アプリ。面談の申請・確定、イベントの出欠確認、スタッフ間の連絡をまとめて扱えます。">
+<!-- アイコン。apple-touch-icon はスマホの「ホーム画面に追加」で使われる。
+     iPhoneは**ホーム画面に追加したときだけ**通知（Web Push）を受け取れるので、
+     ここは通知機能の前提でもある -->
+<link rel="icon" href="/icon-120.png" sizes="120x120" type="image/png">
+<link rel="apple-touch-icon" href="/icon-120.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="OPS日調">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>OPS日調アプリ</title>
-<!-- テーマは端末設定ではなくアプリ側の設定に従う。既定はダーク。
+<!-- テーマは端末設定ではなくアプリ側の設定に従う。既定はライト。
+     ダークは六角形タイルの色分け（面談＝緑／依頼＝オレンジ…）が定義されておらず、
+     4つとも同じグレーになって情報が減るため、既定はライトにしてある。
      CSSより先に data-theme を確定させないと、一瞬だけ違う配色が見えてしまう -->
 <script>
 (function(){
   var el=document.documentElement;
   try{
     var t=localStorage.getItem('ops_theme_v1');
-    el.setAttribute('data-theme',t==='light'?'light':'dark');
-  }catch(e){el.setAttribute('data-theme','dark');}
+    el.setAttribute('data-theme',t==='dark'?'dark':'light');
+  }catch(e){el.setAttribute('data-theme','light');}
   /* 左メニューの開閉。保存された指定が無ければ、スマホは細い帯・PCは広げた状態にする。
      ここで確定させないと、一瞬だけ違う幅で描かれて中身が横にずれる */
   try{
@@ -139,6 +151,11 @@ const ICON={
       +'<path pathLength="1" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>'
       +'<path pathLength="1" d="M9 12h7"/><path pathLength="1" d="M9 16h4.5"/>',
   clock:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="M12 6.8v5.5l3.4 2"/>',
+  // テーマ切替。押すと何になるかを示すので、ライト表示中は moon（＝ダークにする）を出す
+  moon:'<path pathLength="1" d="M20.5 14.3A8.6 8.6 0 0 1 9.7 3.5a8.7 8.7 0 1 0 10.8 10.8z"/>',
+  sun:'<circle pathLength="1" cx="12" cy="12" r="4.2"/>'
+      +'<path pathLength="1" d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2"/>'
+      +'<path pathLength="1" d="M5.4 5.4 7 7M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/>',
   // 左メニューの開閉。Google Fonts の Material Symbols「left_panel_close」と同じ形を、
   // 他のアイコンに合わせて線1.5pxで描き直したもの（外部フォントは読み込まない）。
   // 左の帯だけ塗るので、この1画だけ fill を上書きする（.ic は fill:none のため）
@@ -195,6 +212,7 @@ const ICON={
           +'<path pathLength="1" d="M8 3v4"/><path pathLength="1" d="M16 3v4"/>'
           +'<path pathLength="1" d="m14.9 17.6 2.2 2.2 4.4-4.8"/>',
   ban:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="m5.6 5.6 12.8 12.8"/>',
+  plus:'<path pathLength="1" d="M12 5v14"/><path pathLength="1" d="M5 12h14"/>',
   /* 歯車は小さくすると潰れるので、意味の伝わる「調整つまみ」にしている */
   settings:'<path pathLength="1" d="M3.5 6h9"/><path pathLength="1" d="M17.8 6h2.7"/>'
           +'<path pathLength="1" d="M3.5 12h4.2"/><path pathLength="1" d="M12.9 12h7.6"/>'
@@ -1077,6 +1095,8 @@ let STAFF_SIGNUP={token:null,email:'',name:''};
 let STAFF_EMAIL_DOMAIN='dot-jp.or.jp'; // サーバー設定で上書きされる（/api/auth/config）
 let GOOGLE_LOGIN_AVAILABLE=false; // サーバー側でGoogleの資格情報が設定済みか（/api/auth/config）
 let MAIL_SEND_AVAILABLE=false;    // サーバー側でメール送信が設定済みか（システム設定の表示に使う）
+let PUSH_AVAILABLE=false;         // このブラウザでプッシュ通知を使えるか（/api/auth/config ＋ 端末の対応）
+let PUSH_PUBLIC_KEY='';           // VAPIDの公開鍵。購読を作るのに要る
 
 /* Googleブランドガイドラインに沿った公式ロゴ（外部読み込みなしで動くようSVGを直接埋め込む） */
 const GOOGLE_LOGO_SVG=`<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
@@ -1264,7 +1284,7 @@ function openDeepLink(){
   if(!id)return;
   history.replaceState(null,'',location.pathname);
   const r=allRequests().find(x=>x.id===id);
-  if(!r){toast('この出欠確認は見つかりませんでした');return;}
+  if(!r){toast('この参加確認は見つかりませんでした');return;}
   if(!isAttend(r))return openRequestDetail(id);
   go('requests');
   openAttendDetail(id);
@@ -1288,6 +1308,163 @@ function renderChip(){
 }
 
 /* =========================================================
+   プッシュ通知（アプリを閉じていても端末の通知欄に出す）
+   ---------------------------------------------------------
+   受け取り役は /sw.js（Service Worker）。ここは
+   「使えるか調べる」「許可をもらう」「購読を作って登録する」だけを持つ。
+
+   知らせるのは2種類。どちらも誰かが操作した瞬間に飛ぶ。
+     interview … 面談の申請が届いた（担当スタッフへ）
+     request   … 依頼・参加確認が届いた（あて先へ）
+   オンオフは端末ごと。スマホには出すがPCには出さない、が自然にできる。
+
+   iPhoneでは、Safariで開いているだけでは PushManager が存在しない。
+   「共有 → ホーム画面に追加」をして、そこから開いたときだけ使える。
+   pushSupported() が false のときは、設定の行そのものを出さない。
+   ========================================================= */
+const pushSupported=()=>'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+/* サーバーからは base64url の文字列で来る。購読を作るには生のバイト列が要る */
+function urlB64ToU8(base64){
+  const pad='='.repeat((4-base64.length%4)%4);
+  const s=(base64+pad).replace(/-/g,'+').replace(/_/g,'/');
+  const raw=atob(s);
+  const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);
+  return out;
+}
+/* Service Worker は一度だけ登録すればよい。使い回すために覚えておく */
+let SW_REG=null;
+async function pushRegistration(){
+  if(!pushSupported())return null;
+  if(SW_REG)return SW_REG;
+  try{ SW_REG=await navigator.serviceWorker.register('/sw.js',{scope:'/'}); }
+  catch(e){ console.warn('通知の受け取り役を登録できませんでした',e); return null; }
+  return SW_REG;
+}
+async function currentPushSubscription(){
+  const reg=await pushRegistration();
+  if(!reg)return null;
+  try{ return await reg.pushManager.getSubscription(); }
+  catch(e){ return null; }
+}
+/* いまの状態をまとめて返す。設定画面の初期表示に使う。
+   ・permission … 端末側の許可（granted / denied / default）
+   ・on         … このアプリに購読を登録済みか
+   ・prefs      … 種類ごとのオンオフ（サーバーが持っている値） */
+async function pushState(){
+  const out={permission:(window.Notification&&Notification.permission)||'default',
+    on:false,prefs:{interview:true,request:true}};
+  const sub=await currentPushSubscription();
+  if(!sub)return out;
+  try{
+    const res=await api('/api/push/state',{method:'POST',body:JSON.stringify({endpoint:sub.endpoint})});
+    if(!res.ok)return out;
+    const d=await res.json();
+    out.on=!!d.found;
+    if(d.prefs)out.prefs=d.prefs;
+  }catch(e){/* 通信できないときは既定のまま */}
+  return out;
+}
+/* 購読を作って（または作り直して）サーバーに登録する。
+   許可をもらう Notification.requestPermission() は、
+   ボタンを押した流れの中でしか呼べないブラウザがあるので、必ず操作から呼ぶこと */
+async function pushSubscribe(prefs){
+  const reg=await pushRegistration();
+  if(!reg)return false;
+  let perm=Notification.permission;
+  if(perm==='default')perm=await Notification.requestPermission();
+  if(perm!=='granted')return false;
+  let sub=await reg.pushManager.getSubscription();
+  if(!sub){
+    try{
+      sub=await reg.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey:urlB64ToU8(PUSH_PUBLIC_KEY),
+      });
+    }catch(e){ console.warn('通知を購読できませんでした',e); return false; }
+  }
+  try{
+    const res=await api('/api/push/subscribe',{method:'PUT',
+      body:JSON.stringify({endpoint:sub.endpoint,keys:{
+        p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),
+        auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),
+      },prefs})});
+    return res.ok;
+  }catch(e){ console.warn('通知の登録に失敗しました',e); return false; }
+}
+/* 端末ごと通知を止める。ブラウザ側の購読も消して、
+   「アプリでは切ったのにサーバーには残っている」状態を作らない */
+async function pushUnsubscribe(){
+  const sub=await currentPushSubscription();
+  if(!sub)return true;
+  try{ await api('/api/push/unsubscribe',{method:'POST',body:JSON.stringify({endpoint:sub.endpoint})}); }
+  catch(e){ console.warn('通知の解除に失敗しました',e); }
+  try{ await sub.unsubscribe(); }catch(e){/* すでに無いときは気にしない */}
+  return true;
+}
+
+/* 設定画面。チェックは2つで、両方外すと通知そのものを止める */
+async function openPushSettings(){
+  openSheet(`<h3>通知</h3><p class="page-sub" style="margin-top:0">読み込んでいます…</p>`);
+  const st=await pushState();
+  renderPushSettings(st);
+}
+function renderPushSettings(st){
+  const blocked=st.permission==='denied';
+  const row=(key,label,desc)=>`
+    <label class="pushrow">
+      <input type="checkbox" id="push_${key}" ${st.on&&st.prefs[key]?'checked':''} ${blocked?'disabled':''}>
+      <span class="pushrow-tx"><b>${label}</b><small>${desc}</small></span>
+    </label>`;
+  openSheet(`<h3>通知</h3>
+    <p class="page-sub" style="margin-top:0">アプリを閉じていても、この端末の通知欄にお知らせします。</p>
+    ${blocked?`<div class="hint mock">${ic('alert')}<span>この端末では通知が<b>ブロック</b>されています。ブラウザのアドレスバーの鍵アイコン（iPhoneは設定アプリ）から、このサイトの通知を「許可」に変えてください。</span></div>`:''}
+    <div class="pushlist">
+      ${row('interview','面談の申請が届いたとき','あなたが担当に選ばれた申請だけお知らせします。')}
+      ${row('request','依頼・参加確認が届いたとき','あなたがあて先に入っているものだけお知らせします。')}
+    </div>
+    <div class="field-err" id="pushErr"></div>
+    <button class="btn pri block" style="margin-top:18px" id="pushBtn" ${blocked?'disabled':''}
+      onclick="savePushSettings()">この設定にする</button>
+    <p class="fine" style="margin-top:10px">両方のチェックを外すと、この端末への通知を止めます。ほかの端末の設定はそのままです。</p>
+    ${isIOSBrowser()?`<div class="hint" style="margin-top:12px">${ic('bulb')}<span>iPhone・iPadでは、<b>共有 →「ホーム画面に追加」</b>をして、そのアイコンから開いたときだけ通知が届きます。Safariで開いている間は届きません。</span></div>`:''}`);
+}
+const isIOSBrowser=()=>/iP(hone|ad|od)/.test(navigator.userAgent)
+  ||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+async function savePushSettings(){
+  const btn=document.getElementById('pushBtn');
+  const err=document.getElementById('pushErr');
+  err.classList.remove('show');
+  const prefs={interview:document.getElementById('push_interview').checked,
+    request:document.getElementById('push_request').checked};
+  btn.disabled=true;btn.textContent='設定中…';
+  if(!prefs.interview&&!prefs.request){
+    await pushUnsubscribe();
+    closeSheet();toast('この端末への通知を止めました');
+    syncPushLabel();
+    return;
+  }
+  const ok=await pushSubscribe(prefs);
+  btn.disabled=false;btn.textContent='この設定にする';
+  if(!ok){
+    err.textContent='通知を設定できませんでした。ブラウザで通知が許可されているかご確認ください。';
+    err.classList.add('show');
+    return;
+  }
+  closeSheet();toast('通知の設定を保存しました');
+  syncPushLabel();
+}
+/* プロフィールの「通知」行の右端に、いまの状態を出す。
+   状態を取るのに通信が要るので、行を描いたあとから埋める */
+async function syncPushLabel(){
+  const el=document.getElementById('profPushVal');
+  if(!el||!PUSH_AVAILABLE)return;
+  const st=await pushState();
+  const on=st.on&&(st.prefs.interview||st.prefs.request);
+  el.textContent=st.permission==='denied'?'ブロック中':(on?'オン':'オフ');
+}
+
+/* =========================================================
    テーマ切替（ダーク⇄ライト）
    端末のOS設定ではなくアプリ側の設定に従う。同じキーを <head> の先頭でも
    読んでいて、CSSが当たる前に data-theme を確定させている
@@ -1298,13 +1475,15 @@ function setTheme(t){
   document.documentElement.setAttribute('data-theme',t);
   try{localStorage.setItem(THEME_KEY,t);}catch(e){}
   const m=document.querySelector('meta[name="theme-color"]');
-  if(m)m.setAttribute('content',t==='light'?'#f7fafb':'#000000');
+  // style.css の --bg と同じ値。ずれるとアドレスバーだけ色が浮く
+  if(m)m.setAttribute('content',t==='light'?'#dbe9e7':'#000000');
 }
 function toggleTheme(){
   setTheme(currentTheme()==='light'?'dark':'light');
-  // テーマの入口はプロフィールの「ほかの設定」。開いていればその場で表示を更新する
+  // テーマの入口は左メニューとプロフィールの「ほかの設定」。開いていればその場で表示を更新する
   const v=document.getElementById('profThemeVal');
   if(v)v.textContent=currentTheme()==='light'?'ライト':'ダーク';
+  syncThemeButton();
   // カレンダーの予定チップは明暗で色の計算式が変わるので、開いている画面を描き直す
   if(ME&&!document.getElementById('app').classList.contains('hidden'))render();
 }
@@ -1410,6 +1589,9 @@ function setCalFull(on){
   window.scrollTo(0,0);
 }
 let IVFILTER={status:'all',branch:'all',q:''}; // 面談一覧フィルタ
+/* 面談一覧の並び。'new'＝申請が新しい順（これまでの動き）／'wish'＝第1希望が近い順。
+   予定を組むときは「近いものから埋める」ほうが自然なので切り替えられるようにした */
+let IVSORT='new';
 let AVSET=null;              // スタッフ不可時間エディタの一時状態
 let BLKFORM=null;            // 「日時でまとめて追加」フォームの状態
 
@@ -1425,15 +1607,32 @@ function buildNav(){
       <span class="si">${ic(t.ic)}</span><span class="sl">${t.label}</span></button>`).join('');
 
   /* 下段は「日常的に使う道具」だけを置く。
-     設定まわり（所属部署・テーマ・ログアウト）は
-     プロフィールの「ほかの設定」に集約したので、ここには出さない */
+     所属部署やログアウトはプロフィールの「ほかの設定」に集約したままだが、
+     テーマだけはここにも出す。プロフィール →「ほかの設定」の中は深すぎて、
+     「見づらい」と思った人がたどり着けなかったため */
   document.getElementById('sbAct').innerHTML=`
     ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す申請リンクを作る">
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
     ${ME.role==='intern'?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
-      <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`:''}`;
+      <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`:''}
+    <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="${themeSwitchLabel()}">
+      <span class="si">${ic(currentTheme()==='light'?'moon':'sun')}</span>
+      <span class="sl">${themeSwitchLabel()}</span></button>`;
+}
+/* 押したら何になるか、を書く（いまの状態ではなく行き先）。
+   「ライト」とだけ出ていると、いまがライトなのか押すとライトになるのか分からない */
+function themeSwitchLabel(){return currentTheme()==='light'?'ダークにする':'ライトにする';}
+/* 左メニューのテーマボタンだけを描き直す。
+   render() だと閉じているシートの中身まで作り直してしまうので、その場を書き換える */
+function syncThemeButton(){
+  const b=document.getElementById('sbTheme');
+  if(!b)return;
+  const label=themeSwitchLabel();
+  b.setAttribute('title',label);
+  b.querySelector('.si').innerHTML=ic(currentTheme()==='light'?'moon':'sun');
+  b.querySelector('.sl').textContent=label;
 }
 /* インターン生から見た担当スタッフ。見るだけで、変更はできない。
    本人が付け替えると、スタッフ側が知らないうちに担当から外れてしまうため */
@@ -1647,11 +1846,11 @@ function viewHome(){
     if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
     /* 所属部署はプロフィールの「ほかの設定」、カレンダー連携は左メニューへ移した。
-       「面談できない時間」は面談可能時間帯の中から開く（前提関係にあるため） */
+       「この日は受けられない時間」は、その中から開く（前提関係にあるため） */
     items.push(
       hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
       hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread),
-      hex('openAvailabilitySettings()','alarm','面談可能時間帯','曜日ごと・不可時間も'),
+      hex('openAvailabilitySettings()','alarm','受けられる時間','曜日ごとの受付時間'),
       hex('openMailHistory()','mail','メール履歴','送信・受信の記録'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
@@ -1660,7 +1859,8 @@ function viewHome(){
       <span class="fb-ic">${ic('link')}</span>
       <span class="fb-tx"><b>インターン生に渡すリンクを作る</b><small>支部で共通のリンクです。開くと面談を申請できます</small></span>
       <span class="fb-go">${ic('chevron')}</span></button>`;
-    return hi+dueNotice+
+    /* 「明日の面談」がいちばん時間に追われる知らせなので、締切より上に置く */
+    return hi+interviewHomeReminder()+dueNotice+
       (pend?`<div class="hint">${ic('bell')}<span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
       linkBtn+hexgrid(items)+eventsSection();
   }
@@ -1813,7 +2013,7 @@ function renderGoogleCalendarSettings(data){
       <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:var(--bad-line)" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に面談不可時間として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
+      <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に「面談を受けられない時間」として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
       <div class="hint" style="margin-top:10px">${ic('user')}<span>連携すると、あなたのGoogleカレンダーの予定が日調アプリのカレンダーにも並びます。
         <b>これはあなたにしか見えません</b>（他の人の画面には出ません）。いつでも隠せます。</span></div>
       <button class="btn pri block" style="margin-top:16px" onclick="startGoogleConnect(this)">Googleカレンダーと連携する</button>
@@ -2041,11 +2241,36 @@ function ivIsGuest(iv){return !ivIntern(iv);}
 /* この面談が自分の支部のものか。ゲスト申請は支部が直接入っている */
 function ivInMyBranch(iv){return ivInternBranch(iv)===ME.branch_id;}
 
+/* 第1希望のまとまり。無いこともある（枠を1つも選ばずに送られた古い申請） */
+function ivTopGroup(iv){return ivGroups(iv)[0]||null;}
+/* 並べ替えに使う「希望日」。第1希望の先頭の枠。
+   希望が無いものは末尾に流したいので、とても大きい値を返す */
+function ivWishTime(iv){
+  const g=ivTopGroup(iv);
+  return g&&g.slots.length?new Date(g.slots[0]).getTime():Infinity;
+}
+/* 一覧の2段目に出す一文。
+   これが無いと「いつ希望しているか」が1件ずつ開かないと分からず、
+   申請が溜まるとタップと戻るを繰り返すことになる。
+   確定済みは確定日時のほうが知りたいので、そちらを優先して出す */
+function ivRowSub(iv){
+  if(iv.status==='fixed')return `確定 ${fmtDT(iv.confirmed_datetime)} ・ 申請 ${fmtRel(iv.created_at)}`;
+  const g=ivTopGroup(iv);
+  if(!g)return `申請 ${fmtRel(iv.created_at)}`;
+  return `第1希望 ${fmtGroupRange(g)} ・ 申請 ${fmtRel(iv.created_at)}`;
+}
+function setIvSort(v){IVSORT=v;render();}
 function viewStaffInterviews(){
   // staff sees interviews of own branch (assigned to them or their branch)
+  /* 状態（申請中→確定済み→不成立）を最優先にするのは、並べ替えを変えても同じ。
+     「まだ手を付けていないもの」が下に沈むと、並べ替えた意味が無くなるため。
+     その中の順番だけを IVSORT で切り替える */
+  const inner=IVSORT==='wish'
+    ? (a,b)=>ivWishTime(a)-ivWishTime(b)||new Date(b.created_at)-new Date(a.created_at)
+    : (a,b)=>new Date(b.created_at)-new Date(a.created_at);
   const all=(DB.interviews||[]).filter(iv=>{
     return iv.staff_id===ME.id || ivInMyBranch(iv);
-  }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||new Date(b.created_at)-new Date(a.created_at);});
+  }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||inner(a,b);});
   if(!all.length)return `<h1 class="page">面談一覧</h1><div class="empty"><div class="ei">${ic('list')}</div><p>担当する面談はまだありません。</p></div>`;
   // フィルタ適用
   const q=(IVFILTER.q||'').trim();
@@ -2063,6 +2288,11 @@ function viewStaffInterviews(){
       <input placeholder="学生名で検索" value="${esc(IVFILTER.q)}" oninput="IVFILTER.q=this.value" onchange="render()"
         onkeydown="if(event.key==='Enter')render()">
       ${q||IVFILTER.status!=='all'?`<button class="btn sm" onclick="clearIvFilter()">クリア</button>`:''}
+    </div>
+    <div class="sortbar">
+      <span class="sortlab">${ic('list')}並べ替え</span>
+      <button class="${IVSORT==='new'?'on':''}" onclick="setIvSort('new')">申請が新しい順</button>
+      <button class="${IVSORT==='wish'?'on':''}" onclick="setIvSort('wish')">希望日が近い順</button>
     </div>`;
   if(!list.length)return `<h1 class="page">面談一覧</h1>
     <p class="page-sub">${branchName(ME.branch_id)}の面談 ${all.length}件</p>
@@ -2073,7 +2303,7 @@ function viewStaffInterviews(){
       <span class="av ${accOf(intern?.id||iv.id)}">${esc(initials(nm))}</span>
       <span class="rmain">
         <span class="rt">${esc(nm)} <span class="tag">${branchName(ivInternBranch(iv))}</span></span>
-        <span class="rs">申請 ${fmtRel(iv.created_at)}${iv.status==='fixed'?'・確定 '+fmtDT(iv.confirmed_datetime):''}</span>
+        <span class="rs">${esc(ivRowSub(iv))}</span>
       </span>
       <span class="pill ${s.c}">${s.t}</span>
     </div>`;}).join('');
@@ -2156,16 +2386,16 @@ function openInterview(id){
   const internName=ivInternName(iv);const guest=ivIsGuest(iv);
   const groups=ivGroups(iv);
   /* 別の面談を開いたら開閉をやり直す（持ち越し防止）。
-     以前は確定済みの日時を含む希望を最初から開く案があったが、取りやめた。
-     ・fixed（確定済み）のときは actions がこの希望一覧（choiceGroup）自体を描かず、
-       確定日時を出す別の分岐に入るため、IV_OPEN に番号を入れても反映される画面がない
-     ・applied（申請中）のときはサーバー側が status!=='fixed' なら confirmed_datetime を
-       必ず null にする（新規申請時も null）ので、「申請中なのに確定日時が入っている」
-       状態はそもそも起こらない
-     つまりこの分岐は現行の作りでは成立しないため、常に空の状態から開き直す */
+     確定済み（fixed）のときは actions がこの希望一覧（choiceGroup）自体を描かず、
+     確定日時を出す別の分岐に入るので、開いておく意味がない。
+
+     申請中（applied）のときだけ、**第1希望を最初から開いた状態**にする。
+     いちばんよくやる操作は「第1希望どおりに確定する」なのに、
+     以前はリスト行に見える見出しを押して開かないと確定ボタンが出てこず、
+     例外的な操作（別日時・不成立）のほうが目立っていたため */
   if(IV_OPEN_FOR!==id){
     IV_OPEN_FOR=id;
-    IV_OPEN=new Set();
+    IV_OPEN=new Set(iv.status==='applied'&&groups.length?[1]:[]);
     IV_TIME={};
   }
   /* 順位の札。第1〜第3だけ色を変える。申請画面の一覧とまったく同じ色にしてあり、
@@ -2206,9 +2436,13 @@ function openInterview(id){
     actions=`<div class="hint" style="margin-top:12px">${ic('bulb')}<span>下は<b>${internName?esc(internName)+'さんが':'相手が'}空けている時間</b>です。面談の長さではありません。この中から開始時刻を決めてください。</span></div>
       <div class="choice-list">
         ${groups.map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn" style="flex:1" onclick="openCustomConfirm('${id}')">別日時で確定</button>
-        <button class="btn bad" style="flex:1" onclick="failInterview('${id}')">不成立にする</button>
+      <button class="btn block" style="margin-top:14px" onclick="openCustomConfirm('${id}')">${ic('calendar')}候補以外の日時で確定する</button>
+      <p class="fine" style="margin-top:6px">${esc(internName||'相手')}さんが出していない時間で決めるときに使います。</p>
+      <!-- 不成立は戻しにくい操作なので、確定の並びから外して最後に置く。
+           以前は「別日時で確定」と同じ大きさで横に並んでいて、押し間違えやすかった -->
+      <div class="danger-zone">
+        <button class="btn bad block sm" onclick="failInterview('${id}')">この申請を不成立にする</button>
+        <p class="fine" style="margin-top:6px">どの候補でも都合が合わないときに使います。あとから申請中に戻せます。</p>
       </div>`;
   }else if(iv.status==='fixed'){
     actions=`<div class="hint">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
@@ -2358,6 +2592,9 @@ async function sendMail(receiverId,kind){
 /* =========================================================
    イベント（一覧・回答・作成）
    ========================================================= */
+/* 回答済みでも○△×を開いたままにしている予定のid。
+   既定では答え終わったカードを畳むので、開き直したものだけをここに持つ */
+let EVOPEN=new Set();
 function eventClock(ev){
   if(ev?.has_time===false)return '';
   return hm(ev.start_datetime);
@@ -2377,6 +2614,10 @@ function eventCard(ev,showEdit){
      ここでもう一度回答欄を出す必要が無い。votable が false のときは
      日時・説明だけの簡潔な表示にする（回答者一覧も、答えを集めていないので出さない） */
   const noVote=ev.votable===false;
+  /* 自分が答え終わっているか。答えたカードは畳んで、ホームが縦に伸びるのを防ぐ。
+     読めない値が入っていたら畳まない（畳んだ側は答えを文字で出すので、
+     知らない値だと「undefined」と表示されてしまう） */
+  const answered=!!mine&&!!ATT_LABEL[mine.response];
   /* id を振っておく。出欠を押したときに、この1枚だけを描き直すため
      （画面ごと作り直すと登場アニメがもう一度再生されて一瞬暗く沈む） */
   return `<div class="card" id="evc_${ev.id}"><div class="cb">
@@ -2392,21 +2633,27 @@ function eventCard(ev,showEdit){
       ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
       ${(ev.meet_url||ev.zoom_url)?`<div class="meta" style="margin-top:6px">${ev.meet_url?`<span>${ic('link')}<a href="${esc(ev.meet_url)}" target="_blank" rel="noopener">Meet</a></span>`:''}${ev.zoom_url?`<span>${ic('link')}<a href="${esc(ev.zoom_url)}" target="_blank" rel="noopener">Zoom</a></span>`:''}</div>`:''}
 
-      ${(isPrivate||noVote)?'':`
+      ${(isPrivate||noVote)?'':(answered&&!EVOPEN.has(ev.id)?`
+      <!-- 答え終わった予定は畳む。月に10件あるとホームが数千px伸びるため、
+           自分の答えと集計だけを1行にして、変えたいときだけ開く -->
+      <div class="voted-row">
+        <span class="voted-mine v-${mine.response}">${attMarkLabel(mine.response)}</span>
+        <span class="voted-tally">${ATT_MARK.ok}${c.ok}・${ATT_MARK.may}${c.may}・${ATT_MARK.no}${c.no}</span>
+        <button class="btn sm" onclick="toggleEventVote('${ev.id}')">回答を変える</button>
+      </div>`:`
       <div class="votebar">
         <i class="vb-ok" style="width:${c.ok/total*100}%"></i>
         <i class="vb-may" style="width:${c.may/total*100}%"></i>
         <i class="vb-no" style="width:${c.no/total*100}%"></i>
       </div>
       <div class="votekeys">
-        <span>○ 参加 <b>${c.ok}</b></span><span>△ 未定 <b>${c.may}</b></span><span>× 不参加 <b>${c.no}</b></span>
+        ${['ok','may','no'].map(v=>`<span>${attMarkLabel(v)} <b>${c[v]}</b></span>`).join('')}
       </div>
 
       <div class="vote3" style="margin-top:12px">
-        <div class="v ${mine?.response==='ok'?'on-ok':''}" onclick="vote('${ev.id}','ok')"><span class="em">○</span>参加</div>
-        <div class="v ${mine?.response==='may'?'on-may':''}" onclick="vote('${ev.id}','may')"><span class="em">△</span>未定</div>
-        <div class="v ${mine?.response==='no'?'on-no':''}" onclick="vote('${ev.id}','no')"><span class="em">×</span>不参加</div>
-      </div>`}
+        ${['ok','may','no'].map(v=>`<div class="v ${mine?.response===v?'on-'+v:''}"
+          onclick="vote('${ev.id}','${v}')"><span class="em">${ATT_MARK[v]}</span>${ATT_LABEL[v]}</div>`).join('')}
+      </div>`)}
       ${(ME.role==='admin'||ev.creator_id===ME.id||(!isPrivate&&!noVote&&ME.role!=='intern'))?`
         <div class="btn-row" style="margin-top:10px">
           ${(isPrivate||noVote)?'':`<button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>`}
@@ -2762,9 +3009,21 @@ async function vote(evId,resp){
   }else render();
   if(ok)toast('回答を記録しました');
 }
+/* 畳んである予定カードを開く／閉じる。
+   カード1枚だけを差し替えるのは vote() と同じ理由（画面ごと作り直すと沈む） */
+function toggleEventVote(evId){
+  if(EVOPEN.has(evId))EVOPEN.delete(evId); else EVOPEN.add(evId);
+  const card=document.getElementById('evc_'+evId);
+  const ev=(DB.events||[]).find(e=>e.id===evId);
+  if(card&&ev){
+    const box=document.createElement('div');
+    box.innerHTML=eventCard(ev);
+    card.replaceWith(box.firstElementChild);
+  }else render();
+}
 function openEventResponders(evId){
   const resp=DB.event_responses.filter(r=>r.event_id===evId);
-  const label={ok:'○ 参加',may:'△ 未定',no:'× 不参加'};
+  const label={ok:attMarkLabel('ok'),may:attMarkLabel('may'),no:attMarkLabel('no')};
   const rows=resp.length?resp.map(r=>{const u=findUser(r.user_id);
     return `<div class="row"><span class="av ${accOf(u?.id)}">${esc(initials(u?.nickname))}</span>
       <span class="rmain"><span class="rt">${esc(u?.nickname||'—')}</span>
@@ -2953,7 +3212,7 @@ async function deleteEvent(id){
    スタッフ空き日程
    ========================================================= */
 /* =========================================================
-   面談可能時間帯の設定（スタッフ・曜日ごと）
+   面談を受けられる時間の設定（スタッフ・曜日ごと）
    ========================================================= */
 function openAvailabilitySettings(){
   const w=getWeekly(ME.id);
@@ -2966,15 +3225,15 @@ function openAvailabilitySettings(){
         <span style="color:var(--sub)">〜</span>
         <input type="time" id="wke${d}" value="${c.e}">
       </span></div>`;}).join('');
-  openSheet(`<h3>面談可能時間帯</h3>
-    <p class="page-sub">インターン生は、ここで設定した時間帯の中から30分刻みで面談を予約できます。</p>
-    <!-- 曜日ごとの設定と、日を指定した「この日のここは無理」は表裏一体なので
+  openSheet(`<h3>面談を受けられる時間</h3>
+    <p class="page-sub">曜日ごとの受付時間です。インターン生は、ここで決めた時間帯の中から30分刻みで申請できます。</p>
+    <!-- 曜日ごとの設定と、日にちを指定して外す画面は表裏一体なので
          ここから続けて開けるようにする。逆向きの導線は viewAvailSet() 側にある -->
     <button class="btn block" style="margin-top:10px" onclick="closeSheet();go('avset')">
-      ${ic('ban')}面談できない時間を登録</button>
+      ${ic('ban')}この日は受けられない時間を決める</button>
     <div style="margin-top:8px">${rows}</div>
     <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
-    <div class="hint" style="margin-top:12px">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に不可時間として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
+    <div class="hint" style="margin-top:12px">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に「受けられない時間」として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
     ${openCalendarButton()}`);
 }
 function toggleWk(d){
@@ -2997,15 +3256,16 @@ async function saveAvailability(){
     db.availability[ME.id]=Object.assign({},db.availability[ME.id],{weekly});
   });
   if(!ok)return;
-  closeSheet();toast('面談可能時間帯を保存しました');
+  closeSheet();toast('面談を受けられる時間を保存しました');
 }
 
 /* =========================================================
-   面談できない時間（カレンダー・30分枠タップ式）
+   この日は受けられない時間（カレンダー・30分枠タップ式）
    ========================================================= */
 function viewAvailSet(){
   if(!AVSET)AVSET={weekOffset:0};
-  const back=`<button class="btn ghost sm" style="margin-bottom:6px" onclick="go('home')">${ic('back')}ホームに戻る</button>`;
+  /* 「ホームへ戻る」は render() が全画面の右上に付ける（viewBack）。
+     ここで自前でもう1つ出していたため、文言まで違う戻るボタンが縦に2つ並んでいた */
   const{days,times,grid:egrid}=genEditGrid(ME.id,AVSET.weekOffset||0);
   const todayKey=ymd(new Date());
   const monthLabel=`${days[0].getFullYear()}年${days[0].getMonth()+1}月`;
@@ -3030,8 +3290,8 @@ function viewAvailSet(){
   const table=times.length?`<div class="booktable-wrap">
     <table class="booktable"><thead><tr><th class="bt-corner"></th>${headCells}</tr></thead>
     <tbody>${bodyRows}</tbody></table></div>`
-    :`<div class="empty" style="padding:28px"><div class="ei">${ic('calendar-check')}</div><p>面談可能時間帯が設定されていません。<br>先に「面談可能時間帯」で曜日を有効にしてください。</p>
-      <button class="btn pri" onclick="openAvailabilitySettings()">面談可能時間帯を設定</button></div>`;
+    :`<div class="empty" style="padding:28px"><div class="ei">${ic('calendar-check')}</div><p>受けられる時間がまだ決まっていません。<br>先に「面談を受けられる時間」で曜日を有効にしてください。</p>
+      <button class="btn pri" onclick="openAvailabilitySettings()">面談を受けられる時間を決める</button></div>`;
   const blockedCnt=egrid.reduce((n,col)=>n+col.filter(c=>c.state==='block').length,0);
 
   // 登録済み一覧（今後の予定・両方式まとめて）
@@ -3045,7 +3305,7 @@ function viewAvailSet(){
       <span class="rmain"><span class="rt">${fmtDate(b.start)} ${hm(b.start)}〜${hm(b.end)}</span>
       <span class="rs">${esc(b.note||'予定あり')}${isSlot?'（枠タップ）':''}</span></span>
       <button class="btn sm bad" onclick="delBlock('${b.id}')">削除</button>
-    </div>`;}).join(''):'<div class="empty" style="padding:20px">登録された不可時間はありません</div>';
+    </div>`;}).join(''):'<div class="empty" style="padding:20px">受けられない時間はまだ登録されていません</div>';
 
   // 日時でまとめて追加フォーム（スクロール式 時間ピッカー）
   if(!BLKFORM)initBlkForm();
@@ -3068,11 +3328,11 @@ function viewAvailSet(){
     <label class="fl">メモ（任意）</label>
     <input id="blkNote" value="${esc(BLKFORM.note)}" placeholder="例：授業／アルバイト" oninput="BLKFORM.note=this.value">
     <div class="field-err" id="blkErr"></div>
-    <button class="btn pri block" style="margin-top:16px" onclick="addBlock()">この時間を不可にする</button>`;
+    <button class="btn pri block" style="margin-top:16px" onclick="addBlock()">この時間は受けられないことにする</button>`;
 
-  return `${back}
-    <h1 class="page">面談できない時間を登録</h1>
-    <p class="page-sub">面談を受けたくない時間を登録します。ここで指定した時間はインターン生の予約画面で「×」になり選べなくなります。</p>
+  return `
+    <h1 class="page">この日は受けられない時間</h1>
+    <p class="page-sub">曜日ごとの「面談を受けられる時間」から、日にちを指定して外します。ここで外した時間は、インターン生の申請画面で「×」になり選べなくなります。</p>
 
     <h3 style="margin:6px 2px 8px;font-size:15px">① カレンダーから枠をタップ</h3>
     <div class="card"><div class="cb">
@@ -3081,11 +3341,11 @@ function viewAvailSet(){
         <span class="wm">${monthLabel}</span>
         <button class="pg" onclick="avSetWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
-      <label class="fl"><span>時間をタップ（不可 ${blockedCnt}枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）</span></label>
+      <label class="fl"><span>時間をタップ（受けられない ${blockedCnt}枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）</span></label>
       ${table}
       <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
-        <span><span class="legend-dot" style="background:var(--panel);border:1px solid var(--line)"></span>受付中（タップで不可）</span>
-        <span><span class="legend-dot" style="background:var(--bad)"></span>不可（タップで解除）</span>
+        <span><span class="legend-dot" style="background:var(--panel);border:1px solid var(--line)"></span>受けられる（タップで外す）</span>
+        <span><span class="legend-dot" style="background:var(--bad)"></span>受けられない（タップで戻す）</span>
         <span><span class="legend-dot" style="background:var(--disabled)"></span>予定・面談あり</span>
       </div>
     </div></div>
@@ -3219,7 +3479,7 @@ async function addBlock(){
     added:[{id:'blk_'+uid(),start:start.toISOString(),end:end.toISOString(),note}],
   });
   if(!ok)return;
-  toast('不可時間を登録しました');
+  toast('受けられない時間を登録しました');
   initBlkForm();render();
 }
 async function delBlock(id){
@@ -3701,6 +3961,8 @@ function profileLinks(){
     canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
     ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
     ['calendar','カレンダーに登録','openCalendarSubscriptionSettings()'],
+    PUSH_AVAILABLE?['bell','通知','openPushSettings()',
+      '<span id="profPushVal" style="color:var(--mut);font-size:13px;font-weight:700">—</span>']:null,
     // テーマだけは押しても画面が変わらないので、右端に「いまどちらか」を出す
     ['contrast','テーマ','toggleTheme()',themeVal],
   ].filter(Boolean).map(([icon,label,act,right])=>profileRow(icon,label,act,right)).join('');
@@ -3732,6 +3994,8 @@ function openMyProfile(){
     <!-- ログアウトは戻せない操作なので、ほかの設定と混ぜず、間を空けて最後に置く -->
     <button class="btn ghost block" style="margin-top:18px;color:var(--bad)"
       onclick="logout()">${ic('power')}ログアウト</button>`);
+  // 通知の状態は通信しないと分からないので、開いたあとから右端に埋める
+  syncPushLabel();
 }
 
 /* ---------- 編集する画面 ---------- */
@@ -3926,6 +4190,28 @@ function dueHomeNotice(){
   }).join('');
   return `<div class="hint due-home">${ic('bell')}<div class="due-home-list"><b>回答期限が近い依頼があります</b>${rows}</div></div>`;
 }
+/* ホームに出す「明日の面談」。
+   確定した日時はスタッフのカレンダーには載るが、アプリを開いたときに
+   目に入る場所が無かった。前日に気づけるよう、自分が担当する
+   確定済みの面談のうち、日付が明日のものだけをここに出す。
+   今日ぶんを出さないのは、当日はもうカレンダー側で見ているため */
+function tomorrowInterviews(){
+  const t=new Date();t.setDate(t.getDate()+1);
+  const key=ymd(t);
+  return (DB.interviews||[])
+    .filter(iv=>iv.staff_id===ME.id&&iv.status==='fixed'&&iv.confirmed_datetime
+      &&ymd(new Date(iv.confirmed_datetime))===key)
+    .sort((a,b)=>new Date(a.confirmed_datetime)-new Date(b.confirmed_datetime));
+}
+function interviewHomeReminder(){
+  const list=tomorrowInterviews();
+  if(!list.length)return '';
+  const rows=list.map(iv=>
+    `<button type="button" class="due-home-link" onclick="openInterview('${iv.id}')"
+      >${hm(iv.confirmed_datetime)}　${esc(ivInternName(iv))}さん${ic('chevron')}</button>`).join('');
+  return `<div class="hint due-home">${ic('alarm')}<div class="due-home-list"
+    ><b>明日は面談が${list.length}件あります</b>${rows}</div></div>`;
+}
 
 let REQTAB='inbox'; // 'inbox' | 'done' | 'sent'
 let REQBACKTAB='inbox';
@@ -3962,12 +4248,8 @@ function viewRequests(){
       <span class="segb">完了済みの依頼</span></label>
   </div>`;
   return `<h1 class="page">依頼</h1>
-    <p class="page-sub">${canSend?`${branchName(ME.branch_id)}のスタッフに、連絡や出欠確認を出せます。`:'スタッフから届いた連絡・依頼です。'}</p>
-    ${canSend?`<div class="btn-row" style="margin-bottom:16px">
-      <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">＋ 日程調整</button>
-      <button class="btn pri" style="flex:1" onclick="openRsvpForm()">＋ 出欠確認</button>
-      <button class="btn pri" style="flex:1" onclick="openRequestForm()">＋ 依頼を出す</button>
-    </div>`:''}
+    <p class="page-sub">${canSend?`${branchName(ME.branch_id)}のスタッフに、日程調整・参加確認・連絡を送れます。`:'スタッフから届いた連絡・依頼です。'}</p>
+    ${canSend?`<button class="btn pri block" style="margin-bottom:16px" onclick="openSendPicker()">${ic('plus')}新しく送る</button>`:''}
     ${tabs}
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
       :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
@@ -4019,6 +4301,12 @@ function requestList(list,kind){
    確定すると支部のカレンダーに予定が1件できる（サーバー側でまとめて行う）
    ========================================================= */
 const ATT_MARK={ok:'○',may:'△',no:'×'};
+/* 3状態の言い方はアプリ全体でこれ1組に統一する。
+   以前は日程調整が「参加できる／たぶん／無理」、カレンダーの予定が
+   「参加／未定／不参加」と、同じ3状態に2つの語彙があった。
+   attendance.html（ログイン不要の回答ページ）も同じ語を使うこと */
+const ATT_LABEL={ok:'参加',may:'未定',no:'不参加'};
+const attMarkLabel=v=>`${ATT_MARK[v]} ${ATT_LABEL[v]}`;
 function isAttend(r){return r&&r.kind==='attend';}
 function isPublicAttend(r){return isAttend(r)&&!!r.public_url;}
 /* 出欠確認の一生の中で、回答の置き場所が変わる。
@@ -4148,11 +4436,14 @@ function openAttendDetail(id){
   const answerBlock=(mineToAnswer&&!r.confirmed)?`
     <div class="divider" style="margin:18px 0 14px"></div>
     <label class="fl">あなたの回答<span class="fl-sub">候補ごとに選んでください</span></label>
+    <div class="attkeys">${['ok','may','no'].map(v=>
+      `<span class="attkey v-${v}">${ATT_MARK[v]}<b>${ATT_LABEL[v]}</b></span>`).join('')}</div>
     <div class="attans" id="attans">${opts.map(o=>`
       <div class="attrow">
         <span class="atname">${fmtSlot(o)}</span>
         <span class="att3">${['ok','may','no'].map(v=>`
           <button type="button" class="attb v-${v} ${ATTANS[o.id]===v?'on':''}"
+            aria-label="${esc(fmtSlot(o))} は${ATT_LABEL[v]}"
             data-op="${o.id}" data-v="${v}" onclick="pickAttend('${o.id}','${v}')">${ATT_MARK[v]}</button>`).join('')}</span>
       </div>`).join('')}</div>
     <div class="field-err" id="attErr"></div>
@@ -4392,6 +4683,34 @@ const REQ_MODES=[
   {id:'by_dept',     label:'部署で選ぶ'},
 ];
 
+/* 送るものを選ぶ画面。
+   以前は「＋日程調整／＋出欠確認／＋依頼を出す」が同じ色・同じ大きさで横に並び、
+   どれが何なのか名前だけでは区別が付かなかった。しかもフォームを開いた先に
+   「送るもの：連絡・依頼／日程調整」というもう一段の切り替えがあり、
+   外で選んだのに中でまた選ぶ形になっていた。
+   入口を1つにまとめ、ここで違いを言葉で説明してから中に入る形にしている */
+function openSendPicker(){
+  const card=(fn,icon,title,desc,to)=>`
+    <button type="button" class="sendpick" onclick="closeSheet();${fn}">
+      <span class="sp-ic">${ic(icon)}</span>
+      <span class="sp-main">
+        <span class="sp-t">${title}</span>
+        <span class="sp-d">${desc}</span>
+        <span class="sp-to">${ic('send')}あて先：${to}</span>
+      </span>
+      <span class="sp-chev">${ic('chevron')}</span>
+    </button>`;
+  openSheet(`<h3>新しく送る</h3>
+    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に送ります。近いものを選んでください。</p>
+    <div class="sendpick-list">
+      ${card("openRequestForm('attend')",'calendar','日程を決める',
+        '候補の日にちをいくつか出して、みんなの都合から1日に絞ります。集まった○△×を見て、あとから確定します。','選んだ相手')}
+      ${card('openRsvpForm()','calendar-check','参加を確認する',
+        'すでに日にちが決まっている予定に、参加できるかどうかだけ聞きます。候補は1つです。','支部の全スタッフ')}
+      ${card('openRequestForm()','megaphone','連絡・お願い',
+        '日程が関係しない連絡ごとです。読んでもらう、やってもらう、といった用件に使います。','選んだ相手')}
+    </div>`);
+}
 function openRequestForm(kind){
   /* 締切は月・日・時刻で持つ。年は送るときに dueResolveDate が決める。
      時刻の既定は 23:59＝その日いっぱい */
@@ -4414,18 +4733,25 @@ let RSVPCAL=null;
 function openRsvpForm(){
   const now=new Date();
   RSVPCAL={y:now.getFullYear(),m:now.getMonth(),date:''};
-  openSheet(`<h3>出欠確認を送る</h3>
-    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の全スタッフに、参加・未定・不参加で答えてもらいます。</p>
-    <label class="fl">予定の名前<span class="req">*</span></label>
-    <input id="rsvpTitle" autocomplete="off" placeholder="例）7月度 支部定例ミーティング">
-    <div class="field-err" id="rsvpTitleE"></div>
-    <label class="fl">説明</label>
-    <textarea id="rsvpBody" rows="4" placeholder="伝えたいことがあれば書いてください。"></textarea>
-    <label class="fl" style="margin-top:16px">日付<span class="req">*</span></label>
-    <div id="rsvpCalWrap">${rsvpCalendarHTML()}</div>
-    <div class="field-err" id="rsvpDateE"></div>
+  openSheet(`<h3>参加を確認する</h3>
+    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の全スタッフに、○参加／△未定／×不参加で答えてもらいます。あて先は選べません。</p>
+    <div class="hint" style="margin-bottom:4px">${ic('bulb')}<span>日にちがまだ決まっていないときは、こちらではなく<b>「日程を決める」</b>を使ってください。</span></div>
+    <div class="sheet2">
+      <section class="s2col">
+        <label class="fl" style="margin-top:0">予定の名前<span class="req">*</span></label>
+        <input id="rsvpTitle" autocomplete="off" placeholder="例）7月度 支部定例ミーティング">
+        <div class="field-err" id="rsvpTitleE"></div>
+        <label class="fl">説明</label>
+        <textarea id="rsvpBody" rows="4" placeholder="伝えたいことがあれば書いてください。"></textarea>
+      </section>
+      <section class="s2col">
+        <label class="fl" style="margin-top:0">日付<span class="req">*</span></label>
+        <div id="rsvpCalWrap">${rsvpCalendarHTML()}</div>
+        <div class="field-err" id="rsvpDateE"></div>
+      </section>
+    </div>
     <div class="field-err" id="rsvpErr"></div>
-    <button class="btn pri block" style="margin-top:18px" id="rsvpBtn" onclick="submitRsvp()">出欠確認を送る</button>`);
+    <button class="btn pri block" style="margin-top:18px" id="rsvpBtn" onclick="submitRsvp()">この内容で参加を聞く</button>`);
 }
 function rsvpCalendarHTML(){
   const today=ymd(new Date());
@@ -4482,7 +4808,7 @@ async function submitRsvp(){
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
       err.textContent=d.error||'送信できませんでした';err.classList.add('show');
-      btn.disabled=false;btn.textContent='出欠確認を送る';return;
+      btn.disabled=false;btn.textContent='この内容で参加を聞く';return;
     }
     const {request,notification}=await res.json();
     // 候補は1件しか無いので、選ぶ手順を挟まずその場で確定させる
@@ -4491,7 +4817,7 @@ async function submitRsvp(){
     if(!confirmRes.ok){
       const d=await confirmRes.json().catch(()=>({}));
       err.textContent=d.error||'確定できませんでした';err.classList.add('show');
-      btn.disabled=false;btn.textContent='出欠確認を送る';return;
+      btn.disabled=false;btn.textContent='この内容で参加を聞く';return;
     }
     const {event}=await confirmRes.json();
     request.confirmed=request.options[0].id;
@@ -4501,12 +4827,12 @@ async function submitRsvp(){
     sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
     setSaveError(null);
   }catch(e){
-    console.warn('出欠確認の送信に失敗しました',e);
+    console.warn('参加確認の送信に失敗しました',e);
     err.textContent='送信できませんでした。通信状況をご確認ください';err.classList.add('show');
-    btn.disabled=false;btn.textContent='出欠確認を送る';return;
+    btn.disabled=false;btn.textContent='この内容で参加を聞く';return;
   }
   closeSheet();updateBell();render();
-  toast('出欠確認を送りました');
+  toast('参加確認を送りました');
 }
 function setReqMode(mode){
   REQFORM.mode=mode;
@@ -4598,6 +4924,9 @@ function reqPickerHTML(){
 
 /* ふつうの依頼と出欠確認の切り替え。候補の日時は REQFORM.opts に貯める。
    候補はカレンダーで選んでもらうので、ここでは作らない */
+/* 送るものの切り替えは openSendPicker() に移したので、フォームの中からは呼ばれない。
+   関数ごと消さずに残してあるのは、日程調整の「あて先＝誰でも回答OK」という
+   組み合わせの決まりをここ1か所で持っているため。呼び出す口が要るときはここを使う */
 function setReqKind(kind){
   REQFORM.kind=kind;
   if(kind==='attend'&&REQFORM.mode!=='public')REQFORM.mode='public';
@@ -4851,30 +5180,41 @@ function renderRequestForm(keepText){
   const currentTargetHint=REQFORM.mode==='public'?'':`
     <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>（${ids.length}名）</span></div>`;
 
-  openSheet(`<h3>${attend?'日程調整':'依頼を出す'}</h3>
-    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、${attend?'日程の候補を出して出欠を集めます。':'連絡や依頼を送ります。'}</p>
-
-    <label class="fl">送るもの</label>
-    <div class="modechips">
-      <button type="button" class="modechip ${attend?'':'on'}" onclick="setReqKind('normal')">連絡・依頼</button>
-      <button type="button" class="modechip ${attend?'on':''}" onclick="setReqKind('attend')">日程調整</button>
-    </div>
-
-    <label class="fl" style="margin-top:16px">あて先の選び方</label>
+  /* 「送るもの」の切り替えはここには置かない。
+     何を送るかは openSendPicker() で選び終えている。中でもう一度出すと、
+     外で選んだ意味が無くなるうえ、「参加を確認する」だけがその切り替えに
+     入っていないので、3つのうち2つだけ行き来できる歪な形になっていた。
+     選び間違えたときは、シートを閉じてもう一度「新しく送る」から入る */
+  /* 広い画面では左右2列（.sheet2）に分ける。1列に縦積みすると、
+     PCでは左右に900px以上の余白があるのに「件名→本文→締切→候補日」と
+     延々下へ伸びて、シートの中を延々スクロールすることになっていた。
+     狭い画面では1列に戻るので、スマホの見え方は今までどおり */
+  const colTarget=`
+    <label class="fl" style="margin-top:0">あて先の選び方</label>
     <div class="modechips">${modeBtns}</div>
     <div style="margin-top:12px">${reqPickerHTML()}</div>
-
-    ${currentTargetHint}
-
-    <label class="fl" style="margin-top:16px">件名<span class="req">*</span></label>
+    ${currentTargetHint}`;
+  const colText=`
+    <label class="fl" style="margin-top:0">件名<span class="req">*</span></label>
     <input id="reqSubj" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
     <label class="fl">本文</label>
-    <textarea id="reqBody" rows="${attend?4:6}" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>
-    ${reqDueFieldHTML()}
-    ${reqOptionsHTML()}
+    <textarea id="reqBody" rows="${attend?4:6}" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>`;
+  /* 候補日のカレンダーは背が高い。日程調整のときは
+     「あて先＋件名・本文」を左、「締切＋候補日」を右にすると、左右の高さが釣り合う */
+  const cols=attend
+    ? [colTarget+colText, reqDueFieldHTML()+reqOptionsHTML()]
+    : [colTarget, colText+reqDueFieldHTML()];
+
+  openSheet(`<h3>${attend?'日程を決める':'連絡・お願い'}</h3>
+    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、${attend?'日程の候補を出して、○△×を集めます。':'連絡や依頼を送ります。'}</p>
+
+    <div class="sheet2">
+      <section class="s2col">${cols[0]}</section>
+      <section class="s2col">${cols[1]}</section>
+    </div>
     <div class="field-err" id="reqErr"></div>
 
-    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'日程調整を送る':'この内容で送る'}</button>`);
+    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'候補を送って都合を聞く':'この内容で送る'}</button>`);
 }
 
 async function submitRequest(){
@@ -4937,7 +5277,7 @@ async function submitRequest(){
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
       err.textContent=d.error||'送信できませんでした';err.classList.add('show');
-      btn.disabled=false;btn.textContent=attend?'日程調整を送る':'この内容で送る';
+      btn.disabled=false;btn.textContent=attend?'候補を送って都合を聞く':'この内容で送る';
       return;
     }
     const out=await res.json();request=out.request;
@@ -5085,6 +5425,11 @@ function consumeTokenFromHash(){
     }catch(e){/* 取得できないときは既定値のまま（Googleボタンは出さない） */}
     GOOGLE_LOGIN_AVAILABLE=!!boot.config.googleLogin;
     MAIL_SEND_AVAILABLE=!!boot.config.mailSend;
+    /* プッシュ通知が使えるのは、サーバーに鍵があり、かつこのブラウザが
+       Service Worker と PushManager を持っているとき。
+       iPhoneは「ホーム画面に追加」しないと PushManager が現れない */
+    PUSH_PUBLIC_KEY=boot.config.pushPublicKey||'';
+    PUSH_AVAILABLE=!!boot.config.push&&!!PUSH_PUBLIC_KEY&&pushSupported();
     STAFF_EMAIL_DOMAIN=boot.config.staffEmailDomain||STAFF_EMAIL_DOMAIN;
     LOGIN_BRANCHES=boot.branches||(boot.db&&boot.db.branches)||[];
 

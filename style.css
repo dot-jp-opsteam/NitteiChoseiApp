@@ -1,7 +1,10 @@
   /* 色はすべてここで定義する。個々のルールに直接色を書かないこと。
-     :root がダーク（既定）。ライトは html[data-theme="light"] で変数だけ差し替える。
+     :root がダーク。ライトは html[data-theme="light"] で変数だけ差し替える。
+     **アプリの既定はライト**（index.html の <head> と apply/attendance の
+     data-theme="light" がそれを決めている）。CSS側の素の :root がダークなのは
+     成り立ちの名残で、data-theme が必ず指定されるため実害はない。
      端末設定ではなくアプリ側の設定に従うため、prefers-color-scheme は使わない
-     （☰メニューの切替が端末設定に負けてしまうため） */
+     （左メニューの切替が端末設定に負けてしまうため） */
   :root{
     --bg:#000000; --panel:#111111; --panel2:#1a1a1a; --line:#262626; --line2:#1c1c1c;
     --line-h:rgba(67,231,223,.45);
@@ -314,6 +317,9 @@
   .btn.block{width:100%}
   .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn-row{display:flex;gap:8px;flex-wrap:wrap}
+  /* 戻しにくい操作の置き場。ふつうの操作と同じ並びに置くと押し間違えるので、
+     罫線で切ってから下に離す */
+  .danger-zone{margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
 
   /* ---------- Forms ---------- */
   label.fl{display:block;font-size:13px;font-weight:600;color:var(--sub);margin:14px 0 5px}
@@ -425,9 +431,22 @@
   .vb-ok{background:var(--ok)} .vb-may{background:var(--warn)} .vb-no{background:var(--bad)}
   .votekeys{display:flex;gap:14px;font-size:12px;color:var(--sub)}
   .votekeys b{color:var(--ink)}
-  .vote3{display:flex;gap:8px}
-  .vote3 .v{flex:1;text-align:center;padding:12px 6px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-weight:700}
-  .vote3 .v .em{font-size:20px;display:block}
+  /* PCだと1つ300px近い巨大なボタンになっていた。押しやすさに必要なのは
+     指1本ぶんの高さと幅で、それ以上に広げても得は無いので上限を付ける */
+  .vote3{display:flex;gap:8px;max-width:420px}
+  .vote3 .v{flex:1;text-align:center;padding:9px 6px;border:1px solid var(--line);border-radius:10px;cursor:pointer;
+    font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px}
+  .vote3 .v .em{font-size:17px}
+  /* 答え終わった予定。自分の答えと集計だけを1行にして畳む */
+  .voted-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;
+    padding-top:10px;border-top:1px solid var(--line2)}
+  .voted-mine{font-size:13px;font-weight:800;padding:4px 10px;border-radius:999px;
+    background:var(--chip);color:var(--sub)}
+  .voted-mine.v-ok{background:var(--ok-soft);color:var(--ok-ink)}
+  .voted-mine.v-may{background:var(--warn-soft);color:var(--warn)}
+  .voted-mine.v-no{background:var(--bad-soft);color:var(--bad)}
+  .voted-tally{font-size:12px;color:var(--mut);font-weight:700}
+  .voted-row .btn{margin-left:auto}
   .vote3 .v.on-ok{border-color:var(--ok);background:var(--ok-soft);color:var(--ok-ink)}
   .vote3 .v.on-may{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
   .vote3 .v.on-no{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
@@ -464,6 +483,19 @@
   .chk:hover{border-color:var(--line-h)}
   .chk input{width:16px;height:16px;accent-color:var(--brand);flex:none;margin:0}
   .chk:has(input:checked){border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+
+  /* ---------- 通知のオンオフ ---------- */
+  /* 何が届くのかが分からないと決めようがないので、説明文まで含めて1行にする */
+  .pushlist{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .pushrow{display:flex;align-items:flex-start;gap:11px;padding:13px 14px;border:1px solid var(--line);
+    border-radius:12px;cursor:pointer;background:var(--panel);transition:.12s}
+  .pushrow:hover{border-color:var(--line-h)}
+  .pushrow:has(input:checked){border-color:var(--brand);background:var(--brand-soft)}
+  .pushrow:has(input:disabled){opacity:.55;cursor:not-allowed}
+  .pushrow input{width:18px;height:18px;accent-color:var(--brand);flex:none;margin:2px 0 0}
+  .pushrow-tx{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .pushrow-tx b{font-size:14px;font-weight:700}
+  .pushrow-tx small{font-size:12px;color:var(--sub);line-height:1.5}
 
   /* ---------- 依頼のあて先えらび ---------- */
   /* 上段＝選び方の切り替え、下段＝選んだ方法に応じて展開される候補 */
@@ -728,6 +760,33 @@
   .attb.v-ok.on{background:var(--ok);border-color:var(--ok);color:var(--on-fill)}
   .attb.v-may.on{background:var(--rank2);border-color:var(--rank2);color:var(--on-fill)}
   .attb.v-no.on{background:var(--bad);border-color:var(--bad);color:var(--on-fill)}
+  /* ボタンの中は記号だけなので、意味はこの凡例で示す。
+     3つのボタンの右端に合わせて右寄せにし、どの列が何かを目で結べるようにする */
+  .attkeys{display:flex;justify-content:flex-end;gap:6px;margin:0 0 8px}
+  .attkey{width:44px;display:flex;flex-direction:column;align-items:center;gap:1px;
+    font-size:13px;font-weight:800;color:var(--mut);line-height:1.15}
+  .attkey b{font-size:10.5px;font-weight:700;letter-spacing:.02em}
+  .attkey.v-ok{color:var(--ok)}
+  .attkey.v-may{color:var(--rank2)}
+  .attkey.v-no{color:var(--bad)}
+
+  /* 「新しく送る」で出す3択。名前だけでは違いが分からないので、
+     説明文とあて先まで1枚のカードに入れて、読んでから選べるようにする */
+  .sendpick-list{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .sendpick{display:flex;align-items:flex-start;gap:12px;width:100%;text-align:left;
+    padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);
+    color:var(--ink);cursor:pointer;transition:border-color .15s var(--ease),background .15s var(--ease)}
+  .sendpick:hover{border-color:var(--brand);background:var(--brand-soft)}
+  .sendpick .sp-ic{flex:none;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;
+    background:var(--brand-soft);color:var(--brand-d)}
+  .sendpick .sp-ic .ic{width:20px;height:20px}
+  .sendpick .sp-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .sendpick .sp-t{font-size:15px;font-weight:800}
+  .sendpick .sp-d{font-size:12.5px;color:var(--sub);line-height:1.55}
+  .sendpick .sp-to{display:inline-flex;align-items:center;gap:5px;margin-top:3px;
+    font-size:11.5px;font-weight:700;color:var(--mut)}
+  .sendpick .sp-to .ic{width:13px;height:13px}
+  .sendpick .sp-chev{flex:none;color:var(--mut);display:grid;place-items:center;align-self:center}
 
   /* 画面の左上に置く「ホームへ戻る」。見出しの上に、左寄せで小さく */
   .viewback{display:flex;justify-content:flex-start;margin:0 0 6px}
@@ -749,6 +808,17 @@
     /* 広い画面では上下にも余白を置いて、カードとして中央に浮かせる */
     .atpage{padding:24px 0}
     .sheet.atpage-in{border-radius:16px;padding:20px 20px 28px}
+  }
+
+  /* シートの中を左右2列にする。狭い画面では1列（＝これまでどおり縦積み）。
+     .sheet2 を含むシートだけ幅を広げる。含まないシートは 520px のまま */
+  .sheet2{display:grid;gap:0}
+  .s2col{min-width:0}
+  @media(min-width:900px){
+    .sheet:has(.sheet2){max-width:880px}
+    .sheet2{grid-template-columns:1fr 1fr;gap:0 28px}
+    /* 2列のときだけ、列の間に細い罫線を入れて区切りを見せる */
+    .sheet2 .s2col+.s2col{padding-left:28px;margin-left:-28px;border-left:1px solid var(--line2)}
   }
 
   /* toast */
@@ -1117,6 +1187,17 @@
   .chipfilter button{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 13px;
     font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;min-height:36px}
   .chipfilter button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-d)}
+
+  /* 並べ替え。絞り込み（.chipfilter）と同じ列に見えると
+     「どれを押すと何が変わるのか」が混ざるので、見出しを添えて字を一段小さくする */
+  .sortbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:-4px 0 12px}
+  .sortbar .sortlab{display:inline-flex;align-items:center;gap:5px;
+    font-size:12px;font-weight:700;color:var(--mut);margin-right:2px}
+  .sortbar .sortlab .ic{width:15px;height:15px}
+  .sortbar button{border:1px solid transparent;background:none;border-radius:999px;padding:5px 11px;
+    font-size:12.5px;font-weight:600;color:var(--sub);cursor:pointer;min-height:32px}
+  .sortbar button:hover{color:var(--ink)}
+  .sortbar button.on{border-color:var(--line);background:var(--panel2);color:var(--ink)}
 
   /* =========================================================
      ここから下は参考サイト（zbs.capital）の再現用
