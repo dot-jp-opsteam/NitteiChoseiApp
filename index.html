@@ -807,7 +807,18 @@ function dueDaysRemaining(dueDate,today){
   if(!Number.isFinite(due)||!Number.isFinite(base))return null;
   return Math.round((due-base)/86400000);
 }
-function dueShouldNotify(dueDate,today){
+/* 締切を過ぎたかどうか。
+   時刻まで決めてある依頼は、その時刻を回ったところで締切。
+   時刻の無い依頼（この欄ができる前に送ったもの）は今までどおり日で見て、
+   その日いっぱいは締切前として扱う */
+function dueIsExpired(dueDate,dueTime,today,nowTime){
+  if(!dueDate)return false;
+  if(!dueTime)return dueDaysRemaining(dueDate,today)<0;
+  if(dueDate!==today)return String(dueDate)<String(today);
+  return String(nowTime||'')>String(dueTime);
+}
+function dueShouldNotify(dueDate,today,dueTime,nowTime){
+  if(dueIsExpired(dueDate,dueTime,today,nowTime))return false;
   const days=dueDaysRemaining(dueDate,today);
   /* 「締切の3日前」当日から出す。残り3日はその日にあたるので含める */
   return days!==null&&days>=0&&days<=3;
@@ -815,6 +826,24 @@ function dueShouldNotify(dueDate,today){
 function dueNoticeText(subject,days){
   if(days===0)return String(subject)+'の回答期限は今日までです';
   return String(subject)+'の回答期限まであと'+days+'日です';
+}
+/* 締切は月日と時刻だけを選んでもらい、年はここで決める。
+   締切に去年を選ぶことはないので、今日か、それより先でいちばん近い年になる。
+   12月に「1月」を選べば翌年 */
+function dueResolveDate(month,day,today){
+  const m=Number(month),d=Number(day);
+  if(!m||!d||!today)return '';
+  const y=Number(String(today).slice(0,4));
+  const make=(yy)=>yy+'-'+pad(m)+'-'+pad(d);
+  return make(y)<String(today)?make(y+1):make(y);
+}
+/* その月に何日あるか。うるう年の2月だけ年で変わるので、
+   1日として年を決めてから数える */
+function dueMonthDays(month,today){
+  const m=Number(month);
+  if(!m)return 31;
+  const iso=dueResolveDate(m,1,today);
+  return new Date(Number(iso.slice(0,4)),m,0).getDate();
 }
 
 /* ===== 出欠確認の候補日時をつくるための計算 =====
@@ -837,11 +866,13 @@ function reqDateRange(a,b){
   while(d<=end){out.push(ymd(d));d.setDate(d.getDate()+1);}
   return out;
 }
-/* 同じ日をもう1件ふやす。前の終わりから始めて長さは変えない。
+/* 同じ日をもう1件ふやす。前の終わりから1時間ぶん。
+   もとの長さは引き継がない。2時間の候補をふやすたびに 19-21 → 21-23 と
+   枠が伸びていき、たいてい後から手で直すことになっていたため。
    その日に収まらないときは翌日の 0 時へ送る（23:59 が上限なので、
    終わりがちょうど 24:00 になる場合も収まらない扱いにする） */
 function copyReqOption(opt){
-  const len=Math.max(1,reqMins(opt.t2)-reqMins(opt.t1));
+  const len=60;
   const from=reqMins(opt.t2);
   if(from+len>1439)return {date:reqShiftDate(opt.date,1),t1:'00:00',t2:reqHHMM(len)};
   return {date:opt.date,t1:reqHHMM(from),t2:reqHHMM(from+len)};
@@ -4181,26 +4212,27 @@ function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userI
 function requestNeedsAction(r){
   return isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id);
 }
-function dueDateLabel(value){
+function dueDateLabel(value,time){
   if(!value)return '';
   const parts=String(value).split('-');
   if(parts.length!==3)return '';
-  return Number(parts[0])+'年'+Number(parts[1])+'月'+Number(parts[2])+'日';
+  return Number(parts[0])+'年'+Number(parts[1])+'月'+Number(parts[2])+'日'+(time?' '+time:'');
 }
-function dueIsPast(value){return dueDaysRemaining(value,ymd(new Date()))<0;}
+function dueNowTime(){const d=new Date();return pad(d.getHours())+':'+pad(d.getMinutes());}
+function dueIsPast(value,time){return dueIsExpired(value,time,ymd(new Date()),dueNowTime());}
 function dueRequestMeta(r){
   if(!r.due_date)return '';
-  const past=dueIsPast(r.due_date);
-  return ` ・ <span class="due-date${past?' due-overdue':''}">回答期限：${esc(dueDateLabel(r.due_date))}${past?'（締切を過ぎています）':''}</span>`;
+  const past=dueIsPast(r.due_date,r.due_time);
+  return ` ・ <span class="due-date${past?' due-overdue':''}">回答期限：${esc(dueDateLabel(r.due_date,r.due_time))}${past?'（締切を過ぎています）':''}</span>`;
 }
 function dueRequestDetail(r){
   if(!r.due_date)return '';
-  const past=dueIsPast(r.due_date);
-  return `<div class="due-date due-detail${past?' due-overdue':''}">回答の締切日：<b>${esc(dueDateLabel(r.due_date))}</b>${past?'<span>締切を過ぎています</span>':''}</div>`;
+  const past=dueIsPast(r.due_date,r.due_time);
+  return `<div class="due-date due-detail${past?' due-overdue':''}">回答の締切：<b>${esc(dueDateLabel(r.due_date,r.due_time))}</b>${past?'<span>締切を過ぎています</span>':''}</div>`;
 }
 function dueHomeNotice(){
-  const today=ymd(new Date());
-  const targets=myRequests().filter(r=>requestNeedsAction(r)&&dueShouldNotify(r.due_date,today));
+  const today=ymd(new Date()),nowTime=dueNowTime();
+  const targets=myRequests().filter(r=>requestNeedsAction(r)&&dueShouldNotify(r.due_date,today,r.due_time,nowTime));
   if(!targets.length)return '';
   const rows=targets.map(r=>{
     const days=dueDaysRemaining(r.due_date,today);
@@ -4633,7 +4665,10 @@ const REQ_MODES=[
 ];
 
 function openRequestForm(kind){
-  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',opts:[],withTime:false,dueDate:''};
+  /* 締切は月・日・時刻で持つ。年は送るときに dueResolveDate が決める。
+     時刻の既定は 23:59＝その日いっぱい */
+  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',
+    opts:[],withTime:false,dueMonth:'',dueDay:'',dueTime:'23:59'};
   renderRequestForm();
 }
 function setReqMode(mode){
@@ -4913,6 +4948,59 @@ function reqOptionsHTML(){
     <div class="optlist">${rows}</div>`;
 }
 
+/* ===== 回答の締切 =====
+   年は選ばせない。締切に去年を選ぶことはなく、選択肢に並べても押し間違いのもとになる。
+   月と日を選ぶと dueResolveDate が今日以降でいちばん近い年を当てる */
+function reqDueFieldHTML(){
+  const today=ymd(new Date());
+  const m=Number(REQFORM.dueMonth)||0, d=Number(REQFORM.dueDay)||0;
+  const opt=(v,label,on)=>`<option value="${v}"${on?' selected':''}>${label}</option>`;
+  let months=opt('','—',!m);
+  for(let i=1;i<=12;i++)months+=opt(i,i+'月',i===m);
+  let days=opt('','—',!d);
+  const last=dueMonthDays(m||1,today);
+  for(let i=1;i<=last;i++)days+=opt(i,i+'日',i===d);
+  const iso=dueResolveDate(m,d,today);
+  return `<div class="due-field">
+      <label for="reqDueMonth">回答の締切（任意）</label>
+      <div class="due-pick">
+        <select id="reqDueMonth" aria-label="締切の月" onchange="setReqDueMonth(this.value)">${months}</select>
+        <select id="reqDueDay" aria-label="締切の日" onchange="setReqDueDay(this.value)">${days}</select>
+        <input type="time" id="reqDueTime" aria-label="締切の時刻" value="${esc(REQFORM.dueTime||'23:59')}"
+          ${iso?'':'disabled'} onchange="setReqDueTime(this.value)">
+      </div>
+      ${iso?`<span class="due-year">${esc(dueDateLabel(iso,REQFORM.dueTime))}まで</span>`:''}
+    </div>`;
+}
+/* 月だけ、日だけ選ばれた状態は締切として使えないので、相手側も埋めておく。
+   このとき「いちばん近い先の日」になるようにする。今月を選んで1日を入れると
+   その日はもう過ぎていて、年が来年へ飛んでしまうため */
+function setReqDueMonth(v){
+  REQFORM.dueMonth=v;
+  if(!v){REQFORM.dueDay='';renderRequestForm(true);return;}
+  const now=new Date();
+  if(!REQFORM.dueDay)REQFORM.dueDay=Number(v)===now.getMonth()+1?String(now.getDate()):'1';
+  // 31日のまま短い月へ移ると存在しない日になる。月末に寄せる
+  const last=dueMonthDays(v,ymd(now));
+  if(Number(REQFORM.dueDay)>last)REQFORM.dueDay=String(last);
+  renderRequestForm(true);
+}
+function setReqDueDay(v){
+  REQFORM.dueDay=v;
+  if(!v)REQFORM.dueMonth='';
+  else if(!REQFORM.dueMonth){
+    const now=new Date();
+    // 今月のその日がもう過ぎているなら来月から。13月は dueResolveDate が翌年の1月にする
+    const m=now.getMonth()+1+(Number(v)<now.getDate()?1:0);
+    REQFORM.dueMonth=String(m>12?m-12:m);
+  }
+  renderRequestForm(true);
+}
+function setReqDueTime(v){
+  REQFORM.dueTime=/^[0-9]{2}:[0-9]{2}$/.test(v)?v:'23:59';
+  renderRequestForm(true);
+}
+
 function renderRequestForm(keepText){
   // 描き直しの前に、打ちかけの件名・本文を控えておく
   const prevSubj=keepText?(document.getElementById('reqSubj')||{}).value||'':'';
@@ -4945,10 +5033,7 @@ function renderRequestForm(keepText){
     <input id="reqSubj" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
     <label class="fl">本文</label>
     <textarea id="reqBody" rows="${attend?4:6}" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>
-    <div class="due-field">
-      <label for="reqDueDate">回答の締切日（任意）</label>
-      <input type="date" id="reqDueDate" min="${ymd(new Date())}" value="${esc(REQFORM.dueDate||'')}" oninput="REQFORM.dueDate=this.value">
-    </div>
+    ${reqDueFieldHTML()}
     ${reqOptionsHTML()}
     <div class="field-err" id="reqErr"></div>
 
@@ -4958,7 +5043,9 @@ function renderRequestForm(keepText){
 async function submitRequest(){
   const subject=document.getElementById('reqSubj').value.trim();
   const body=document.getElementById('reqBody').value.trim();
-  const dueDate=document.getElementById('reqDueDate').value;
+  // 締切の年は選ばせていないので、送る直前に月日から組み立てる
+  const dueDate=dueResolveDate(REQFORM.dueMonth,REQFORM.dueDay,ymd(new Date()));
+  const dueTime=dueDate?(REQFORM.dueTime||'23:59'):'';
   const err=document.getElementById('reqErr');
   const btn=document.getElementById('reqBtn');
   err.classList.remove('show');
@@ -5008,6 +5095,7 @@ async function submitRequest(){
       body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids,
         kind:attend?'attend':'normal',options,
         due_date:dueDate||undefined,
+        due_time:dueTime||undefined,
         public_access:attend&&REQFORM.mode==='public'})});
     if(!res.ok){
       const d=await res.json().catch(()=>({}));

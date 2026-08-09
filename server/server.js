@@ -170,7 +170,7 @@ async function initDB() {
        options    … 候補の日時。JSON配列 [{id,start,end}]
        confirmed  … 確定した候補のid。未確定なら null */
   for (const [col, type] of [['kind', 'TEXT'], ['options', 'TEXT'], ['confirmed', 'TEXT'],
-    ['event_id', 'TEXT'], ['public_token', 'TEXT'], ['due_date', 'TEXT']]) {
+    ['event_id', 'TEXT'], ['public_token', 'TEXT'], ['due_date', 'TEXT'], ['due_time', 'TEXT']]) {
     try { await client.execute(`ALTER TABLE requests ADD COLUMN ${col} ${type}`); }
     catch (e) { /* 既にある。SQLiteには IF NOT EXISTS が無いのでこれで判定する */ }
   }
@@ -522,6 +522,7 @@ async function listRequestsFor(user) {
     subject: r.subject, body: r.body, target_label: r.target_label,
     recipient_ids: parseIds(r.recipient_ids), created_at: r.created_at,
     due_date: r.due_date || undefined,
+    due_time: r.due_time || undefined,
     read_by: byRequest.get(r.id) || [],
     kind: r.kind || 'normal',
     options: safeJson(r.options, []),
@@ -692,6 +693,15 @@ function todayInJapan() {
 function normalizeDueDate(value) {
   if (value == null || value === '') return null;
   if (typeof value !== 'string' || !validAttendDate(value) || value < todayInJapan()) return undefined;
+  return value;
+}
+
+/* 締切の時刻。日付が無いときは時刻だけ残っても意味がないので落とす。
+   今日の過ぎた時刻はあえて弾かない（送る直前に日付をまたぐことがあり、
+   そこで送信そのものを止めてしまうと打ち直しになる） */
+function normalizeDueTime(value, dueDate) {
+  if (value == null || value === '' || !dueDate) return null;
+  if (typeof value !== 'string' || !validAttendTime(value)) return undefined;
   return value;
 }
 
@@ -2237,10 +2247,12 @@ app.post('/api/requests', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '依頼を送れるのはスタッフだけです' });
   }
-  const { subject, body, target_label, recipient_ids, kind, options, public_access, due_date } = req.body || {};
+  const { subject, body, target_label, recipient_ids, kind, options, public_access, due_date, due_time } = req.body || {};
   if (!subject || !String(subject).trim()) return res.status(400).json({ error: '件名を入力してください' });
   const dueDate = normalizeDueDate(due_date);
   if (dueDate === undefined) return res.status(400).json({ error: '締切日が正しくありません' });
+  const dueTime = normalizeDueTime(due_time, dueDate);
+  if (dueTime === undefined) return res.status(400).json({ error: '締切の時刻が正しくありません' });
   /* 出欠確認のときは候補の日時が要る。候補は画面から来た値をそのまま信じず、
      日時として読める形かどうかをここで確かめる */
   const isAttend = kind === 'attend';
@@ -2279,6 +2291,7 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       target_label: target_label || null, recipient_ids: ids,
       created_at: new Date().toISOString(), read_by: [],
       due_date: dueDate || undefined,
+      due_time: dueTime || undefined,
       kind: isAttend ? 'attend' : 'normal', options: opts, confirmed: null, event_id: null,
       public_url: publicToken
         ? `${process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`}/a/${publicToken}`
@@ -2286,11 +2299,11 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       responses: [],
     };
     await client.execute({
-      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, kind, options, public_token, due_date)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, kind, options, public_token, due_date, due_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [request.id, request.sender_id, request.branch_id, request.subject,
         request.body, request.target_label, JSON.stringify(ids), request.created_at,
-        request.kind, JSON.stringify(opts), publicToken, dueDate],
+        request.kind, JSON.stringify(opts), publicToken, dueDate, dueTime],
     });
     /* 出欠確認は、あて先ひとりずつのメール履歴にも残す。
        依頼の一覧を見ていない人でも、メール画面から気づけるようにするため。
@@ -2347,6 +2360,7 @@ app.get('/api/attendance/:token', async (req, res) => {
         id: row.id, subject: row.subject, body: row.body || '', sender_name: row.sender_name || '',
         options: safeJson(row.options, []), confirmed: row.confirmed || null,
         created_at: row.created_at, due_date: row.due_date || undefined,
+        due_time: row.due_time || undefined,
       },
       respondents,
     });

@@ -532,10 +532,21 @@
   /* ---------- 通常依頼の詳細 ---------- */
   .rq-meta{color:var(--sub);font-size:12px;line-height:1.5;margin:8px 0 0}
   .rq-body{white-space:pre-wrap;color:var(--ink);font-size:16px;line-height:1.8;margin-top:18px}
-  .due-field{display:flex;align-items:center;gap:12px;margin-top:14px}
-  .due-field label{flex:1;min-width:0;color:var(--sub);font-size:13px;font-weight:600}
-  .due-field input{flex:0 1 180px;min-width:145px;max-width:180px;color-scheme:light}
-  :root:not([data-theme="light"]) .due-field input{color-scheme:dark}
+  /* 締切は「月・日・時刻」の3つを1行に並べる。年は入力させないので、
+     決まった日付は下に文で出して取り違えを防ぐ */
+  .due-field{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:14px}
+  .due-field label{flex-basis:100%;color:var(--sub);font-size:13px;font-weight:600}
+  .due-pick{display:flex;align-items:center;gap:8px}
+  .due-pick select,.due-pick input{padding:7px 8px;border:1px solid var(--line);border-radius:9px;
+    background:var(--panel);color:var(--ink);font:inherit;font-size:14px;font-weight:700;
+    font-variant-numeric:tabular-nums;color-scheme:light}
+  .due-pick select{min-width:78px}
+  .due-pick input{width:112px;flex:none}
+  .due-pick input:disabled{opacity:.5}
+  :root:not([data-theme="light"]) .due-pick select,
+  :root:not([data-theme="light"]) .due-pick input{color-scheme:dark}
+  .due-pick select:focus-visible,.due-pick input:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+  .due-year{color:var(--sub);font-size:12px;font-weight:650}
   .due-date{color:var(--brand-d);font-weight:650}
   .due-detail{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:fit-content;
     margin-top:12px;padding:7px 10px;border:1px solid var(--hint-line);border-radius:9px;background:var(--brand-soft);font-size:13px}
@@ -560,8 +571,9 @@
   .rq-fab:hover{transform:translateY(-2px);filter:brightness(1.08)}
   .rq-fab:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
   @media(max-width:600px){
-    .due-field{gap:8px}
-    .due-field input{flex-basis:155px;min-width:145px;padding-left:8px;padding-right:6px;font-size:14px}
+    .due-field{gap:6px 8px}
+    .due-pick{gap:6px}
+    .due-pick input{width:104px;padding-left:8px;padding-right:6px}
     .rq-fab{right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));width:56px;height:56px}
   }
   @media(prefers-reduced-motion:reduce){.rq-fab{transition:none}.rq-fab:hover{transform:none}}

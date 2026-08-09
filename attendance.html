@@ -66,15 +66,22 @@ function fmtSlot(o){
 }
 const todayYmd=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',
   year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-function dueDateLabel(value){
+const nowHm=()=>new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Tokyo',
+  hour:'2-digit',minute:'2-digit'}).format(new Date());
+function dueDateLabel(value,time){
   const parts=String(value||'').split('-');
   if(parts.length!==3)return '';
-  return Number(parts[0])+'年'+Number(parts[1])+'月'+Number(parts[2])+'日';
+  return Number(parts[0])+'年'+Number(parts[1])+'月'+Number(parts[2])+'日'+(time?' '+time:'');
 }
+/* 時刻まで決めてある依頼はその時刻で締切。時刻の無い依頼（この欄ができる前に
+   送ったもの）は今までどおり、その日いっぱいは締切前として扱う */
 function dueBlock(r){
   if(!r.due_date)return '';
-  const past=r.due_date<todayYmd();
-  return `<div class="due-date due-detail${past?' due-overdue':''}">回答の締切日：<b>${esc(dueDateLabel(r.due_date))}</b>${past?'<span>締切を過ぎています</span>':''}</div>`;
+  const today=todayYmd();
+  const past=r.due_time
+    ? (r.due_date===today?nowHm()>r.due_time:r.due_date<today)
+    : r.due_date<today;
+  return `<div class="due-date due-detail${past?' due-overdue':''}">回答の締切：<b>${esc(dueDateLabel(r.due_date,r.due_time))}</b>${past?'<span>締切を過ぎています</span>':''}</div>`;
 }
 function initials(name){return (name||'?').slice(0,1);}
 
