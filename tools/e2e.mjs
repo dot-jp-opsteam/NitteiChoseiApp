@@ -1372,9 +1372,11 @@ async function run() {
          枠が入ってしまうので、指のときは押さえてからでないと掴まない。
          ここを消すと同じ不具合が戻る */
       const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+      /* 押さえる長さ（HOLD_MS）は使い心地を見ながら動かす数字なので、値は縛らない。
+         縛るのは「指のときだけ押さえてから選ぶ」という仕組みのほう */
       check('指のときだけ押さえてから選ぶ',
         applyHtml.includes("if(e.pointerType==='touch'){")
-        && applyHtml.includes('var HOLD_MS=200;'), true);
+        && /var HOLD_MS=\d+;/.test(applyHtml), true);
       check('押さえる前に指が動いたら画面送りに譲る',
         applyHtml.includes('>HOLD_SLOP') && applyHtml.includes('clearApplyHold();'), true);
       check('押さえたあとのなぞりは画面送りに取られない',
@@ -1386,7 +1388,7 @@ async function run() {
         applyHtml.includes('class="booktable apbook"')
         && css.includes('.apbook .bt-c.ok{touch-action:auto'), true);
       check('選び方の一言が日時欄に出る',
-        applyHtml.includes('少し長めに押してから上下になぞるとまとめて選べます'), true);
+        applyHtml.includes('押したまま上下になぞるとまとめて選べます'), true);
     }
 
     /* スタッフの確定は、30分ボタンの一覧ではなく開始時刻の入力にする。
