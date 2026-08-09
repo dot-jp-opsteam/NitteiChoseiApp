@@ -120,7 +120,7 @@ const MAX_WEEK_OFFSET = 2;
 const VALIDATION_DAYS = 30;
 
 /**
- * 月曜始まりの1週間ぶんの表を作る。申請ページのカレンダー表示用。
+ * 今日から1週間ぶんの表を作る。申請ページのカレンダー表示用。
  *
  * generateSlots が「空いている枠だけを日ごとに並べる」のに対して、
  * こちらは埋まっている枠も `off` として残す。表の形を崩さないため。
@@ -139,16 +139,17 @@ function generateWeekGrid(availability, takenMs, weekOffset, opts = {}) {
   const n = Number(weekOffset);
   const week = Math.min(Math.max(0, Number.isFinite(n) ? Math.floor(n) : 0), MAX_WEEK_OFFSET);
 
-  // その週の月曜から7日ぶん。日曜は前の週の扱いになるので6日戻す
+  /* 今日から7日ぶん。週を送るごとに7日ずつ先へずらす。
+     以前は月曜始まりにしていたが、それだと週の後半に開くほど左側が
+     すでに過ぎた日で埋まり、選べる枠が右端に寄ってしまっていた */
   const today = new Date(nowMs);
   today.setHours(0, 0, 0, 0);
-  const dow = today.getDay();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + (dow === 0 ? -6 : 1 - dow) + week * 7);
+  const first = new Date(today);
+  first.setDate(today.getDate() + week * 7);
   const days = [];
   for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
+    const d = new Date(first);
+    d.setDate(first.getDate() + i);
     days.push(d);
   }
 

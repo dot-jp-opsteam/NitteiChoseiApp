@@ -2720,7 +2720,7 @@ async function applyContextFor(token, staffId) {
   return { branch, staff, availability, takenMs };
 }
 
-/* 選んだスタッフの空き枠を、月曜始まりの1週間ぶんの表として返す。
+/* 選んだスタッフの空き枠を、今日から1週間ぶんの表として返す。
    画面はこれを並べるだけにして、枠の判断はサーバーだけが持つ */
 app.get('/api/apply/:token/slots', async (req, res) => {
   try {

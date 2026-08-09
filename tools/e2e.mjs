@@ -1313,11 +1313,31 @@ async function run() {
       'u_e2e_staff,u_e2e_staff3,u_e2e_staff4');
     check('メールアドレスは渡さない', 'email' in ((page.json.staff || [])[0] || {}), false);
 
-    // 空き枠。月曜始まりの1週間ぶんの表で返る。受付時間を決めていなくても既定値で出る
+    // 空き枠。今日から1週間ぶんの表で返る。受付時間を決めていなくても既定値で出る
     const slotRes = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff`);
     check('空き枠を取れる', slotRes.status, 200);
     check('今週から始まる', slotRes.json.week, 0);
     check('7日ぶんの表になる', (slotRes.json.days || []).length, 7);
+    /* 表の左端は今日。以前は月曜始まりだったので、週の後半に開くほど
+       左側が過ぎた日で埋まり、選べる枠が右端に寄っていた */
+    {
+      const t = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      const todayKey = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+      check('表のいちばん左は今日', (slotRes.json.days || [])[0], todayKey);
+      const last = new Date(t);
+      last.setDate(t.getDate() + 6);
+      check('表のいちばん右は6日先',
+        (slotRes.json.days || [])[6],
+        `${last.getFullYear()}-${p(last.getMonth() + 1)}-${p(last.getDate())}`);
+      // 次の週は7日ぶんそのまま先へずれる（曜日をまたいで詰め直したりしない）
+      const wk1 = await api(null, 'GET', `/api/apply/${token1}/slots?staff_id=u_e2e_staff&week=1`);
+      const next = new Date(t);
+      next.setDate(t.getDate() + 7);
+      check('次の週は7日先から始まる',
+        (wk1.json.days || [])[0],
+        `${next.getFullYear()}-${p(next.getMonth() + 1)}-${p(next.getDate())}`);
+    }
     /* 表の高さはスタッフの受付時間に関わらず9:00〜23:00で固定。
        週ごとに伸び縮みすると、同じ時刻の行が上下にずれて選びにくくなるため */
     check('表はいつも9:00から始まる', (slotRes.json.times || [])[0], '09:00');
@@ -1347,6 +1367,26 @@ async function run() {
       /* 未入力のあいだだけ赤い＊を出す */
       check('お名前に必須の＊がある', applyHtml.includes('id="reqname"'), true);
       check('担当スタッフに必須の＊がある', applyHtml.includes('id="reqstaff"'), true);
+
+      /* スマホの誤タップ対策。画面を送ろうとして表の上に指が乗っただけで
+         枠が入ってしまうので、指のときは押さえてからでないと掴まない。
+         ここを消すと同じ不具合が戻る */
+      const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+      check('指のときだけ押さえてから選ぶ',
+        applyHtml.includes("if(e.pointerType==='touch'){")
+        && applyHtml.includes('var HOLD_MS=200;'), true);
+      check('押さえる前に指が動いたら画面送りに譲る',
+        applyHtml.includes('>HOLD_SLOP') && applyHtml.includes('clearApplyHold();'), true);
+      check('押さえたあとのなぞりは画面送りに取られない',
+        applyHtml.includes("document.addEventListener('touchmove',applyHoldMove,{passive:false})")
+        && applyHtml.includes('e.preventDefault();     // ここから先は画面を動かさず'), true);
+      check('動かさずに離したときは1マス選ぶ',
+        applyHtml.includes('function applyHoldEnd(') && applyHtml.includes('startApplyDrag(h.cell,h.iso);'), true);
+      check('申請ページの表は既定のスクロールを残す',
+        applyHtml.includes('class="booktable apbook"')
+        && css.includes('.apbook .bt-c.ok{touch-action:auto'), true);
+      check('選び方の一言が日時欄に出る',
+        applyHtml.includes('少し長めに押してから上下になぞるとまとめて選べます'), true);
     }
 
     /* スタッフの確定は、30分ボタンの一覧ではなく開始時刻の入力にする。

@@ -326,14 +326,21 @@ function weekBlock(groups){
   }
 
   return '<div class="divider"></div>'+pager
-    +'<label class="fl" id="slotlabel">日時を選ぶ（'+groups.length+'件選択中）</label>'
+    +'<label class="fl"><span id="slotlabel">日時を選ぶ（'+groups.length+'件選択中）</span>'
+      +'<span class="fl-sub">タップで1つ、少し長めに押してから上下になぞるとまとめて選べます</span></label>'
     +body+selSummaryBlock(groups);
 }
 
+/* 表に出ている7日ぶんが何月なのか。今日始まりなので月をまたぐことが多い。
+   またぐときは「2026年8月〜9月」と両方出す。先頭の月だけだと、右半分の日付が
+   どの月のものか分からなくなる */
 function monthLabel(){
-  if(!APPLY.grid||!APPLY.grid.days.length)return '';
-  var d=parseYmd(APPLY.grid.days[0]);
-  return d.getFullYear()+'年'+(d.getMonth()+1)+'月';
+  var days=APPLY.grid&&APPLY.grid.days;
+  if(!days||!days.length)return '';
+  var a=parseYmd(days[0]),b=parseYmd(days[days.length-1]);
+  var head=a.getFullYear()+'年'+(a.getMonth()+1)+'月';
+  if(a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth())return head;
+  return head+'〜'+(a.getFullYear()===b.getFullYear()?'':b.getFullYear()+'年')+(b.getMonth()+1)+'月';
 }
 
 function gridTable(){
@@ -373,13 +380,13 @@ function gridTable(){
       var n=rank.get(c.iso);
       return '<td class="bt-c ok '+(n?'sel '+rankOnly(n):'')+'" data-iso="'+esc(c.iso)+'"'
         +' onpointerdown="applyPointerDown(event,\''+esc(c.iso)+'\')"'
-        +' title="タップ、または同じ日の中で上下になぞって選択">'
+        +' title="タップ、または長押ししてから同じ日の中で上下になぞって選択">'
         +(n?'<span class="bt-num">'+n+'</span>':'○')+'</td>';
     }).join('');
     return '<tr><th class="bt-t">'+esc(label)+'</th>'+cells+'</tr>';
   }).join('');
 
-  return '<div class="booktable-wrap"><table class="booktable">'
+  return '<div class="booktable-wrap"><table class="booktable apbook">'
     +'<thead><tr><th class="bt-corner"></th>'+headCells+'</tr>'
     +'<tr><th class="bt-corner"></th>'+allDayCells+'</tr></thead>'
     +'<tbody>'+bodyRows+'</tbody></table></div>';
@@ -471,22 +478,107 @@ function removeSlots(csv){
    往復してもモードが入れ替わらないようにしている。
    なぞれるのは縦（押し始めた日の列）だけ。列は td の並び順で見分ける */
 var APDRAG=null;
+
+/* 指のときだけ「押さえてから」なぞれるようにする。
+   スマホでは画面を送ろうとしてカレンダーの上に指が乗ることがあり、
+   押した瞬間から掴んでいると、送るつもりが枠を選んでしまっていた。
+
+   ・押してすぐは何もしない。0.2秒そのまま押さえていたら選択に入る
+   ・0.2秒たつ前に指が動いたら、それは画面を送る操作。カレンダーは手を出さない
+   ・動かさずにポンと離したときは、押すつもりだったとみなして1マス選ぶ
+
+   マウスには効かせない。狙った場所を正確に押せるので待たせる理由がない */
+var HOLD_MS=200;      // ここを押さえていれば「選ぶつもり」とみなす
+var HOLD_SLOP=10;     // これ以上ずれたら「画面を送るつもり」とみなす（px）
+var APHOLD=null;
+
 function applyPointerDown(e,iso){
   if(e.button!==undefined&&e.button!==0)return;
+  if(e.pointerType==='touch'){
+    beginApplyHold(e,iso);
+    return;
+  }
   e.preventDefault();
-  var col=dragColOf(e.currentTarget);
+  startApplyDrag(e.currentTarget,iso);
+  document.addEventListener('pointermove',applyDragMove);
+  document.addEventListener('pointerup',applyDragEnd);
+  document.addEventListener('pointercancel',applyDragEnd);
+}
+
+function beginApplyHold(e,iso){
+  clearApplyHold();
+  var cell=e.currentTarget;
+  APHOLD={cell:cell,iso:iso,x:e.clientX,y:e.clientY,armed:false,timer:0};
+  APHOLD.timer=setTimeout(function(){
+    if(!APHOLD)return;
+    APHOLD.armed=true;
+    // 掴めたことを指に返す。対応していない端末では何も起きない
+    if(navigator.vibrate)navigator.vibrate(8);
+    startApplyDrag(APHOLD.cell,APHOLD.iso);
+  },HOLD_MS);
+  /* touchmove を passive でない形で見る。pointermove では画面送りを止められない。
+     0.2秒のあいだ指が止まっていれば画面はまだ動き出していないので、
+     ここで初めて preventDefault すれば送りに取られずになぞれる */
+  document.addEventListener('touchmove',applyHoldMove,{passive:false});
+  document.addEventListener('touchend',applyHoldEnd);
+  document.addEventListener('touchcancel',applyHoldCancel);
+}
+
+function applyHoldMove(e){
+  if(!APHOLD)return;
+  var t=e.touches&&e.touches[0];
+  if(!t)return;
+  if(!APHOLD.armed){
+    if(Math.abs(t.clientX-APHOLD.x)>HOLD_SLOP||Math.abs(t.clientY-APHOLD.y)>HOLD_SLOP){
+      clearApplyHold();   // 画面を送ろうとしている。そのままブラウザに任せる
+    }
+    return;
+  }
+  e.preventDefault();     // ここから先は画面を動かさず、なぞって選ぶ
+  var i=dragRowIndexAt(t);
+  if(i>=0)applyDragTo(i);
+}
+
+function applyHoldEnd(e){
+  var h=APHOLD;
+  if(!h)return;
+  var armed=h.armed;
+  clearApplyHold();
+  if(armed){applyDragEnd();return;}
+  /* 0.2秒たつ前に離した。指が動いていなければ「押すつもり」だったので1マスだけ選ぶ。
+     動いていたときは applyHoldMove がすでに手を引いているのでここへは来ない */
+  startApplyDrag(h.cell,h.iso);
+  applyDragEnd();
+  if(e&&e.cancelable)e.preventDefault();   // 続けて出るクリックを止める
+}
+
+function applyHoldCancel(){
+  var armed=APHOLD&&APHOLD.armed;
+  clearApplyHold();
+  if(armed)applyDragEnd();
+}
+
+/* 押さえ待ちの後始末。選択そのものには触らない */
+function clearApplyHold(){
+  if(APHOLD&&APHOLD.timer)clearTimeout(APHOLD.timer);
+  APHOLD=null;
+  document.removeEventListener('touchmove',applyHoldMove,{passive:false});
+  document.removeEventListener('touchend',applyHoldEnd);
+  document.removeEventListener('touchcancel',applyHoldCancel);
+}
+
+/* なぞりの開始。押し始めた枠を選び、その列を上下の動きの物差しにする */
+function startApplyDrag(cell,iso){
+  var col=dragColOf(cell);
   var cells=colCells(col);
   APDRAG={
     mode:APPLY.sel.indexOf(iso)>=0?'remove':'add',
     col:col, cells:cells,
-    anchor:cells.indexOf(e.currentTarget),
+    anchor:cells.indexOf(cell),
     base:APPLY.sel.slice(),          // なぞる前の状態。範囲を作り直すたびにここから組み立てる
   };
   document.body.classList.add('noselect');
   applyDragTo(APDRAG.anchor);
-  document.addEventListener('pointermove',applyDragMove);
-  document.addEventListener('pointerup',applyDragEnd);
-  document.addEventListener('pointercancel',applyDragEnd);
 }
 function dragColOf(cell){
   return cell&&cell.cellIndex!==undefined

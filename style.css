@@ -1099,6 +1099,12 @@
   .bt-c.locked{cursor:not-allowed;background:var(--panel2);color:var(--disabled);font-size:11px;font-weight:700}
   /* ドラッグでのまとめて不可・解除操作 */
   .bt-c.ok,.bt-c.block{touch-action:none}
+  /* 申請ページ（apply.html）の表だけは、指を置いただけでは掴まない。
+     touch-action:none のままだと表の上から画面を送れず、送るつもりの指が
+     そのまま枠を選んでしまう。0.2秒押さえたときだけ touchmove を止めて
+     なぞりに切り替えるので、ここは既定のスクロールを生かしておく。
+     長押しで iOS の選択メニューが出ないように callout も切る */
+  .apbook .bt-c.ok{touch-action:auto;-webkit-touch-callout:none}
   body.noselect{user-select:none;-webkit-user-select:none}
 
   /* filter bar */
