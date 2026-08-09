@@ -630,7 +630,7 @@ async function testAttendance() {
       && appHtml.includes("toast('完了を取り消しました')"), true);
   check('未処理件数は未完了の通常依頼と未回答の出欠確認を数える',
     appHtml.includes('function requestNeedsAction(r)')
-      && appHtml.includes("isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id)"), true);
+      && appHtml.includes("isAttend(r)?!attendResponses(r).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id)"), true);
   /* 回答済み・確認済みは出欠も通常も完了済みタブへ移る。
      以前は出欠確認だけ回答後も受けた依頼に残り続けていた */
   check('答えた出欠確認も完了済みへ移る',
@@ -643,6 +643,43 @@ async function testAttendance() {
   check('完了済みの依頼は新しい順のまま',
     appHtml.includes('function myRequests(){')
       && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
+  /* 依頼を出す画面のボタンは「日程調整」「出欠確認」「依頼を出す」の順。
+     以前の「出欠を確認する」（複数候補から絞る機能）は「日程調整」に改名し、
+     いちばん左へ移した。「出欠確認」は別物の新機能で、その間に挟まる */
+  check('ボタンは日程調整→出欠確認→依頼を出すの順に並ぶ',
+    /＋ 日程調整[\s\S]*openRsvpForm\(\)[\s\S]*＋ 出欠確認[\s\S]*openRequestForm\(\)[\s\S]*＋ 依頼を出す/.test(appHtml), true);
+  check('旧「出欠を確認する」の文言は残っていない', appHtml.includes('出欠を確認する'), false);
+
+  /* ---- 出欠確認（1件だけの予定に○△×で答える新タブ） ----
+     日程調整（候補を複数出して絞る）とは別物。中身は出欠確認（kind:'attend'）を
+     候補1件で作り、その場ですぐ確定させるだけで、専用のAPIは足していない */
+  check('出欠確認フォームは名前・説明・日付の3つだけ',
+    appHtml.includes('function openRsvpForm()')
+      && appHtml.includes('id="rsvpTitle"') && appHtml.includes('id="rsvpBody"') && appHtml.includes('id="rsvpDate"')
+      && !appHtml.includes('id="rsvpTime"'), true);
+  check('出欠確認は支部の全スタッフ固定で対象を選ばせない',
+    appHtml.includes("target_label:'支部の全スタッフ',recipient_ids:ids")
+      && appHtml.includes('const ids=branchStaff().filter(u=>u.id!==ME.id).map(u=>u.id);'), true);
+  check('出欠確認は作成した直後にその場で確定させる',
+    appHtml.includes("kind:'attend',options:[{date,has_date:true,has_time:false}]")
+      && appHtml.includes('/confirm`,')
+      && appHtml.includes('option_id:request.options[0].id'), true);
+
+  /* 確定した出欠確認は、依頼の詳細を開いてもカレンダーと同じイベントカードを見せる。
+     ○△×の回答場所はカレンダー側（event_responses）に一本化されているため、
+     依頼と出欠確認の入力欄をこのカードだけに重ねている（二重に持たない） */
+  check('確定済みの出欠確認はカレンダーと同じカードを流用する',
+    appHtml.includes('const ev=r.confirmed?(DB.events||[]).find(e=>e.id===r.event_id):null;')
+      && appHtml.includes('eventCard(ev,false)'), true);
+  check('依頼から開いたイベントカードは編集・削除を出さない',
+    appHtml.includes('function eventCard(ev,showEdit)')
+      && appHtml.includes('showEdit&&(ME.role===\'admin\'||ev.creator_id===ME.id)'), true);
+  check('出欠の回答場所は確定前後で自動的に切り替わる',
+    appHtml.includes('function attendResponses(r)')
+      && appHtml.includes('if(r.confirmed&&r.event_id){'), true);
+  check('場所を入力しないイベントは行ごと表示しない',
+    appHtml.includes('${ev.location?`<div class="meta">')
+      && !appHtml.includes("esc(ev.location||'—')"), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
   /* 日付は入力欄をやめてカレンダーで選ぶ形にした */
@@ -845,6 +882,39 @@ async function testAttendance() {
     subject: '過去の締切', recipient_ids: ['u_e2e_staff3'], due_date: '2000-01-01',
   });
   check('昨日以前の締切日は作れない', pastDue.status, 400);
+
+  /* ---- 出欠確認（1件だけの予定に○△×で答える、旧「出欠を確認する」とは別物） ----
+     画面の submitRsvp() は「候補1件の出欠確認を作る→その場で確定する」の2手順で
+     実現している。サーバー側に専用APIは無いので、ここでも同じ2手順で確かめる */
+  const rsvpDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(Date.now() + 3 * 86400000));
+  const rsvpMade = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '7月度 支部定例ミーティング', body: '今月の活動報告と来月の予定共有を行います。',
+    target_label: '支部の全スタッフ', recipient_ids: ['u_e2e_staff3', 'u_e2e_staff4'],
+    kind: 'attend', options: [{ date: rsvpDate, has_date: true, has_time: false }],
+  });
+  check('出欠確認（1件）を作れる', rsvpMade.status, 200);
+  check('候補は1件だけ', rsvpMade.json.request?.options?.length, 1);
+  const rsvpOptId = rsvpMade.json.request?.options?.[0]?.id;
+  const rsvpConfirm = await api(TOKENS.staff, 'POST', `/api/requests/${rsvpMade.json.request?.id}/confirm`,
+    { option_id: rsvpOptId });
+  check('その場ですぐ確定できる', rsvpConfirm.status, 200);
+  const rsvpEventId = rsvpConfirm.json.event?.id;
+  check('確定するとカレンダー予定ができる', !!rsvpEventId, true);
+  check('カレンダー予定の名前は依頼の件名を引き継ぐ', rsvpConfirm.json.event?.title, '7月度 支部定例ミーティング');
+  check('時間は設定していない予定になる', rsvpConfirm.json.event?.has_time, false);
+
+  // 確定後の○△×は、依頼側ではなくカレンダー予定（イベント）の回答として集計される
+  const rsvpVote = await api(TOKENS.staff3, 'PUT', `/api/events/${rsvpEventId}/response`, { response: 'ok' });
+  check('出欠確認に確定後は支部のスタッフが回答できる', rsvpVote.status, 200);
+  const rsvpView = await getDB(TOKENS.staff3);
+  const rsvpReq = (rsvpView.requests || []).find((r) => r.id === rsvpMade.json.request?.id);
+  check('確定した出欠確認は完了状態で読み出せる', rsvpReq?.confirmed, rsvpOptId);
+  check('確定した出欠確認にはカレンダー予定のidが付く', rsvpReq?.event_id, rsvpEventId);
+  check('確定後の回答がカレンダー予定の回答として残る',
+    (rsvpView.event_responses || []).some((x) => x.event_id === rsvpEventId && x.user_id === 'u_e2e_staff3' && x.response === 'ok'),
+    true);
 }
 
 /* 自分のGoogleカレンダーの取り込み。

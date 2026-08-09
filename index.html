@@ -2579,7 +2579,11 @@ function eventClock(ev){
   if(ev?.has_time===false)return '';
   return hm(ev.start_datetime);
 }
-function eventCard(ev){
+/* showEdit=false のときは「編集」「削除」を出さない。依頼の出欠確認から
+   同じカードを間借りするとき用（依頼の件名・本文と食い違ってしまうため、
+   カレンダー側からの直接編集はさせない） */
+function eventCard(ev,showEdit){
+  if(showEdit===undefined)showEdit=true;
   const resp=DB.event_responses.filter(r=>r.event_id===ev.id);
   const c={ok:0,may:0,no:0};resp.forEach(r=>c[r.response]++);
   const total=c.ok+c.may+c.no||1;
@@ -2597,7 +2601,7 @@ function eventCard(ev){
       <div class="meta" style="margin-top:6px">
         <span>${ic('calendar')}<b>${ev.has_time===false?fmtDate(ev.start_datetime):fmtDT(ev.start_datetime)}</b>${ev.has_time===false?'':` 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}`}</span>
       </div>
-      <div class="meta"><span>${ic('pin')}${esc(ev.location||'—')}</span></div>
+      ${ev.location?`<div class="meta"><span>${ic('pin')}${esc(ev.location)}</span></div>`:''}
       ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
       ${(ev.meet_url||ev.zoom_url)?`<div class="meta" style="margin-top:6px">${ev.meet_url?`<span>${ic('link')}<a href="${esc(ev.meet_url)}" target="_blank" rel="noopener">Meet</a></span>`:''}${ev.zoom_url?`<span>${ic('link')}<a href="${esc(ev.zoom_url)}" target="_blank" rel="noopener">Zoom</a></span>`:''}</div>`:''}
 
@@ -2619,7 +2623,7 @@ function eventCard(ev){
       ${(ME.role==='admin'||ev.creator_id===ME.id||(!isPrivate&&ME.role!=='intern'))?`
         <div class="btn-row" style="margin-top:10px">
           ${isPrivate?'':`<button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>`}
-          ${(ME.role==='admin'||ev.creator_id===ME.id)?`<button class="btn sm" onclick="openEventForm('${ev.id}')">編集</button>
+          ${(showEdit&&(ME.role==='admin'||ev.creator_id===ME.id))?`<button class="btn sm" onclick="openEventForm('${ev.id}')">編集</button>
           <button class="btn sm bad" onclick="deleteEvent('${ev.id}')">削除</button>`:''}
         </div>`:''}
     </div></div>`;
@@ -4210,7 +4214,7 @@ function sentRequests(){
 }
 function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userId);}
 function requestNeedsAction(r){
-  return isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id);
+  return isAttend(r)?!attendResponses(r).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id);
 }
 function dueDateLabel(value,time){
   if(!value)return '';
@@ -4278,8 +4282,9 @@ function viewRequests(){
   return `<h1 class="page">依頼</h1>
     <p class="page-sub">${canSend?`${branchName(ME.branch_id)}のスタッフ・インターン生に、連絡や出欠確認を出せます。`:'スタッフから届いた連絡・依頼です。'}</p>
     ${canSend?`<div class="btn-row" style="margin-bottom:16px">
+      <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">＋ 日程調整</button>
+      <button class="btn pri" style="flex:1" onclick="openRsvpForm()">＋ 出欠確認</button>
       <button class="btn pri" style="flex:1" onclick="openRequestForm()">＋ 依頼を出す</button>
-      <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">＋ 出欠を確認する</button>
     </div>`:''}
     ${tabs}
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
@@ -4300,7 +4305,7 @@ function requestList(list,kind){
     const sender=findUser(r.sender_id);
     const att=isAttend(r);
     // 出欠確認は「確認したか」ではなく「答えたか」「決まったか」で状態を出す
-    const answered=att?(r.responses||[]).some(a=>a.user_id===ME.id):false;
+    const answered=att?attendResponses(r).some(a=>a.user_id===ME.id):false;
     const numAns=att?attendAnswered(r).length:0;
     // 「受けた依頼」は inbox/done どちらも送った人を名乗る。target_label は自分が送った側（sent）だけの情報
     const sub=att
@@ -4334,11 +4339,23 @@ function requestList(list,kind){
 const ATT_MARK={ok:'○',may:'△',no:'×'};
 function isAttend(r){return r&&r.kind==='attend';}
 function isPublicAttend(r){return isAttend(r)&&!!r.public_url;}
+/* 出欠確認の一生の中で、回答の置き場所が変わる。
+   確定する前は候補ごとの request_responses、確定した後は
+   そのとき出来たカレンダー予定の event_responses が本物になる
+   （確定後は答える場所がカレンダーの○△×ボタンに移るため）。
+   ここで吸収して、呼び出し側はどちらの状態でも同じ形で読める */
+function attendResponses(r){
+  if(r.confirmed&&r.event_id){
+    return (DB.event_responses||[]).filter(x=>x.event_id===r.event_id)
+      .map(x=>({user_id:x.user_id,response:x.response,option_id:r.confirmed}));
+  }
+  return r.responses||[];
+}
 /* 候補ごとの集計。誰が何を答えたかも引ける形にして返す */
 function attendTally(r){
   const byOpt=new Map();
   (r.options||[]).forEach(o=>byOpt.set(o.id,{ok:0,may:0,no:0,who:new Map()}));
-  (r.responses||[]).forEach(a=>{
+  attendResponses(r).forEach(a=>{
     const t=byOpt.get(a.option_id);
     if(!t||!ATT_MARK[a.response])return;
     t[a.response]++;
@@ -4351,13 +4368,13 @@ function attendTally(r){
    あて先から外れたあとに答えが残っている人（部署の変更など）も落とさない */
 function attendResponders(r){
   const ids=[...(r.recipient_ids||[])];
-  (r.responses||[]).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
+  attendResponses(r).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
   return ids;
 }
 /* 1人でも答えた人。集計の「回答者◯名」に使う */
 function attendAnswered(r){
   const ids=[];
-  (r.responses||[]).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
+  attendResponses(r).forEach(a=>{if(!ids.includes(a.user_id))ids.push(a.user_id);});
   return ids;
 }
 /* ○がいちばん多い候補。同じ数のものが複数あれば、その全部を返す。
@@ -4395,8 +4412,20 @@ function openAttendDetail(id){
   const r=allRequests().find(x=>x.id===id);
   if(!r)return;
   const sender=findUser(r.sender_id);
-  const mineToAnswer=(r.recipient_ids||[]).includes(ME.id);
   const isOwner=r.sender_id===ME.id||ME.role==='admin';
+  /* 確定した出欠確認は、そのとき出来たカレンダー予定と同じカードを見せる。
+     ○△×の回答場所はもうそちら側（event_responses）に移っているので、
+     ここでも同じ eventCard を出せば、依頼から見てもカレンダーから見ても
+     常に同じ最新の回答状況になる（二重に持たない） */
+  const ev=r.confirmed?(DB.events||[]).find(e=>e.id===r.event_id):null;
+  if(ev){
+    openSheet(`<h3>${esc(r.subject)} <span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">出欠</span></h3>
+      <p class="page-sub" style="margin-top:0">${esc(sender?sender.nickname:'—')}さん ・ ${esc(r.target_label||'')}（${(r.recipient_ids||[]).length}名）</p>
+      ${dueRequestDetail(r)}
+      ${eventCard(ev,false)}`);
+    return;
+  }
+  const mineToAnswer=(r.recipient_ids||[]).includes(ME.id);
   const tally=attendTally(r);
   const responders=attendResponders(r);
   const answered=new Set(attendAnswered(r));
@@ -4682,6 +4711,75 @@ function openRequestForm(kind){
   REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',
     opts:[],withTime:false,dueMonth:'',dueDay:'',dueTime:'23:59'};
   renderRequestForm();
+}
+
+/* ---------- 出欠確認（1件だけの予定に○△×で答えてもらう） ----------
+   「日程調整」は候補日を複数出して1つに絞る機能だが、こちらは最初から
+   日付が決まっている予定の出欠を取るだけなので、別の作りにしてある。
+   中身は出欠確認（kind:'attend'）を候補1件で作り、その場ですぐ確定する
+   だけ。確定するとサーバー側でカレンダーに予定ができ、以後の○△×は
+   そのカレンダー予定（イベント）の回答として集計される（attendResponses参照）。
+   対象は支部の全スタッフに固定。インターン生は依頼を受け取る手段が無いため対象外 */
+function openRsvpForm(){
+  openSheet(`<h3>出欠確認を送る</h3>
+    <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の全スタッフに、参加・未定・不参加で答えてもらいます。</p>
+    <label class="fl">予定の名前<span class="req">*</span></label>
+    <input id="rsvpTitle" autocomplete="off" placeholder="例）7月度 支部定例ミーティング">
+    <div class="field-err" id="rsvpTitleE"></div>
+    <label class="fl">説明</label>
+    <textarea id="rsvpBody" rows="4" placeholder="伝えたいことがあれば書いてください。"></textarea>
+    <label class="fl">日付<span class="req">*</span></label>
+    <input type="date" id="rsvpDate" min="${ymd(new Date())}">
+    <div class="field-err" id="rsvpDateE"></div>
+    <div class="field-err" id="rsvpErr"></div>
+    <button class="btn pri block" style="margin-top:18px" id="rsvpBtn" onclick="submitRsvp()">出欠確認を送る</button>`);
+}
+async function submitRsvp(){
+  const title=document.getElementById('rsvpTitle').value.trim();
+  const body=document.getElementById('rsvpBody').value.trim();
+  const date=document.getElementById('rsvpDate').value;
+  const titleE=document.getElementById('rsvpTitleE'),dateE=document.getElementById('rsvpDateE');
+  const err=document.getElementById('rsvpErr'),btn=document.getElementById('rsvpBtn');
+  titleE.classList.remove('show');dateE.classList.remove('show');err.classList.remove('show');
+  let valid=true;
+  if(!title){titleE.textContent='予定の名前を入力してください';titleE.classList.add('show');valid=false;}
+  if(!date){dateE.textContent='日付を選んでください';dateE.classList.add('show');valid=false;}
+  if(!valid)return;
+
+  const ids=branchStaff().filter(u=>u.id!==ME.id).map(u=>u.id);
+  btn.disabled=true;btn.textContent='送信中…';
+  try{
+    const res=await api('/api/requests',{method:'POST',body:JSON.stringify({
+      subject:title,body,target_label:'支部の全スタッフ',recipient_ids:ids,
+      kind:'attend',options:[{date,has_date:true,has_time:false}]})});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      err.textContent=d.error||'送信できませんでした';err.classList.add('show');
+      btn.disabled=false;btn.textContent='出欠確認を送る';return;
+    }
+    const {request,notification}=await res.json();
+    // 候補は1件しか無いので、選ぶ手順を挟まずその場で確定させる
+    const confirmRes=await api(`/api/requests/${encodeURIComponent(request.id)}/confirm`,
+      {method:'POST',body:JSON.stringify({option_id:request.options[0].id})});
+    if(!confirmRes.ok){
+      const d=await confirmRes.json().catch(()=>({}));
+      err.textContent=d.error||'確定できませんでした';err.classList.add('show');
+      btn.disabled=false;btn.textContent='出欠確認を送る';return;
+    }
+    const {event}=await confirmRes.json();
+    request.confirmed=request.options[0].id;
+    if(event){request.event_id=event.id;DB.events=[...(DB.events||[]),event];}
+    DB.requests=[...(DB.requests||[]),request];
+    if(notification)DB.notifications=[...(DB.notifications||[]),notification];
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('出欠確認の送信に失敗しました',e);
+    err.textContent='送信できませんでした。通信状況をご確認ください';err.classList.add('show');
+    btn.disabled=false;btn.textContent='出欠確認を送る';return;
+  }
+  closeSheet();updateBell();render();
+  toast('出欠確認を送りました');
 }
 function setReqMode(mode){
   REQFORM.mode=mode;
@@ -5026,13 +5124,13 @@ function renderRequestForm(keepText){
   const currentTargetHint=REQFORM.mode==='public'?'':`
     <div class="hint" style="margin-top:12px">${ic('send')}<span>いまのあて先：<b>${esc(label)}</b>（${ids.length}名）</span></div>`;
 
-  openSheet(`<h3>${attend?'出欠を確認する':'依頼を出す'}</h3>
+  openSheet(`<h3>${attend?'日程調整':'依頼を出す'}</h3>
     <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、${attend?'日程の候補を出して出欠を集めます。':'連絡や依頼を送ります。'}</p>
 
     <label class="fl">送るもの</label>
     <div class="modechips">
       <button type="button" class="modechip ${attend?'':'on'}" onclick="setReqKind('normal')">連絡・依頼</button>
-      <button type="button" class="modechip ${attend?'on':''}" onclick="setReqKind('attend')">出欠確認</button>
+      <button type="button" class="modechip ${attend?'on':''}" onclick="setReqKind('attend')">日程調整</button>
     </div>
 
     <label class="fl" style="margin-top:16px">あて先の選び方</label>
@@ -5049,7 +5147,7 @@ function renderRequestForm(keepText){
     ${reqOptionsHTML()}
     <div class="field-err" id="reqErr"></div>
 
-    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'出欠確認を送る':'この内容で送る'}</button>`);
+    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'日程調整を送る':'この内容で送る'}</button>`);
 }
 
 async function submitRequest(){
@@ -5112,7 +5210,7 @@ async function submitRequest(){
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
       err.textContent=d.error||'送信できませんでした';err.classList.add('show');
-      btn.disabled=false;btn.textContent=attend?'出欠確認を送る':'この内容で送る';
+      btn.disabled=false;btn.textContent=attend?'日程調整を送る':'この内容で送る';
       return;
     }
     const out=await res.json();request=out.request;
