@@ -29,6 +29,29 @@ const { hashPassword } = createRequire(path.join(ROOT, 'server', 'package.json')
 const PORT = 8123;
 const BASE = `http://localhost:${PORT}`;
 
+/* ---------- 表示の絞り込み ----------
+   --quiet      失敗したものだけ出す
+   --only <語>  見出しにその語を含む区画の結果だけ出す（例: --only 出欠）
+
+   間引くのは**表示だけ**で、検査そのものは必ず全部走らせる。
+   途中の区画を飛ばすと、前の区画が作ったデータが無くて後ろが壊れるため。
+   全部走らせても3秒ほどしかかからない */
+const CLI = process.argv.slice(2);
+const QUIET = CLI.includes('--quiet');
+const ONLY = (() => { const i = CLI.indexOf('--only'); return i >= 0 ? (CLI[i + 1] || '') : ''; })();
+const rawLog = console.log.bind(console);
+let currentSection = '';
+console.log = (...args) => {
+  const line = typeof args[0] === 'string' ? args[0] : '';
+  // 見出しは「───────␣名前␣───────」。最後の区切り線は空白を挟まないので当たらない
+  const isHeading = line.includes('─────── ');
+  const isResult = /^ {2}(OK|NG) /.test(line);
+  if (isHeading) currentSection = line;
+  if (ONLY && (isHeading || isResult) && !currentSection.includes(ONLY)) return;
+  if (QUIET && (isHeading || line.startsWith('  OK '))) return;
+  rawLog(...args);
+};
+
 /* ---------- 結果の集計 ---------- */
 let pass = 0;
 const failures = [];
