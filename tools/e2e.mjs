@@ -612,11 +612,13 @@ async function testAttendance() {
   check('依頼タブは受けた依頼と完了済みの依頼を切り替える',
     appHtml.includes('<span class="segb">完了済みの依頼</span>')
       && !appHtml.includes('<span class="segb">送った依頼</span>'), true);
-  check('送った依頼は自前SVGの固定ボタンで切り替える',
+  /* アイコンだけだと何のボタンか伝わらなかったので、文字ラベル付きの
+     固定ボタンにしてある。「送信した依頼」の文言そのものを検査する */
+  check('送った依頼は文字ラベル付きの固定ボタンで切り替える',
     appHtml.includes('class="rq-fab"')
       && appHtml.includes('toggleSentRequests()')
       && appHtml.includes("ic(REQTAB==='sent'?'back':'megaphone')")
-      && appHtml.includes('aria-label="${REQTAB===\'sent\'?\'受けた依頼に戻る\':\'送った依頼を表示\'}"')
+      && appHtml.includes("REQTAB==='sent'?'受けた依頼へ戻る':'送信した依頼'")
       && styleSource.includes('.rq-fab{position:fixed;'), true);
   check('依頼一覧は固定ボタンに隠れない余白を持つ',
     appHtml.includes('class="rq-list-space"') && styleSource.includes('.rq-list-space{padding-bottom:'), true);
@@ -629,6 +631,18 @@ async function testAttendance() {
   check('未処理件数は未完了の通常依頼と未回答の出欠確認を数える',
     appHtml.includes('function requestNeedsAction(r)')
       && appHtml.includes("isAttend(r)?!(r.responses||[]).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id)"), true);
+  /* 回答済み・確認済みは出欠も通常も完了済みタブへ移る。
+     以前は出欠確認だけ回答後も受けた依頼に残り続けていた */
+  check('答えた出欠確認も完了済みへ移る',
+    appHtml.includes('const inbox=sortInboxByDue(received.filter(requestNeedsAction))')
+      && appHtml.includes('const done=received.filter(r=>!requestNeedsAction(r))'), true);
+  /* 受けた依頼（未処理）は締切が早い順。締切なしは末尾、同着は新着順で並べる */
+  check('受けた依頼は締切が早い順に並ぶ',
+    appHtml.includes('function sortInboxByDue(list)')
+      && appHtml.includes("const da=a.due_date||'9999-99-99'"), true);
+  check('完了済みの依頼は新しい順のまま',
+    appHtml.includes('function myRequests(){')
+      && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
   /* 日付は入力欄をやめてカレンダーで選ぶ形にした */

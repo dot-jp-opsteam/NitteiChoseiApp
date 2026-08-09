@@ -4250,13 +4250,24 @@ function toggleSentRequests(){
   render();
 }
 
+/* 受けた依頼の並び。まだ答えていないものは締切が早い順（締切なしは末尾）、
+   答え終えたものは新着順のまま。requestNeedsAction が両方の境目になる */
+function sortInboxByDue(list){
+  return list.slice().sort((a,b)=>{
+    const da=a.due_date||'9999-99-99',db=b.due_date||'9999-99-99';
+    if(da!==db)return da<db?-1:1;
+    const ta=a.due_time||(a.due_date?'23:59':'99:99'),tb=b.due_time||(b.due_date?'23:59':'99:99');
+    if(ta!==tb)return ta<tb?-1:1;
+    return new Date(b.created_at)-new Date(a.created_at);
+  });
+}
 function viewRequests(){
   const canSend=canSendRequest();
   const received=myRequests();
-  // 出欠確認は回答後も受信側に残す。通常依頼だけを本人の完了状態で分ける
-  const inbox=received.filter(r=>isAttend(r)||!hasConfirmed(r,ME.id));
-  const done=received.filter(r=>!isAttend(r)&&hasConfirmed(r,ME.id));
-  const pending=received.filter(requestNeedsAction).length;
+  // 答えた／確認した依頼は出欠も通常もまとめて完了済みへ移る
+  const inbox=sortInboxByDue(received.filter(requestNeedsAction));
+  const done=received.filter(r=>!requestNeedsAction(r));
+  const pending=inbox.length;
   const sent=sentRequests();
   const tabs=`<div class="seg" style="margin-bottom:14px">
     <label><input type="radio" name="reqTab" ${REQTAB==='inbox'?'checked':''} onchange="setReqTab('inbox')">
@@ -4274,9 +4285,8 @@ function viewRequests(){
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
       :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
     ${canSend?`<button type="button" class="rq-fab" onclick="toggleSentRequests()"
-      aria-label="${REQTAB==='sent'?'受けた依頼に戻る':'送った依頼を表示'}"
       title="${REQTAB==='sent'?'受けた依頼に戻る':'送った依頼を表示'}">
-      ${ic(REQTAB==='sent'?'back':'megaphone')}</button>`:''}`;
+      ${ic(REQTAB==='sent'?'back':'megaphone')}<span>${REQTAB==='sent'?'受けた依頼へ戻る':'送信した依頼'}</span></button>`:''}`;
 }
 
 function requestList(list,kind){
@@ -4292,16 +4302,18 @@ function requestList(list,kind){
     // 出欠確認は「確認したか」ではなく「答えたか」「決まったか」で状態を出す
     const answered=att?(r.responses||[]).some(a=>a.user_id===ME.id):false;
     const numAns=att?attendAnswered(r).length:0;
+    // 「受けた依頼」は inbox/done どちらも送った人を名乗る。target_label は自分が送った側（sent）だけの情報
     const sub=att
-      ? (kind==='inbox'
-        ? `${esc(sender?sender.nickname:'—')}さん ・ 候補${(r.options||[]).length}件 ・ ${fmtRel(r.created_at)}`
-        : `${esc(r.target_label||'')} ・ ${isPublicAttend(r)?`${numAns}人が回答`:`${numAns}/${total}人が回答`} ・ ${fmtRel(r.created_at)}`)
-      : (kind==='inbox'
-        ? `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`
-        : `${esc(r.target_label||'')} ・ ${done}/${total}人が完了 ・ ${fmtRel(r.created_at)}`);
+      ? (kind==='sent'
+        ? `${esc(r.target_label||'')} ・ ${isPublicAttend(r)?`${numAns}人が回答`:`${numAns}/${total}人が回答`} ・ ${fmtRel(r.created_at)}`
+        : `${esc(sender?sender.nickname:'—')}さん ・ 候補${(r.options||[]).length}件 ・ ${fmtRel(r.created_at)}`)
+      : (kind==='sent'
+        ? `${esc(r.target_label||'')} ・ ${done}/${total}人が完了 ・ ${fmtRel(r.created_at)}`
+        : `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`);
     let badge='';
     if(att&&r.confirmed)badge='<span class="tag ok">確定</span>';
     else if(att&&kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
+    else if(att&&kind==='done')badge='<span class="tag ok">回答済み</span>';
     else if(!att&&kind==='inbox'&&!hasConfirmed(r,ME.id))badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>';
     else if(!att&&kind==='done')badge='<span class="tag ok">完了</span>';
     return `<div class="row" style="cursor:pointer" onclick="openRequestDetail('${r.id}')">
