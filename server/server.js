@@ -2538,6 +2538,12 @@ app.put('/api/requests/:id/response', requireAuth, async (req, res) => {
 app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => withAttendanceConfirmLock(async () => {
   const actor = req.authUser;
   const optionId = req.body?.option_id;
+  /* 「日程調整」は候補段階ですでに○△×を集めているので、確定後の予定で
+     もう一度取り直す必要が無い（votable:false）。一方「出欠確認」は候補が
+     最初から1件で、確定した瞬間が答える機会そのものなので、そこだけは
+     引き続き○△×を受け付ける（votable:true）。呼び出し側がどちらの操作かを
+     申告する */
+  const keepVotable = req.body?.keep_votable === true;
   try {
     const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
     const row = rs.rows[0];
@@ -2567,6 +2573,7 @@ app.post('/api/requests/:id/confirm', requireAuth, async (req, res) => withAtten
         location: '', branch_id: row.branch_id, visibility: 'branch',
         color: '#56b8ac', creator_id: actor.id, meet_url: '', zoom_url: '',
         created_at: new Date().toISOString(),
+        votable: keepVotable,
       };
       await withDBLock(async () => {
         const db = await readDBForWrite();

@@ -510,12 +510,18 @@ async function testAttendance() {
   check('送った本人は確定できる', done.status, 200);
   check('確定した日時で予定ができる', done.json.event?.start_datetime, mk(t2, 19));
   check('予定の名前は件名になる', done.json.event?.title, 'チーム懇親会');
+  /* 「日程調整」は候補段階ですでに○△×を集めているので、確定してできた
+     予定では、もう一度回答を取らない（votable:false）。keep_votable を
+     送らなかったときの既定値がこれにあたる */
+  check('日程調整で確定した予定は、もう出欠を取らない', done.json.event?.votable, false);
 
   const after = await getDB(TOKENS.staff);
   const row2 = (after.requests || []).find((r) => r.id === attId);
   check('確定した候補が記録される', row2?.confirmed, 'op1');
   check('できた予定が支部のカレンダーに入っている',
     (after.events || []).some((e) => e.id === done.json.event?.id), true);
+  check('カレンダーに入った予定も出欠を取らない',
+    (after.events || []).find((e) => e.id === done.json.event?.id)?.votable, false);
 
   const late = await api(TOKENS.staff3, 'PUT', `/api/requests/${attId}/response`,
     { answers: [{ option_id: 'op0', response: 'no' }] });
@@ -700,6 +706,59 @@ async function testAttendance() {
     appHtml.includes('class="btn sm" onclick="openSharedCalendarSite()"')
       && appHtml.includes("全社カレンダー${ic('chevron')}</button>")
       && !appHtml.includes('class="btn ghost sm" onclick="openSharedCalendarSite()"'), true);
+
+  /* 「日程調整」で確定した予定は、候補段階ですでに○△×を集めているので
+     もう一度取らない（votable:false のとき簡潔に表示）。「出欠確認」や
+     手作りの予定は今までどおり votable:true で回答を受け付ける */
+  check('votableがfalseの予定は投票欄を出さない',
+    appHtml.includes('const noVote=ev.votable===false;')
+      && appHtml.includes('${(isPrivate||noVote)?\'\':`')
+      && appHtml.includes('回答者を見る（${resp.length}）'), true);
+  check('確定後の集計はvotableがfalseなら候補段階の回答をそのまま使う',
+    appHtml.includes('if(ev&&ev.votable===false)return r.responses||[];'), true);
+  check('出欠確認は確定するとき出欠を取り続けるよう申告する',
+    appHtml.includes('option_id:request.options[0].id,keep_votable:true'), true);
+
+  /* 予定の作成・編集フォーム。日付は入力欄をやめ、開いた日に固定する。
+     説明は一番下、色は時間のすぐ下に移した。名前は空でも「タイトルなし」になる */
+  check('予定フォームに日付の入力欄が無い',
+    appHtml.includes('function openEventForm(id,dateKey)')
+      && !appHtml.includes('type="date" id="evDate"')
+      && appHtml.includes('type="hidden" id="evDate"'), true);
+  check('予定の名前は空なら「タイトルなし」になる',
+    appHtml.includes('placeholder="タイトルなし"')
+      && appHtml.includes("document.getElementById('evTitle').value.trim()||'タイトルなし'"), true);
+  check('色は時間のすぐ下、説明はいちばん下に移した',
+    (() => {
+      const f = appHtml.indexOf('function openEventForm(id,dateKey)');
+      const g = appHtml.indexOf('async function saveEvent(id)');
+      const seg = appHtml.slice(f, g);
+      const iTime = seg.indexOf('時間<span class="req">');
+      const iColor = seg.indexOf('カレンダーの色');
+      const iVis = seg.indexOf('この予定を見られる人');
+      const iDesc = seg.indexOf('説明</label>');
+      const iBtn = seg.indexOf('saveEvent(');
+      return iTime > 0 && iColor > iTime && iVis > iColor && iDesc > iVis && iBtn > iDesc;
+    })(), true);
+  check('編集画面から予定を削除できる',
+    appHtml.includes('canEdit=!ev||ME.role===\'admin\'||ev.creator_id===ME.id')
+      && appHtml.includes('この予定を削除</button>'), true);
+
+  /* 日付をタップして出た一覧。支部の予定だけは押すとその予定を開ける
+     （全社カレンダーと確定済みの面談は、今までどおり見るだけ） */
+  check('日付タップの一覧は支部の予定だけ押せる',
+    appHtml.includes('function openDayEventDetail(evId,dayKey)')
+      && appHtml.includes("openDayEventDetail('${e.id}','${key}')"), true);
+  check('全社カレンダーと面談の行は押せないまま',
+    (() => {
+      const iShared = appHtml.indexOf('...shared.map(e=>({t:sharedDate(e),html:row(');
+      const iIvs = appHtml.indexOf('...ivs.map(iv=>({t:new Date(iv.confirmed_datetime),html:row(');
+      const iList = appHtml.indexOf("...list.map(e=>({t:new Date(e.start_datetime),html:row(");
+      if (iShared < 0 || iIvs < 0 || iList < 0) return false;
+      const sharedSeg = appHtml.slice(iShared, iIvs);
+      const ivSeg = appHtml.slice(iIvs, iList);
+      return !sharedSeg.includes('openDayEventDetail') && !ivSeg.includes('openDayEventDetail');
+    })(), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
   check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
   /* 日付は入力欄をやめてカレンダーで選ぶ形にした */
@@ -917,13 +976,16 @@ async function testAttendance() {
   check('出欠確認（1件）を作れる', rsvpMade.status, 200);
   check('候補は1件だけ', rsvpMade.json.request?.options?.length, 1);
   const rsvpOptId = rsvpMade.json.request?.options?.[0]?.id;
+  /* submitRsvp() は候補が1件しか無く、確定した瞬間が答える機会そのものなので、
+     keep_votable:true を送って確定後も○△×を受け付け続けるようにする */
   const rsvpConfirm = await api(TOKENS.staff, 'POST', `/api/requests/${rsvpMade.json.request?.id}/confirm`,
-    { option_id: rsvpOptId });
+    { option_id: rsvpOptId, keep_votable: true });
   check('その場ですぐ確定できる', rsvpConfirm.status, 200);
   const rsvpEventId = rsvpConfirm.json.event?.id;
   check('確定するとカレンダー予定ができる', !!rsvpEventId, true);
   check('カレンダー予定の名前は依頼の件名を引き継ぐ', rsvpConfirm.json.event?.title, '7月度 支部定例ミーティング');
   check('時間は設定していない予定になる', rsvpConfirm.json.event?.has_time, false);
+  check('出欠確認は確定後も引き続き出欠を取る', rsvpConfirm.json.event?.votable, true);
 
   // 確定後の○△×は、依頼側ではなくカレンダー予定（イベント）の回答として集計される
   const rsvpVote = await api(TOKENS.staff3, 'PUT', `/api/events/${rsvpEventId}/response`, { response: 'ok' });

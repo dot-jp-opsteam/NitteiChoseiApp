@@ -2585,6 +2585,10 @@ function eventCard(ev,showEdit){
   const mine=resp.find(r=>r.user_id===ME.id);
   // 自分だけの予定は、出欠を取る相手がいないので回答欄を出さない
   const isPrivate=ev.visibility==='private';
+  /* 「日程調整」で確定した予定は、候補段階ですでに○△×を集めているので、
+     ここでもう一度回答欄を出す必要が無い。votable が false のときは
+     日時・説明だけの簡潔な表示にする（回答者一覧も、答えを集めていないので出さない） */
+  const noVote=ev.votable===false;
   /* id を振っておく。出欠を押したときに、この1枚だけを描き直すため
      （画面ごと作り直すと登場アニメがもう一度再生されて一瞬暗く沈む） */
   return `<div class="card" id="evc_${ev.id}"><div class="cb">
@@ -2600,7 +2604,7 @@ function eventCard(ev,showEdit){
       ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
       ${(ev.meet_url||ev.zoom_url)?`<div class="meta" style="margin-top:6px">${ev.meet_url?`<span>${ic('link')}<a href="${esc(ev.meet_url)}" target="_blank" rel="noopener">Meet</a></span>`:''}${ev.zoom_url?`<span>${ic('link')}<a href="${esc(ev.zoom_url)}" target="_blank" rel="noopener">Zoom</a></span>`:''}</div>`:''}
 
-      ${isPrivate?'':`
+      ${(isPrivate||noVote)?'':`
       <div class="votebar">
         <i class="vb-ok" style="width:${c.ok/total*100}%"></i>
         <i class="vb-may" style="width:${c.may/total*100}%"></i>
@@ -2615,9 +2619,9 @@ function eventCard(ev,showEdit){
         <div class="v ${mine?.response==='may'?'on-may':''}" onclick="vote('${ev.id}','may')"><span class="em">△</span>未定</div>
         <div class="v ${mine?.response==='no'?'on-no':''}" onclick="vote('${ev.id}','no')"><span class="em">×</span>不参加</div>
       </div>`}
-      ${(ME.role==='admin'||ev.creator_id===ME.id||(!isPrivate&&ME.role!=='intern'))?`
+      ${(ME.role==='admin'||ev.creator_id===ME.id||(!isPrivate&&!noVote&&ME.role!=='intern'))?`
         <div class="btn-row" style="margin-top:10px">
-          ${isPrivate?'':`<button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>`}
+          ${(isPrivate||noVote)?'':`<button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>`}
           ${(showEdit&&(ME.role==='admin'||ev.creator_id===ME.id))?`<button class="btn sm" onclick="openEventForm('${ev.id}')">編集</button>
           <button class="btn sm bad" onclick="deleteEvent('${ev.id}')">削除</button>`:''}
         </div>`:''}
@@ -2767,11 +2771,13 @@ function openDaySheet(key){
   const shared=[...sharedItemsFor(Y,M-1),...myCalItemsFor(Y,M-1)]
     .filter(e=>ymd(sharedDate(e))===key);
 
-  /* ここは中身を確かめるための場所なので、押しても何も起きない見るだけの一覧にする。
-     出欠の回答や編集は、これまでどおりカレンダーの下の一覧から行う */
-  const row=(color,title,sub)=>`<div class="dayrow">
+  /* 全社カレンダー（Googleの取り込み）と確定済みの面談は、この画面からは
+     編集できない。押しても何も起きない、確かめるだけの行のまま。
+     支部の予定（list）だけは押すとその予定を開き、編集・削除できるようにする */
+  const row=(color,title,sub,onclick)=>`<div class="dayrow${onclick?' click':''}"${onclick?` onclick="${onclick}"`:''}>
       <span class="dbar" style="background:${color}"></span>
-      <span class="dtx"><b>${esc(title)}</b><small>${esc(sub)}</small></span>
+      <span class="dtx"><b>${esc(title||'タイトルなし')}</b><small>${esc(sub)}</small></span>
+      ${onclick?`<span class="tile-arrow">${ic('chevron')}</span>`:''}
     </div>`;
   const items=[
     ...shared.map(e=>({t:sharedDate(e),html:row(e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR,e.title,
@@ -2779,7 +2785,8 @@ function openDaySheet(key){
     ...ivs.map(iv=>({t:new Date(iv.confirmed_datetime),html:row('var(--iv)',ivLabel(iv),
       `${hm(iv.confirmed_datetime)} ・ 確定した面談`)})),
     ...list.map(e=>({t:new Date(e.start_datetime),html:row(e.color||EVENT_COLORS[0].v,e.title,
-      `${eventClock(e)}${e.location?(eventClock(e)?' ・ ':'')+e.location:''}`)})),
+      `${eventClock(e)}${e.location?(eventClock(e)?' ・ ':'')+e.location:''}`,
+      `openDayEventDetail('${e.id}','${key}')`)})),
   ].sort((a,b)=>a.t-b.t);
 
   const body=items.length?`<div class="daylist">${items.map(i=>i.html).join('')}</div>`
@@ -2788,6 +2795,15 @@ function openDaySheet(key){
     <p class="page-sub" style="margin:4px 0 12px">${items.length?`${items.length}件の予定`:'予定なし'}</p>
     ${body}
     <button class="btn pri block" style="margin-top:16px" onclick="closeSheet();openEventForm(null,'${key}')">＋ この日に予定を追加</button>`);
+}
+/* 日付を押して出た一覧から、支部の予定を1件開く。
+   自分が作った予定か管理者なら、カード内の「編集」「削除」からそのまま操作できる。
+   他の人の予定を見るときは、カードは出るが編集・削除のボタンは出ない（eventCard側の権限判定） */
+function openDayEventDetail(evId,dayKey){
+  const ev=(DB.events||[]).find(e=>e.id===evId);
+  if(!ev)return;
+  openSheet(`<button type="button" class="atback" onclick="openDaySheet('${dayKey}')">${ic('back')}${esc(reqDateLabel(dayKey))}へ戻る</button>
+    ${eventCard(ev,true)}`);
 }
 function eventsSection(){
   if(!calYM){const t=new Date();calYM={y:t.getFullYear(),m:t.getMonth()};}
@@ -3033,23 +3049,29 @@ function openEventForm(id,dateKey){
   const dateVal=st?ymd(st):(dateKey||ymd(new Date()));
   const t1=st?`${pad(st.getHours())}:${pad(st.getMinutes())}`:'09:00';
   const t2=en&&en>st?`${pad(en.getHours())}:${pad(en.getMinutes())}`:'10:00';
+  /* 日付は入力欄をやめた。新規はどの日から「＋この日に予定を追加」を押したかで、
+     編集はもとの予定の日付で、どちらもすでに決まっている。
+     変えたいときは削除して、その日から作り直してもらう */
+  const dLabel=reqDateLabel(dateVal);
+  const canEdit=!ev||ME.role==='admin'||ev.creator_id===ME.id;
   openSheet(`<h3>${ev?'予定を編集':'予定を作成'}</h3>
-    <label class="fl">予定の名前<span class="req">*</span></label>
-    <input id="evTitle" value="${esc(ev?.title||'')}"><div class="field-err" id="evTitleE"></div>
-    <label class="fl">説明</label>
-    <textarea id="evDesc">${esc(ev?.description||'')}</textarea>
-    <label class="fl">日付<span class="req">*</span></label>
-    <input type="date" id="evDate" value="${dateVal}"><div class="field-err" id="evStartE"></div>
-    ${dateOnly?`<div class="hint" style="margin-top:12px">${ic('calendar')}<span>この予定には時間を設定していません。</span></div>
+    <p class="page-sub" style="margin-top:0">${esc(dLabel)}の予定</p>
+    <label class="fl">予定の名前</label>
+    <input id="evTitle" placeholder="タイトルなし" value="${esc(ev?.title||'')}">
+    <input type="hidden" id="evDate" value="${dateVal}">
+    ${dateOnly?`<div class="hint" style="margin-top:16px">${ic('calendar')}<span>この予定には時間を設定していません。</span></div>
       <input type="hidden" id="evT1" value="${t1}"><input type="hidden" id="evT2" value="${t2}">`:`
-      <label class="fl">時間<span class="req">*</span></label>
+      <label class="fl" style="margin-top:16px">時間<span class="req">*</span></label>
       <div class="timerange">
         <select id="evT1" onchange="syncEvEnd()">${timeOpts(t1)}</select>
         <span class="tr-sep">〜</span>
         <select id="evT2">${timeOpts(t2)}</select>
       </div>`}
     <div class="field-err" id="evTimeE"></div>
-    <label class="fl">この予定を見られる人</label>
+    <label class="fl" style="margin-top:16px">カレンダーの色</label>
+    <div class="colorpick" id="evColorPick">${EVENT_COLORS.map(c=>`<span class="cdot${c.v===(ev?.color||EVENT_COLORS[0].v)?' on':''}" style="background:${c.v}" data-c="${c.v}" title="${c.n}" onclick="pickEvColor('${c.v}')"></span>`).join('')}</div>
+    <input type="hidden" id="evColor" value="${esc(ev?.color||EVENT_COLORS[0].v)}">
+    <label class="fl" style="margin-top:16px">この予定を見られる人</label>
     ${canShare?`<select id="evVis" onchange="toggleEvBranch()">
       <option value="private" ${vis==='private'?'selected':''}>自分だけ</option>
       <option value="branch" ${vis==='branch'?'selected':''}>支部の全員（出欠を取る）</option>
@@ -3058,10 +3080,10 @@ function openEventForm(id,dateKey){
     <div id="evBranchWrap" style="display:${canShare&&vis==='branch'?'':'none'}">
     <label class="fl">対象支部</label>
     <select id="evBranch">${bopts}</select></div>
-    <label class="fl">カレンダーの色</label>
-    <div class="colorpick" id="evColorPick">${EVENT_COLORS.map(c=>`<span class="cdot${c.v===(ev?.color||EVENT_COLORS[0].v)?' on':''}" style="background:${c.v}" data-c="${c.v}" title="${c.n}" onclick="pickEvColor('${c.v}')"></span>`).join('')}</div>
-    <input type="hidden" id="evColor" value="${esc(ev?.color||EVENT_COLORS[0].v)}">
-    <button class="btn pri block" style="margin-top:18px" onclick="saveEvent(${ev?`'${ev.id}'`:'null'})">${ev?'更新する':'作成する'}</button>`);
+    <label class="fl" style="margin-top:16px">説明</label>
+    <textarea id="evDesc">${esc(ev?.description||'')}</textarea>
+    <button class="btn pri block" style="margin-top:18px" onclick="saveEvent(${ev?`'${ev.id}'`:'null'})">${ev?'更新する':'作成する'}</button>
+    ${(ev&&canEdit)?`<button class="btn bad block" style="margin-top:10px" onclick="deleteEvent('${ev.id}')">この予定を削除</button>`:''}`);
 }
 /* 30分刻みの時刻の一覧。いまの値が刻みに合わないとき
    （前の作りで作った予定など）は、その値も選べるように混ぜてから並べ直す */
@@ -3091,17 +3113,13 @@ function toggleEvBranch(){
   if(wrap)wrap.style.display=document.getElementById('evVis').value==='branch'?'':'none';
 }
 async function saveEvent(id){
-  const title=document.getElementById('evTitle').value.trim();
+  // 名前は必須にしない。空のままなら「タイトルなし」として保存する
+  const title=document.getElementById('evTitle').value.trim()||'タイトルなし';
   const date=document.getElementById('evDate').value;
   const t1=document.getElementById('evT1').value,t2=document.getElementById('evT2').value;
-  let valid=true;
-  const te=document.getElementById('evTitleE'),se=document.getElementById('evStartE');
   const tme=document.getElementById('evTimeE');
-  te.classList.remove('show');se.classList.remove('show');tme.classList.remove('show');
-  if(!title){te.textContent='イベント名は必須です';te.classList.add('show');valid=false;}
-  if(!date){se.textContent='日付は必須です';se.classList.add('show');valid=false;}
-  if(t2<=t1){tme.textContent='終わりの時刻は、始まりより後にしてください';tme.classList.add('show');valid=false;}
-  if(!valid)return;
+  tme.classList.remove('show');
+  if(t2<=t1){tme.textContent='終わりの時刻は、始まりより後にしてください';tme.classList.add('show');return;}
   const visibility=document.getElementById('evVis').value==='branch'?'branch':'private';
   /* 場所とMeet・Zoomのリンクは入力欄をなくしたが、前に入れた内容は消さずに持ち越す。
      編集のたびに黙って空になると、書いてあった集合場所などが失われてしまうため */
@@ -4297,6 +4315,11 @@ function isPublicAttend(r){return isAttend(r)&&!!r.public_url;}
    ここで吸収して、呼び出し側はどちらの状態でも同じ形で読める */
 function attendResponses(r){
   if(r.confirmed&&r.event_id){
+    const ev=(DB.events||[]).find(e=>e.id===r.event_id);
+    /* 「日程調整」で確定した予定はもう一度回答を取らない（votable:false）ので、
+       候補段階で集めた回答（r.responses）がそのまま最終的な回答になる。
+       「出欠確認」（votable:true）だけが、確定後もカレンダー側の回答を見る */
+    if(ev&&ev.votable===false)return r.responses||[];
     return (DB.event_responses||[]).filter(x=>x.event_id===r.event_id)
       .map(x=>({user_id:x.user_id,response:x.response,option_id:r.confirmed}));
   }
@@ -4751,7 +4774,7 @@ async function submitRsvp(){
     const {request,notification}=await res.json();
     // 候補は1件しか無いので、選ぶ手順を挟まずその場で確定させる
     const confirmRes=await api(`/api/requests/${encodeURIComponent(request.id)}/confirm`,
-      {method:'POST',body:JSON.stringify({option_id:request.options[0].id})});
+      {method:'POST',body:JSON.stringify({option_id:request.options[0].id,keep_votable:true})});
     if(!confirmRes.ok){
       const d=await confirmRes.json().catch(()=>({}));
       err.textContent=d.error||'確定できませんでした';err.classList.add('show');

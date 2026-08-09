@@ -1356,6 +1356,9 @@
   .daylist{display:flex;flex-direction:column;gap:8px}
   .dayrow{display:flex;align-items:center;gap:10px;padding:10px 12px;
     border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+  /* 支部の予定だけは押して編集・削除に進める。全社カレンダーと面談は見るだけなので付けない */
+  .dayrow.click{cursor:pointer}
+  .dayrow.click:hover{border-color:var(--line-h);background:var(--panel2)}
   /* 左端の色帯。カレンダーの帯と同じ色にして、どの予定か見分けられるようにする */
   .dayrow .dbar{width:4px;align-self:stretch;min-height:30px;border-radius:2px;flex:none}
   .dayrow .dtx{display:flex;flex-direction:column;gap:2px;min-width:0}
