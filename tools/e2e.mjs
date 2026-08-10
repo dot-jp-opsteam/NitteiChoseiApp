@@ -706,7 +706,7 @@ async function testAttendance() {
       && appHtml.includes('eventCard(ev,false)'), true);
   check('依頼から開いたイベントカードは編集・削除を出さない',
     appHtml.includes('function eventCard(ev,showEdit)')
-      && appHtml.includes('showEdit&&(ME.role===\'admin\'||ev.creator_id===ME.id)'), true);
+      && appHtml.includes('showEdit&&ev.creator_id===ME.id'), true);
   check('出欠の回答場所は確定前後で自動的に切り替わる',
     appHtml.includes('function attendResponses(r)')
       && appHtml.includes('if(r.confirmed&&r.event_id){'), true);
@@ -732,7 +732,7 @@ async function testAttendance() {
      手作りの予定は今までどおり votable:true で回答を受け付ける */
   check('votableがfalseの予定は投票欄を出さない',
     appHtml.includes('const noVote=ev.votable===false;')
-      && appHtml.includes('${(isPrivate||noVote)?\'\':`')
+      && appHtml.includes('${(!isPrivate&&!noVote)?`')
       && appHtml.includes('回答者を見る（${resp.length}）'), true);
   check('確定後の集計はvotableがfalseなら候補段階の回答をそのまま使う',
     appHtml.includes('if(ev&&ev.votable===false)return r.responses||[];'), true);
@@ -760,8 +760,8 @@ async function testAttendance() {
       const iBtn = seg.indexOf('saveEvent(');
       return iTime > 0 && iColor > iTime && iVis > iColor && iDesc > iVis && iBtn > iDesc;
     })(), true);
-  check('編集画面から予定を削除できる',
-    appHtml.includes('canEdit=!ev||ME.role===\'admin\'||ev.creator_id===ME.id')
+  check('編集画面から予定を削除できる（作成者のみ）',
+    appHtml.includes('canEdit=!ev||ev.creator_id===ME.id')
       && appHtml.includes('この予定を削除</button>'), true);
 
   /* 日付をタップして出た一覧。支部の予定だけは押すとその予定を開ける
@@ -1758,8 +1758,14 @@ async function run() {
       /* 既定はライト。ダークだと六角形タイルの色分けが定義されておらず、
          4つとも同じグレーになって情報が減るため */
       check('既定のテーマはライト',
-        appHtml.includes("el.setAttribute('data-theme',t==='dark'?'dark':'light')")
-        && appHtml.includes("catch(e){el.setAttribute('data-theme','light');}"), true);
+        appHtml.includes("theme=t==='dark'?'dark':'light'")
+        && appHtml.includes('el.setAttribute(\'data-theme\',theme)'), true);
+      // OS側がダーク設定でも、style.css が届くまでの一瞬だけ黒く塗られて反転して見えるのを防ぐ
+      check('起動直後の一瞬もアプリの配色に合わせる（黒フラッシュ対策）',
+        appHtml.includes('el.style.colorScheme=theme')
+        && appHtml.includes('document.documentElement.style.colorScheme=t')
+        && applySrc.includes('<meta name="color-scheme" content="light">')
+        && attendSrc.includes('<meta name="color-scheme" content="light">'), true);
       check('アドレスバーの色はライトの地色に合わせてある',
         appHtml.includes('<meta name="theme-color" content="#dbe9e7">')
         && appHtml.includes("t==='light'?'#dbe9e7':'#000000'"), true);
@@ -2131,7 +2137,9 @@ async function run() {
       { name: '負荷' + i, staff_id: 'u_e2e_staff4', choices: [openSlots[i].iso] })));
     const applyMs = Date.now() - t1;
     check(`${N}人が同時に面談を申請して全員成功する`, applyCodes.filter((s) => s === 200).length, N);
-    const staffView = await getDB(TOKENS.staff);
+    /* 面談一覧は担当スタッフ本人にしか出さない仕様（2026-08-10）なので、
+       申請先である staff4 自身のトークンで確認する */
+    const staffView = await getDB(TOKENS.staff4);
     const applied = (staffView.interviews || []).filter((iv) => String(iv.intern_name || '').startsWith('負荷'));
     check(`申請が${N}件すべて記録されている`, applied.length, N);
     console.log(`       （${N}件の同時申請にかかった時間: ${applyMs}ms）`);

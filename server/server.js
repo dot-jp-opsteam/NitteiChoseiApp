@@ -599,6 +599,24 @@ async function archiveOldRecords() {
   return total;
 }
 
+/* 不成立の面談は、一覧に残り続けると邪魔になる。1週間たったものは自動で消す。
+   不成立の面談はGoogleカレンダーへ予定を作っていないので、消してもカレンダー側に影響はない */
+const FAILED_INTERVIEW_KEEP_DAYS = 7;
+
+async function deleteOldFailedInterviews() {
+  const cutoff = new Date(Date.now() - FAILED_INTERVIEW_KEEP_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const del = await client.execute({
+      sql: `DELETE FROM interviews WHERE status = 'failed' AND updated_at < ?`,
+      args: [cutoff],
+    });
+    const removed = Number(del.rowsAffected || 0);
+    if (removed) console.log(`不成立から${FAILED_INTERVIEW_KEEP_DAYS}日たった面談を${removed}件削除しました`);
+  } catch (e) {
+    console.error('不成立の面談の自動削除に失敗しました', e);
+  }
+}
+
 /* 面談。テーブルの列とJSON部分を、画面が期待する1つの形に戻す */
 function rowToInterview(r) {
   let data = {};
@@ -609,7 +627,8 @@ function rowToInterview(r) {
     branch_id: r.branch_id, status: r.status, created_at: r.created_at,
   };
 }
-/* インターン生は自分の面談だけ。スタッフは自分が担当するものと自支部のインターン生の分 */
+/* インターン生は自分の面談だけ。スタッフ・支部管理者も自分が担当するものだけ
+   （同じ支部でも他のスタッフの面談は見せない。2026-08-10 変更）*/
 async function listInterviewsFor(user, users) {
   if (user.role === 'admin') {
     const rs = await client.execute('SELECT * FROM interviews');
@@ -619,17 +638,8 @@ async function listInterviewsFor(user, users) {
     const rs = await client.execute({ sql: 'SELECT * FROM interviews WHERE intern_id = ?', args: [user.id] });
     return rs.rows.map(rowToInterview);
   }
-  const rs = await client.execute({
-    sql: 'SELECT * FROM interviews WHERE staff_id = ? OR branch_id = ?',
-    args: [user.id, user.branch_id || null],
-  });
-  // branch_id が入っていない古い行のために、インターン生の所属でも確かめる
-  const inBranch = new Set((users || []).filter((u) => u.branch_id === user.branch_id).map((u) => u.id));
-  /* アカウントを持たないインターン生の申請は intern_id が空なので、
-     所属では判定できない。支部が一致していれば同じ支部のスタッフに見せる */
-  return rs.rows.map(rowToInterview).filter((iv) => iv.staff_id === user.id
-    || (iv.branch_id && iv.branch_id === user.branch_id)
-    || inBranch.has(iv.intern_id));
+  const rs = await client.execute({ sql: 'SELECT * FROM interviews WHERE staff_id = ?', args: [user.id] });
+  return rs.rows.map(rowToInterview);
 }
 async function getInterview(id) {
   const rs = await client.execute({ sql: 'SELECT * FROM interviews WHERE id = ?', args: [id] });
@@ -1163,14 +1173,6 @@ async function syncInterviewToGoogle(old, iv, users) {
   return iv;
 }
 
-/* 面談ごと消したときの後始末 */
-async function removeInterviewFromGoogle(iv) {
-  if (!GOOGLE_ENABLED || !iv || iv.status !== 'fixed') return;
-  for (const t of IV_GOOGLE_SYNC_TARGETS) {
-    await deleteGoogleEventFor(iv[t.userIdField], iv[t.eventIdField]);
-  }
-}
-
 /* =========================================================
    データの見える範囲・変えてよい範囲（ロール別）
 
@@ -1328,14 +1330,14 @@ function validateDiff(oldDB, newDB, actor) {
       else if (!isAdmin && !isPrivate && ev.branch_id !== actor.branch_id) errs.push('他の支部のイベントは作成できません');
       else if (ev.creator_id !== actor.id) errs.push('作成者が不正です');
     } else if (!sameJSON(prev, ev)) {
-      if (!isAdmin && prev.creator_id !== actor.id) errs.push('このイベントを編集する権限がありません');
+      if (prev.creator_id !== actor.id) errs.push('このイベントを編集する権限がありません');
       else if (actor.role === 'intern' && !isPrivate) errs.push('インターン生が作れるのは「自分だけ」の予定だけです');
     }
   }
   const removedEventIds = new Set([...oldEv.keys()].filter((id) => !newEv.has(id)));
   for (const id of removedEventIds) {
     const prev = oldEv.get(id);
-    if (!isAdmin && prev.creator_id !== actor.id) errs.push('このイベントを削除する権限がありません');
+    if (prev.creator_id !== actor.id) errs.push('このイベントを削除する権限がありません');
   }
 
   // ---- 空き日程：自分の分だけ ----
@@ -1528,7 +1530,7 @@ app.get('/api/bootstrap', async (req, res) => {
     const db = obj ? scopeDBForUser(obj, user, users) : {};
     db.users = scopeUsers(users, user);
     // 専用テーブルへ移した分（依頼・出欠・通知）もここで合わせて返す
-    Object.assign(db, await readTableBacked(user, users));
+    Object.assign(db, await readTableBacked(user));
     res.json({ config, user: toPublicUser(user), db });
   } catch (e) {
     console.error('起動情報の取得に失敗しました', e);
@@ -2009,11 +2011,11 @@ app.get('/api/db', requireAuth, async (req, res) => {
   try {
     const obj = await readDB();
     const users = await listActiveUsers();
-    if (!obj) return res.json({ users: scopeUsers(users, req.authUser), ...await readTableBacked(req.authUser, users) });
+    if (!obj) return res.json({ users: scopeUsers(users, req.authUser), ...await readTableBacked(req.authUser) });
     const scoped = scopeDBForUser(obj, req.authUser, users);
     scoped.users = scopeUsers(users, req.authUser);
     // 専用テーブルへ移した分を合成する。画面から見える形は今までと同じ
-    Object.assign(scoped, await readTableBacked(req.authUser, users));
+    Object.assign(scoped, await readTableBacked(req.authUser));
     res.json(scoped);
   } catch (e) {
     console.error(e);
@@ -2022,10 +2024,10 @@ app.get('/api/db', requireAuth, async (req, res) => {
 });
 
 /* 専用テーブルへ移した項目を、フロントが期待するキー名で返す */
-async function readTableBacked(user, users) {
+async function readTableBacked(user) {
   const [requests, event_responses, notifications, emails, interviews] = await Promise.all([
     listRequestsFor(user), listEventResponses(), listNotificationsFor(user),
-    listEmailsFor(user), listInterviewsFor(user, users),
+    listEmailsFor(user), listInterviewsFor(user),
   ]);
   return { requests, event_responses, notifications, emails, interviews };
 }
@@ -2720,8 +2722,8 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
   try {
     const old = await getInterview(req.params.id);
     if (!old) return res.status(404).json({ error: '面談が見つかりません' });
-    if (actor.role !== 'admin' && old.staff_id !== actor.id && old.branch_id !== actor.branch_id) {
-      return res.status(403).json({ error: '他の支部の面談は変更できません' });
+    if (actor.role !== 'admin' && old.staff_id !== actor.id) {
+      return res.status(403).json({ error: '自分が担当する面談だけ変更できます' });
     }
     const next = {
       ...old, status,
@@ -2749,22 +2751,26 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
   }
 });
 
-/* 申請を取り下げる。本人が申請中のものだけ */
+/* 申請を取り下げる（本人が申請中のものだけ）、または
+   担当スタッフが確定済み・不成立の面談を一覧から片付ける。
+   どちらも、すでにGoogleカレンダーへ入れた予定は消さない（一覧の整理と、
+   本人の予定を残すことは別の話のため） */
 app.delete('/api/interviews/:id', requireAuth, async (req, res) => {
   const actor = req.authUser;
   try {
     const iv = await getInterview(req.params.id);
     if (!iv) return res.status(404).json({ error: '面談が見つかりません' });
     const isOwnApplied = iv.intern_id === actor.id && iv.status === 'applied';
-    if (actor.role !== 'admin' && !isOwnApplied) {
-      return res.status(403).json({ error: 'この面談を取り下げる権限がありません' });
+    const isOwnDone = ['staff', 'branch_admin'].includes(actor.role)
+      && iv.staff_id === actor.id && ['fixed', 'failed'].includes(iv.status);
+    if (actor.role !== 'admin' && !isOwnApplied && !isOwnDone) {
+      return res.status(403).json({ error: 'この面談を削除する権限がありません' });
     }
-    await removeInterviewFromGoogle(iv);
     await client.execute({ sql: 'DELETE FROM interviews WHERE id = ?', args: [iv.id] });
     res.json({ ok: true });
   } catch (e) {
-    console.error('面談の取り下げに失敗しました', e);
-    res.status(500).json({ error: '取り下げできませんでした' });
+    console.error('面談の削除に失敗しました', e);
+    res.status(500).json({ error: '削除できませんでした' });
   }
 });
 
@@ -3400,6 +3406,8 @@ initDB()
       // 古い履歴の片付け。起動時に一度と、その後は1日おき
       archiveOldRecords();
       setInterval(archiveOldRecords, 24 * 60 * 60 * 1000);
+      deleteOldFailedInterviews();
+      setInterval(deleteOldFailedInterviews, 24 * 60 * 60 * 1000);
     });
   })
   .catch((e) => {

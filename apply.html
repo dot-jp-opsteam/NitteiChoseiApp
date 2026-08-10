@@ -11,6 +11,9 @@
 <link rel="apple-touch-icon" href="/icon-120.png">
 <!-- テーマはライト固定。アプリ本体と違い、切り替えの設定を持たない画面なので
      localStorage は読まず、data-theme を最初から light にしてある -->
+<!-- OS側がダーク設定の端末だと、style.cssが届くまでの一瞬だけ
+     背景が黒く塗られてから切り替わって見える。それを防ぐ -->
+<meta name="color-scheme" content="light">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"

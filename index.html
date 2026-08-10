@@ -22,10 +22,18 @@
 <script>
 (function(){
   var el=document.documentElement;
+  var theme='light';
   try{
     var t=localStorage.getItem('ops_theme_v1');
-    el.setAttribute('data-theme',t==='dark'?'dark':'light');
-  }catch(e){el.setAttribute('data-theme','light');}
+    theme=t==='dark'?'dark':'light';
+  }catch(e){}
+  el.setAttribute('data-theme',theme);
+  /* style.css が届くまでの一瞬は、この行が無いとOS側の配色（特にOS側がダーク設定の
+     端末）で背景が塗られ、そこから本来の配色へ切り替わる瞬間に黒い画面が
+     一度チラつく（起動のたびに2回ほど反転して見える、という報告の原因）。
+     アプリの配色決定に使う data-theme と同じ値をここでも即座に反映させ、
+     OS設定に関わらず最初から正しい配色で塗らせる */
+  el.style.colorScheme=theme;
   /* 左メニューの開閉。保存された指定が無ければ、スマホは細い帯・PCは広げた状態にする。
      ここで確定させないと、一瞬だけ違う幅で描かれて中身が横にずれる */
   try{
@@ -268,6 +276,8 @@ const ICON={
     +'<path pathLength="1" d="M5.5 15H4.7A1.2 1.2 0 0 1 3.5 13.8V4.7A1.2 1.2 0 0 1 4.7 3.5h9.1A1.2 1.2 0 0 1 15 4.7v.8"/>',
   /* 名前を間違えたときの逃げ道。ここが出ていたら ICON の綴りが合っていない */
   dot:'<circle pathLength="1" cx="12" cy="12" r="2.2"/>',
+  trash:'<path pathLength="1" d="M4 7h16"/><path pathLength="1" d="M9 7V4.8A1.2 1.2 0 0 1 10.2 3.6h3.6A1.2 1.2 0 0 1 15 4.8V7"/>'
+      +'<path pathLength="1" d="M6.5 7 7.3 19.4A2 2 0 0 0 9.3 21.2h5.4a2 2 0 0 0 2-1.8L17.5 7"/>',
 };
 /* 大きさは指定しない。CSS側で 1em にしてあるので、置いた場所の文字サイズに合わせて伸び縮みする */
 function ic(name,cls){
@@ -431,6 +441,7 @@ async function apiCall(path,opts,key){
 }
 const apiCreate=(path,body,key)=>apiCall(path,{method:'POST',body:JSON.stringify(body)},key);
 const apiPatch=(path,body,key)=>apiCall(path,{method:'PATCH',body:JSON.stringify(body)},key);
+const apiDelete=(path,key)=>apiCall(path,{method:'DELETE'},key);
 
 async function mutate(fn){
   NOTI_QUEUE=[];              // やり直しのたびに積み直すので、始める前に空にする
@@ -1473,6 +1484,7 @@ const THEME_KEY='ops_theme_v1';
 const currentTheme=()=>document.documentElement.getAttribute('data-theme')==='light'?'light':'dark';
 function setTheme(t){
   document.documentElement.setAttribute('data-theme',t);
+  document.documentElement.style.colorScheme=t;
   try{localStorage.setItem(THEME_KEY,t);}catch(e){}
   const m=document.querySelector('meta[name="theme-color"]');
   // style.css の --bg と同じ値。ずれるとアドレスバーだけ色が浮く
@@ -1588,7 +1600,8 @@ function setCalFull(on){
   render();
   window.scrollTo(0,0);
 }
-let IVFILTER={status:'all',branch:'all',q:''}; // 面談一覧フィルタ
+// 面談一覧フィルタ。開いたとき最初に目に入るのは「対応が要るもの」であってほしいので、既定は申請中
+let IVFILTER={status:'applied',branch:'all',q:''};
 /* 面談一覧の並び。'new'＝申請が新しい順（これまでの動き）／'wish'＝第1希望が近い順。
    予定を組むときは「近いものから埋める」ほうが自然なので切り替えられるようにした */
 let IVSORT='new';
@@ -1790,9 +1803,10 @@ function flushPendingRefresh(){
    act には onclick にそのまま入るJSを渡す（go('my') でも openXxx() でもよい）。
    icon は ICON の名前（引数名を ic にすると同名の関数を隠してしまうので避けている）。
    badge は右上に出す件数（0や未指定なら出さない） */
-function hex(act,icon,t,d,badge){
+function hex(act,icon,t,d,badge,dot){
   return `<button class="hex" onclick="${act}">
     ${badge?`<span class="hxb">${badge}</span>`:''}
+    ${dot?`<span class="hxdot" title="日程が未確定の依頼があります"></span>`:''}
     <span class="hxi">${ic(icon)}</span>
     <span class="hxt">${t}</span>
     <span class="hxd">${d}</span></button>`;
@@ -1845,12 +1859,14 @@ function viewHome(){
     const items=[];
     if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
     const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
+    const sentUnconfirmed=sentUnconfirmedAttendCount();
     /* 所属部署はプロフィールの「ほかの設定」、カレンダー連携は左メニューへ移した。
-       「この日は受けられない時間」は、その中から開く（前提関係にあるため） */
+       「受けられる時間」の入口は「この日は受けられない時間」を初期表示にしている。
+       曜日ごとの受付時間（面談を受けられる時間）は、その画面の中から開く */
     items.push(
       hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
-      hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread),
-      hex('openAvailabilitySettings()','alarm','受けられる時間','曜日ごとの受付時間'),
+      hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread,sentUnconfirmed>0),
+      hex("go('avset')",'alarm','受けられる時間','曜日ごとの受付時間'),
       hex('openMailHistory()','mail','メール履歴','送信・受信の記録'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
@@ -2238,8 +2254,6 @@ function ivInternBranch(iv){const u=ivIntern(iv);return u?u.branch_id:iv.branch_
 /* アカウントを持たない申請か。
    メール送信など、相手のアカウントが要る操作を出し分けるのに使う */
 function ivIsGuest(iv){return !ivIntern(iv);}
-/* この面談が自分の支部のものか。ゲスト申請は支部が直接入っている */
-function ivInMyBranch(iv){return ivInternBranch(iv)===ME.branch_id;}
 
 /* 第1希望のまとまり。無いこともある（枠を1つも選ばずに送られた古い申請） */
 function ivTopGroup(iv){return ivGroups(iv)[0]||null;}
@@ -2259,17 +2273,41 @@ function ivRowSub(iv){
   if(!g)return `申請 ${fmtRel(iv.created_at)}`;
   return `第1希望 ${fmtGroupRange(g)} ・ 申請 ${fmtRel(iv.created_at)}`;
 }
+// 確定済みのうち、確定日時をもう過ぎているもの＝実施済み
+function ivDone(iv){return iv.status==='fixed'&&!!iv.confirmed_datetime&&new Date(iv.confirmed_datetime)<new Date();}
+/* 一覧の見出しゾーン。申請中→確定・未実施→実施済み→不成立の順に並べる。
+   確定済みを2つに分けたのは、面談を控えている学生と終わった学生が
+   同じ塊に混ざると「あと誰と話せばいいか」が一覧からひと目で分からないため */
+const IV_ZONES=[
+  {key:'applied',label:'申請中',match:iv=>iv.status==='applied',del:false},
+  {key:'fixed',label:'面談予定（確定・未実施）',match:iv=>iv.status==='fixed'&&!ivDone(iv),del:true},
+  {key:'done',label:'実施済み',match:iv=>ivDone(iv),del:true},
+  {key:'failed',label:'不成立',match:iv=>iv.status==='failed',del:true},
+];
 function setIvSort(v){IVSORT=v;render();}
+function ivRow(iv,zone){
+  const s=STATUS[iv.status];const intern=ivIntern(iv);const nm=ivInternName(iv);
+  const label=zone.key==='done'?'実施済み':s.t;
+  return `<div class="row" onclick="openInterview('${iv.id}')">
+      <span class="av ${accOf(intern?.id||iv.id)}">${esc(initials(nm))}</span>
+      <span class="rmain">
+        <span class="rt">${esc(nm)} <span class="tag">${branchName(ivInternBranch(iv))}</span></span>
+        <span class="rs">${esc(ivRowSub(iv))}</span>
+      </span>
+      <span class="pill ${s.c}">${label}</span>
+      ${zone.del?`<button class="btn sm iconly" onclick="event.stopPropagation();deleteInterviewRow('${iv.id}')" aria-label="一覧から削除" title="一覧から削除">${ic('trash')}</button>`:''}
+    </div>`;
+}
 function viewStaffInterviews(){
-  // staff sees interviews of own branch (assigned to them or their branch)
   /* 状態（申請中→確定済み→不成立）を最優先にするのは、並べ替えを変えても同じ。
      「まだ手を付けていないもの」が下に沈むと、並べ替えた意味が無くなるため。
      その中の順番だけを IVSORT で切り替える */
   const inner=IVSORT==='wish'
     ? (a,b)=>ivWishTime(a)-ivWishTime(b)||new Date(b.created_at)-new Date(a.created_at)
     : (a,b)=>new Date(b.created_at)-new Date(a.created_at);
+  // 同じ支部でも他のスタッフが担当する面談は出さない（管理者だけは全部見える）
   const all=(DB.interviews||[]).filter(iv=>{
-    return iv.staff_id===ME.id || ivInMyBranch(iv);
+    return ME.role==='admin'||iv.staff_id===ME.id;
   }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||inner(a,b);});
   if(!all.length)return `<h1 class="page">面談一覧</h1><div class="empty"><div class="ei">${ic('list')}</div><p>担当する面談はまだありません。</p></div>`;
   // フィルタ適用
@@ -2295,22 +2333,28 @@ function viewStaffInterviews(){
       <button class="${IVSORT==='wish'?'on':''}" onclick="setIvSort('wish')">希望日が近い順</button>
     </div>`;
   if(!list.length)return `<h1 class="page">面談一覧</h1>
-    <p class="page-sub">${branchName(ME.branch_id)}の面談 ${all.length}件</p>
+    <p class="page-sub">あなたが担当する面談 ${all.length}件</p>
     ${filterBar}
     <div class="empty"><div class="ei">${ic('search')}</div><p>条件に一致する面談がありません。</p></div>`;
-  const rows=list.map(iv=>{const s=STATUS[iv.status];const intern=ivIntern(iv);const nm=ivInternName(iv);
-    return `<div class="row" onclick="openInterview('${iv.id}')">
-      <span class="av ${accOf(intern?.id||iv.id)}">${esc(initials(nm))}</span>
-      <span class="rmain">
-        <span class="rt">${esc(nm)} <span class="tag">${branchName(ivInternBranch(iv))}</span></span>
-        <span class="rs">${esc(ivRowSub(iv))}</span>
-      </span>
-      <span class="pill ${s.c}">${s.t}</span>
-    </div>`;}).join('');
+  const zones=IV_ZONES.map(z=>({z,items:list.filter(z.match)})).filter(g=>g.items.length);
+  const zoneHtml=zones.map(({z,items})=>`
+      <div class="iv-zoneh">${z.label}<span style="opacity:.7"> ${items.length}</span></div>
+      <div class="rowlist">${items.map(iv=>ivRow(iv,z)).join('')}</div>`).join('');
   return `<h1 class="page">面談一覧</h1>
-    <p class="page-sub">${branchName(ME.branch_id)}の面談 ${all.length}件${cnt.applied?` ・ 確定待ち ${cnt.applied}件`:''}${list.length!==all.length?` ・ 表示中 ${list.length}件`:''}</p>
+    <p class="page-sub">あなたが担当する面談 ${all.length}件${cnt.applied?` ・ 確定待ち ${cnt.applied}件`:''}${list.length!==all.length?` ・ 表示中 ${list.length}件`:''}</p>
     ${filterBar}
-    <div class="card"><div class="rowlist">${rows}</div></div>`;
+    <div class="card">${zoneHtml}</div>`;
+}
+async function deleteInterviewRow(id){
+  const iv=(DB.interviews||[]).find(x=>x.id===id);
+  if(!iv)return;
+  if(!await confirmSheet('一覧から削除',
+    '一覧から削除します。カレンダーに入れた予定（Googleカレンダーなど）は消えません。元に戻せません。','削除する'))return;
+  const ok=await apiDelete(`/api/interviews/${encodeURIComponent(id)}`);
+  if(!ok)return;
+  DB.interviews=(DB.interviews||[]).filter(x=>x.id!==id);
+  render();
+  toast('一覧から削除しました');
 }
 function setIvFilter(key,val){IVFILTER[key]=val;render();}
 function clearIvFilter(){IVFILTER={status:'all',branch:'all',q:''};render();}
@@ -2626,8 +2670,12 @@ function eventCard(ev,showEdit){
         <b style="font-size:16px">${esc(ev.title)}</b>
         <span class="tag" style="margin-left:auto">${isPrivate?ic('lock')+'自分だけ':branchName(ev.branch_id)}</span>
       </div>
-      <div class="meta" style="margin-top:6px">
-        <span>${ic('calendar')}<b>${ev.has_time===false?fmtDate(ev.start_datetime):fmtDT(ev.start_datetime)}</b>${ev.has_time===false?'':` 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}`}</span>
+      <div class="meta" style="margin-top:6px;align-items:center">
+        <span style="font-size:15px">${ic('calendar')}<b>${ev.has_time===false?fmtDate(ev.start_datetime):fmtDT(ev.start_datetime)}</b>${ev.has_time===false?'':` 〜 ${fmtDT(ev.end_datetime).split(') ')[1]||fmtDT(ev.end_datetime)}`}</span>
+        ${(showEdit&&ev.creator_id===ME.id)?`<span style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn sm iconly" onclick="openEventForm('${ev.id}')" aria-label="編集" title="編集">${ic('edit')}</button>
+          <button class="btn sm iconly bad" onclick="deleteEvent('${ev.id}')" aria-label="削除" title="削除">${ic('trash')}</button>
+        </span>`:''}
       </div>
       ${ev.location?`<div class="meta"><span>${ic('pin')}${esc(ev.location)}</span></div>`:''}
       ${ev.description?`<p style="color:var(--sub);font-size:13px;margin:6px 0 0">${esc(ev.description)}</p>`:''}
@@ -2654,11 +2702,9 @@ function eventCard(ev,showEdit){
         ${['ok','may','no'].map(v=>`<div class="v ${mine?.response===v?'on-'+v:''}"
           onclick="vote('${ev.id}','${v}')"><span class="em">${ATT_MARK[v]}</span>${ATT_LABEL[v]}</div>`).join('')}
       </div>`)}
-      ${(ME.role==='admin'||ev.creator_id===ME.id||(!isPrivate&&!noVote&&ME.role!=='intern'))?`
+      ${(!isPrivate&&!noVote)?`
         <div class="btn-row" style="margin-top:10px">
-          ${(isPrivate||noVote)?'':`<button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>`}
-          ${(showEdit&&(ME.role==='admin'||ev.creator_id===ME.id))?`<button class="btn sm" onclick="openEventForm('${ev.id}')">編集</button>
-          <button class="btn sm bad" onclick="deleteEvent('${ev.id}')">削除</button>`:''}
+          <button class="btn sm" onclick="openEventResponders('${ev.id}')">回答者を見る（${resp.length}）</button>
         </div>`:''}
     </div></div>`;
 }
@@ -2784,12 +2830,13 @@ function openSharedCalendarSite(){
     '_blank','noopener');
 }
 
-// 自分に関係する確定面談を取得（カレンダー併記用）
+// 自分に関係する確定面談を取得（カレンダー併記用）。
+// 同じ支部でも他のスタッフが担当する面談は出さない（2026-08-10 変更）
 function myInterviewsForCal(){
   return (DB.interviews||[]).filter(iv=>{
     if(iv.status!=='fixed'||!iv.confirmed_datetime)return false;
     if(ME.role==='admin')return true;
-    return iv.staff_id===ME.id||ivInMyBranch(iv);
+    return iv.staff_id===ME.id;
   });
 }
 function ivLabel(iv){return `面談：${ivInternName(iv)}さん`;}
@@ -3100,7 +3147,7 @@ function openEventForm(id,dateKey){
      編集はもとの予定の日付で、どちらもすでに決まっている。
      変えたいときは削除して、その日から作り直してもらう */
   const dLabel=reqDateLabel(dateVal);
-  const canEdit=!ev||ME.role==='admin'||ev.creator_id===ME.id;
+  const canEdit=!ev||ev.creator_id===ME.id;
   openSheet(`<h3>${ev?'予定を編集':'予定を作成'}</h3>
     <p class="page-sub" style="margin-top:0">${esc(dLabel)}の予定</p>
     <label class="fl">予定の名前</label>
@@ -3227,10 +3274,6 @@ function openAvailabilitySettings(){
       </span></div>`;}).join('');
   openSheet(`<h3>面談を受けられる時間</h3>
     <p class="page-sub">曜日ごとの受付時間です。インターン生は、ここで決めた時間帯の中から30分刻みで申請できます。</p>
-    <!-- 曜日ごとの設定と、日にちを指定して外す画面は表裏一体なので
-         ここから続けて開けるようにする。逆向きの導線は viewAvailSet() 側にある -->
-    <button class="btn block" style="margin-top:10px" onclick="closeSheet();go('avset')">
-      ${ic('ban')}この日は受けられない時間を決める</button>
     <div style="margin-top:8px">${rows}</div>
     <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
     <div class="hint" style="margin-top:12px">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に「受けられない時間」として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
@@ -3333,8 +3376,10 @@ function viewAvailSet(){
   return `
     <h1 class="page">この日は受けられない時間</h1>
     <p class="page-sub">曜日ごとの「面談を受けられる時間」から、日にちを指定して外します。ここで外した時間は、インターン生の申請画面で「×」になり選べなくなります。</p>
+    <button class="btn block" style="margin-top:10px" onclick="openAvailabilitySettings()">
+      ${ic('alarm')}面談を受けられる時間</button>
 
-    <h3 style="margin:6px 2px 8px;font-size:15px">① カレンダーから枠をタップ</h3>
+    <h3 style="margin:20px 2px 8px;font-size:15px">① カレンダーから枠をタップ</h3>
     <div class="card"><div class="cb">
       <div class="weekpager">
         <button class="pg" onclick="avSetWeek(-1)" ${(AVSET.weekOffset||0)<=0?'disabled':''}>${ic('chevron-l')}前の1週間</button>
@@ -3381,6 +3426,27 @@ async function applyBlockChanges({added=[],removedIds=[]}={}){
     for(const b of added){if(!list.some(x=>x.id===b.id))list.push(b);}
     av.blocks=list;
   });
+}
+
+/* 押し始めたセルが表の何列目かを覚えておく（なぞれるのはその列だけにするため） */
+function dragColOf(cell){
+  return cell&&cell.cellIndex!==undefined
+    ? {table:cell.closest('table'),index:cell.cellIndex} : null;
+}
+/* 指の高さが、押し始めた列の何行目にあたるかを探して、そのセルを返す */
+function dragCellAt(e,col){
+  if(!col||!col.table)return null;
+  const cells=Array.prototype.filter.call(
+    col.table.querySelectorAll('tbody .bt-c'),
+    td=>td.cellIndex===col.index);
+  if(!cells.length)return null;
+  for(const td of cells){
+    const r=td.getBoundingClientRect();
+    if(e.clientY>=r.top&&e.clientY<=r.bottom)return td;
+  }
+  if(e.clientY<cells[0].getBoundingClientRect().top)return cells[0];
+  if(e.clientY>cells[cells.length-1].getBoundingClientRect().bottom)return cells[cells.length-1];
+  return null;
 }
 
 /* 枠タップ／ドラッグでまとめて不可・解除する（マウス・タッチ共通）。
@@ -4159,6 +4225,11 @@ function sentRequests(){
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 }
 function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userId);}
+/* 自分が送った「日程調整」のうち、まだ日程を確定していないもの。
+   送った側は完了扱いにならず放置されがちなので、依頼一覧とホームの入口で気づけるようにする */
+function sentUnconfirmedAttendCount(){
+  return sentRequests().filter(r=>isAttend(r)&&!r.confirmed).length;
+}
 function requestNeedsAction(r){
   return isAttend(r)?!attendResponses(r).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id);
 }
@@ -4281,6 +4352,7 @@ function requestList(list,kind){
         : `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`);
     let badge='';
     if(att&&r.confirmed)badge='<span class="tag ok">確定</span>';
+    else if(att&&kind==='sent')badge='<span class="tag" style="background:var(--bad-soft);color:var(--bad)">日程未確定</span>';
     else if(att&&kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
     else if(att&&kind==='done')badge='<span class="tag ok">回答済み</span>';
     else if(!att&&kind==='inbox'&&!hasConfirmed(r,ME.id))badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>';
@@ -5130,13 +5202,23 @@ function reqDueFieldHTML(){
   return `<div class="due-field">
       <label for="reqDueMonth">回答の締切（任意）</label>
       <div class="due-pick">
-        <select id="reqDueMonth" aria-label="締切の月" onchange="setReqDueMonth(this.value)">${months}</select>
-        <select id="reqDueDay" aria-label="締切の日" onchange="setReqDueDay(this.value)">${days}</select>
+        <select id="reqDueMonth" aria-label="締切の月" onchange="setReqDueMonth(this.value)" onfocus="reqDueFocusToday()">${months}</select>
+        <select id="reqDueDay" aria-label="締切の日" onchange="setReqDueDay(this.value)" onfocus="reqDueFocusToday()">${days}</select>
         <input type="time" id="reqDueTime" aria-label="締切の時刻" value="${esc(REQFORM.dueTime||'23:59')}"
           ${iso?'':'disabled'} onchange="setReqDueTime(this.value)">
       </div>
       ${iso?`<span class="due-year">${esc(dueDateLabel(iso,REQFORM.dueTime))}まで</span>`:''}
     </div>`;
+}
+/* 「締切」欄をタップした瞬間に今日の日付を入れておく。
+   まだ何も選んでいない（月が空欄の）ときだけ働く。一度選んだあとは
+   タップし直しても上書きしない */
+function reqDueFocusToday(){
+  if(REQFORM.dueMonth)return;
+  const now=new Date();
+  REQFORM.dueMonth=String(now.getMonth()+1);
+  REQFORM.dueDay=String(now.getDate());
+  renderRequestForm(true);
 }
 /* 月だけ、日だけ選ばれた状態は締切として使えないので、相手側も埋めておく。
    このとき「いちばん近い先の日」になるようにする。今月を選んで1日を入れると

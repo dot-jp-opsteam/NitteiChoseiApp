@@ -352,6 +352,9 @@
   .st-failed{background:var(--bad-soft);color:var(--bad)}
 
   /* ---------- List rows ---------- */
+  /* 面談一覧のゾーン見出し（申請中／確定・未実施／実施済み／不成立） */
+  .iv-zoneh{padding:14px 16px 6px;font-size:12px;font-weight:700;color:var(--sub)}
+  .card>.iv-zoneh:first-child{padding-top:16px}
   .rowlist{display:flex;flex-direction:column}
   .rowlist .row{padding:13px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;cursor:pointer;transition:background .1s}
   .rowlist .row:last-child{border-bottom:0}
@@ -1503,6 +1506,12 @@
   .hex .hxb{position:absolute;top:14%;right:16%;min-width:18px;height:18px;padding:0 5px;
     border-radius:999px;background:var(--brand);color:var(--on-fill);
     font-size:10px;font-weight:900;display:grid;place-items:center}
+  /* 送信した依頼に日程未確定のものがあるときの赤い印。数字バッジ(hxb)とは別の意味なので、
+     反対側の角に小さな丸だけを出す。
+     六角形は clip-path で切り抜いているため、上下の細くなる部分に置くと
+     見えなくなる。25%〜75%は横幅いっぱいの帯になるので、その範囲の左端に置く */
+  .hex .hxdot{position:absolute;top:26%;left:9%;width:10px;height:10px;
+    border-radius:999px;background:var(--bad);border:2px solid var(--panel)}
   /* ユーザー一覧のアバターを六角形にする */
   .av.hexav{border-radius:0;width:34px;height:39px;
     clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
