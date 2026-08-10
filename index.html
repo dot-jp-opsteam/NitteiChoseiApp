@@ -1628,8 +1628,13 @@ function buildNav(){
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
-    ${ME.role==='intern'?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
-      <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`:''}
+    ${ME.role==='intern'
+      ?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
+        <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`
+      /* スタッフのメール履歴はホームの六角形からここへ移した（入れ替わりでカレンダー連携がホームへ）。
+         面談の確定・不成立は実際にメールを送っているので、その控えを見る場所は残しておく */
+      :`<button class="sb-item" onclick="openMailHistory()" title="送ったメール・届いたメールの記録を見る">
+        <span class="si">${ic('mail')}</span><span class="sl">メール履歴</span></button>`}
     <button class="sb-item" onclick="openTrashList()" title="削除した依頼を見る">
       <span class="si">${ic('trash')}</span><span class="sl">削除リスト</span></button>
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="${themeSwitchLabel()}">
@@ -1867,14 +1872,18 @@ function viewHome(){
     if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
     const unread=myRequests().filter(requestNeedsAction).length;
     const sentUnconfirmed=sentUnconfirmedAttendCount();
-    /* 所属部署はプロフィールの「ほかの設定」、カレンダー連携は左メニューへ移した。
+    /* 所属部署はプロフィールの「ほかの設定」へ移した。
        「受けられる時間」の入口は「この日は受けられない時間」を初期表示にしている。
-       曜日ごとの受付時間（面談を受けられる時間）は、その画面の中から開く */
+       曜日ごとの受付時間（面談を受けられる時間）は、その画面の中から開く。
+       カレンダー連携はホームへ戻した。連携しないと自分の予定が「面談不可」に
+       反映されず、空いていない時間に面談を入れられてしまうので、
+       左メニューの奥ではなく気づける場所に置く。
+       入れ替わりでメール履歴は左メニューへ移した */
     items.push(
       hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
       hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread,sentUnconfirmed>0),
       hex("go('avset')",'alarm','受けられる時間','曜日ごとの受付時間'),
-      hex('openMailHistory()','mail','メール履歴','送信・受信の記録'),
+      hex('openGoogleCalendarSettings()','calendar','カレンダー連携','Googleカレンダーとつなぐ'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
        毎日使うものではないので、六角形の上に控えめな帯として置く */
