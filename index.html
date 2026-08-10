@@ -3497,7 +3497,9 @@ function viewAvailSet(){
     <h3 style="margin:20px 2px 8px;font-size:15px">登録済み（今後の予定）</h3>
     <div class="card"><div class="rowlist">${listRows}</div></div>`;
 }
-function avSetWeek(delta){AVSET.weekOffset=Math.max(0,(AVSET.weekOffset||0)+delta);render();}
+/* 週送りも同じ画面の中で表が入れ替わるだけなので renderQuiet()。
+   render() だと1週間ずらすたびに画面ぜんぶが暗転する */
+function avSetWeek(delta){AVSET.weekOffset=Math.max(0,(AVSET.weekOffset||0)+delta);renderQuiet();}
 
 /* 自分の不可時間リストを db から取り出す（無ければ作る） */
 function blocksOf(db,userId){
@@ -3591,9 +3593,12 @@ async function avDragEnd(){
   if(!AVDRAG)return;
   const {touched,added,removedIds}=AVDRAG;
   AVDRAG=null;
-  if(!touched.size){render();return;}
+  /* 同じ画面の中で枠を塗っただけなので renderQuiet()。
+     render() だと画面ぜんぶの登場アニメが再生され、
+     なぞり終えるたびに黒い背景で暗転して見える */
+  if(!touched.size){renderQuiet();return;}
   const ok=await applyBlockChanges({added,removedIds});
-  render();
+  renderQuiet();
   if(ok)toast(touched.size>1?`${touched.size}件を更新しました`:'更新しました');
 }
 
@@ -3641,11 +3646,12 @@ async function addBlock(){
   });
   if(!ok)return;
   toast('受けられない時間を登録しました');
-  initBlkForm();render();
+  // 追加・削除も同じ画面の中の出来事なので、暗転しない renderQuiet() を使う
+  initBlkForm();renderQuiet();
 }
 async function delBlock(id){
   const ok=await applyBlockChanges({removedIds:[id]});
-  render();
+  renderQuiet();
   if(ok)toast('削除しました');
 }
 
