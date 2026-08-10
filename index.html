@@ -1842,7 +1842,7 @@ function viewHome(){
     <p class="page-sub">${branchName(ME.branch_id)} ・ ${ROLE_JP[ME.role]}</p>`;
   const dueNotice=dueHomeNotice();
   if(ME.role==='intern'){
-    const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
+    const unread=myRequests().filter(requestNeedsAction).length;
     /* 面談を申請する入口はここに無い。アカウントの要らない apply.html へ
        移したため（2026-08-06）。詳しくは
        _archive/2026-08-06-インターン生の面談申請画面/README.md */
@@ -1858,7 +1858,7 @@ function viewHome(){
     const pend=(DB.interviews||[]).filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
     const items=[];
     if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
-    const unread=myRequests().filter(r=>!hasConfirmed(r,ME.id)).length;
+    const unread=myRequests().filter(requestNeedsAction).length;
     const sentUnconfirmed=sentUnconfirmedAttendCount();
     /* 所属部署はプロフィールの「ほかの設定」、カレンダー連携は左メニューへ移した。
        「受けられる時間」の入口は「この日は受けられない時間」を初期表示にしている。
@@ -4304,6 +4304,16 @@ function sortInboxByDue(list){
     return new Date(b.created_at)-new Date(a.created_at);
   });
 }
+/* 送った依頼の並び。日程未確定の出欠確認（＝自分がまだ確定操作をしていないもの）を
+   先頭にまとめる。放置されがちなので、下に埋もれさせないため。
+   同じ区分の中は新しい順のまま */
+function sortSentByConfirm(list){
+  return list.slice().sort((a,b)=>{
+    const na=isAttend(a)&&!a.confirmed?1:0,nb=isAttend(b)&&!b.confirmed?1:0;
+    if(na!==nb)return nb-na;
+    return new Date(b.created_at)-new Date(a.created_at);
+  });
+}
 function viewRequests(){
   const canSend=canSendRequest();
   const received=myRequests();
@@ -4311,7 +4321,8 @@ function viewRequests(){
   const inbox=sortInboxByDue(received.filter(requestNeedsAction));
   const done=received.filter(r=>!requestNeedsAction(r));
   const pending=inbox.length;
-  const sent=sentRequests();
+  const sent=sortSentByConfirm(sentRequests());
+  const sentUnconfirmed=sentUnconfirmedAttendCount();
   const tabs=`<div class="seg" style="margin-bottom:14px">
     <label><input type="radio" name="reqTab" ${REQTAB==='inbox'?'checked':''} onchange="setReqTab('inbox')">
       <span class="segb">受けた依頼${pending?`（${pending}）`:''}</span></label>
@@ -4326,6 +4337,7 @@ function viewRequests(){
       :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
     ${canSend?`<button type="button" class="rq-fab" onclick="toggleSentRequests()"
       title="${REQTAB==='sent'?'受けた依頼に戻る':'送った依頼を表示'}">
+      ${REQTAB!=='sent'&&sentUnconfirmed>0?`<span class="hxdot" title="日程が未確定の依頼があります"></span>`:''}
       ${ic(REQTAB==='sent'?'back':'megaphone')}<span>${REQTAB==='sent'?'受けた依頼へ戻る':'送信した依頼'}</span></button>`:''}`;
 }
 

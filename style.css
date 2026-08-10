@@ -609,6 +609,11 @@
   .rq-fab svg{width:18px;height:18px;flex:none}
   .rq-fab:hover{transform:translateY(-2px);filter:brightness(1.08)}
   .rq-fab:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+  /* 六角形の赤丸（送った日程調整に未確定のものがある）と同じ意味・同じ見た目を
+     ここにも出す。.hex .hxdot は六角形の斜辺に合わせた位置指定なので、
+     四角いボタンの角にはこちらを別に定義する */
+  .rq-fab .hxdot{position:absolute;top:-3px;left:-3px;width:10px;height:10px;
+    border-radius:999px;background:var(--bad);border:2px solid var(--panel)}
   @media(max-width:600px){
     .due-field{gap:6px 8px}
     .due-pick{gap:6px}
