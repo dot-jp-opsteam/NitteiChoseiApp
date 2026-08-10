@@ -41,6 +41,7 @@ const google = require('./google');
 const auth = require('./auth');
 const mail = require('./mail');
 const sharedCalFilter = require('./shared-cal-filter');
+const googleSyncFilter = require('./google-sync-filter');
 const slots = require('./slots');
 const push = require('./push');
 const { buildICalendar } = require('./ical');
@@ -3196,6 +3197,28 @@ app.get(/^\/api\/calendar\/([A-Za-z0-9_-]{32,})\.ics$/, async (req, res) => {
   }
 });
 
+/* この人（staff_idにもintern_idにも使われるGoogle連携ユーザーID）が持つ、
+   確定済み面談としてこのアプリ自身がGoogleカレンダーに書き込んだイベントID。
+   webhookで戻ってきた変更がこれと一致するときは、「外部の予定」として
+   取り込まない（取り込むと面談一覧と不可時間の一覧に同じ時間帯が
+   二重に現れる。2026-08-10 発見・修正）。
+   本人がstaff_idの行はgoogleEventId、intern_idの行はgoogleEventIdInternが
+   その人自身のカレンダー上のイベントIDになる */
+async function ownGoogleEventIdsFor(userId) {
+  const rs = await client.execute({
+    sql: "SELECT staff_id, intern_id, data FROM interviews WHERE status = 'fixed' AND (staff_id = ? OR intern_id = ?)",
+    args: [userId, userId],
+  });
+  const ids = new Set();
+  for (const row of rs.rows) {
+    let data = {};
+    try { data = JSON.parse(row.data) || {}; } catch { /* 壊れていても他の行は続ける */ }
+    if (row.staff_id === userId && data.googleEventId) ids.add(data.googleEventId);
+    if (row.intern_id === userId && data.googleEventIdIntern) ids.add(data.googleEventIdIntern);
+  }
+  return ids;
+}
+
 // Googleからのpush通知受信（面談不可時間へ外部予定を反映）
 app.post('/api/webhooks/google-calendar', async (req, res) => {
   if (!GOOGLE_ENABLED) return res.status(200).end();
@@ -3209,8 +3232,15 @@ app.post('/api/webhooks/google-calendar', async (req, res) => {
     if (resourceState === 'sync') return res.status(200).end(); // 登録直後の確認通知は無視
 
     const accessToken = await accessTokenFor(tokenRow);
-    const { items, nextSyncToken } = await google.listChangedEvents(accessToken, tokenRow.calendar_id, tokenRow.sync_token);
+    const { items: allItems, nextSyncToken } = await google.listChangedEvents(accessToken, tokenRow.calendar_id, tokenRow.sync_token);
     if (nextSyncToken) await updateSyncToken(tokenRow.staff_id, nextSyncToken);
+
+    /* このアプリ自身が面談確定で書き込んだイベントは、外部予定として
+       取り込まない。含めてしまうと、確定済みの面談が「面談一覧」と
+       「この日は受けられない時間」の両方に別々に現れ、同じ予定を
+       二重に登録したように見えてしまう */
+    const ownEventIds = await ownGoogleEventIdsFor(tokenRow.staff_id);
+    const items = googleSyncFilter.excludeOwnEvents(allItems, ownEventIds);
 
     /* Googleは複数のスタッフぶんの通知をほぼ同時に送ってくることがある。
        列に並べないと、後から書いたほうが先の取り込みを消してしまう */

@@ -1205,6 +1205,43 @@ async function testSharedCalFilter() {
   check('空にすれば何も外さない', f.filterSharedEvents([ev('OPS定例')], none).length, 1);
 }
 
+async function testGoogleSyncFilter() {
+  console.log('\n─────── Googleカレンダーwebhook：自分が作った予定の除外 ───────');
+  const f = createRequire(path.join(ROOT, 'server', 'package.json'))('./google-sync-filter.js');
+
+  const ev = (id, summary) => ({ id, summary });
+  const own = new Set(['gev_mine']);
+
+  check('自分の面談確定イベントは除外される',
+    f.excludeOwnEvents([ev('gev_mine', '面談: 田中さん'), ev('gev_other', '歯医者')], own)
+      .map((e) => e.id),
+    ['gev_other']);
+  check('自分のイベントが無ければ何も除外しない',
+    f.excludeOwnEvents([ev('gev_a', 'a'), ev('gev_b', 'b')], new Set()).length, 2);
+  check('該当が無ければ空配列を返しても落ちない',
+    f.excludeOwnEvents([], own).length, 0);
+  check('items が undefined でも落ちない',
+    f.excludeOwnEvents(undefined, own).length, 0);
+
+  /* ここから先はサーバーのソースを直接検査する。
+     テスト環境では GOOGLE_CLIENT_ID 等が無く GOOGLE_ENABLED が false になるため、
+     webhook エンドポイントを実際に叩いての統合テストができない
+     （早期 return で何もせず 200 を返すだけになる）。
+     そのため、webhook ハンドラが上のフィルタ関数を正しく通しているかを
+     ソースコードの文字列で検査する（apply.html 等の検査と同じやり方）。
+     2026-08-10：面談確定でGoogleに書き込んだ自分のイベントが、
+     webhook経由でそのまま「外部予定」として不可時間に二重登録されるバグを発見・修正 */
+  const serverSrc = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
+  check('server.js が google-sync-filter を読み込んでいる',
+    serverSrc.includes("require('./google-sync-filter')"), true);
+  check('webhookハンドラが自分の面談イベントを除外してから取り込む',
+    /app\.post\('\/api\/webhooks\/google-calendar'[\s\S]{0,2000}ownGoogleEventIdsFor[\s\S]{0,400}excludeOwnEvents/.test(serverSrc),
+    true);
+  check('確定済み面談のgoogleEventIdとgoogleEventIdInternの両方を集めている',
+    /function ownGoogleEventIdsFor[\s\S]{0,600}googleEventId[\s\S]{0,300}googleEventIdIntern/.test(serverSrc),
+    true);
+}
+
 async function testLockLogic() {
   console.log('\n─────── 書き込みの直列化（本番と同じ待ちを人工的に作る） ───────');
   const { withDBLock, _resetForTest } = createRequire(path.join(ROOT, 'server', 'package.json'))('./dblock.js');
@@ -2092,6 +2129,7 @@ try {
     await testCalendarSubscription();
     await testMyCalendar();
     await testSharedCalFilter();
+    await testGoogleSyncFilter();
     await testLockLogic();
   }
   console.log(`\n${'─'.repeat(56)}`);
