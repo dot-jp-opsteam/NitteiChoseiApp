@@ -209,6 +209,23 @@ async function initDB() {
     )
   `);
   await client.execute('CREATE INDEX IF NOT EXISTS idx_request_trash_user ON request_trash(user_id)');
+  /* 自分のGoogleカレンダーの予定に対する、このアプリだけのローカルな上書き。
+     Google側の予定そのものは書き換えず、hidden=1なら表示から外し、
+     それ以外は書いてある値でタイトル・時間・場所を上書きして見せる */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS my_calendar_overrides (
+      user_id TEXT NOT NULL,
+      google_event_id TEXT NOT NULL,
+      hidden INTEGER NOT NULL DEFAULT 0,
+      title TEXT,
+      start TEXT,
+      end TEXT,
+      all_day INTEGER,
+      location TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, google_event_id)
+    )
+  `);
   /* 公開出欠の回答者。共有URLとは別のキーを持つ人だけが回答を変更できる。
      キーは漏えい時の影響を小さくするため、平文ではなくSHA-256だけを保存する */
   await client.execute(`
@@ -3129,6 +3146,29 @@ app.get('/api/shared-calendar/events', requireAuth, async (req, res) => {
    本人しか見てはいけない予定の写しがDBに溜まっていくため */
 const myCalCache = new Map();          // key: staffId|timeMin|timeMax
 const MY_CAL_TTL_MS = 60 * 1000;
+/* このアプリ内だけの上書き（hidden・タイトル・時間・場所）を、Googleから取ってきた
+   生の予定に重ねる。Google側には一切書き込まない。
+   キャッシュは生のGoogleの結果を持たせ、上書きは呼ばれるたびにここで当てる
+   （上書きを変えた直後にキャッシュのせいで古い表示に戻らないようにするため） */
+async function applyMyCalOverrides(userId, events) {
+  const rs = await client.execute({ sql: 'SELECT * FROM my_calendar_overrides WHERE user_id = ?', args: [userId] });
+  if (!rs.rows.length) return events;
+  const map = new Map(rs.rows.map((r) => [r.google_event_id, r]));
+  return events
+    .filter((e) => !map.get(e.id)?.hidden)
+    .map((e) => {
+      const o = map.get(e.id);
+      if (!o) return e;
+      return {
+        ...e,
+        title: o.title ?? e.title,
+        start: o.start ?? e.start,
+        end: o.end ?? e.end,
+        allDay: o.all_day != null ? !!o.all_day : e.allDay,
+        location: o.location ?? e.location,
+      };
+    });
+}
 app.get('/api/my-calendar/events', requireAuth, async (req, res) => {
   if (!GOOGLE_ENABLED) return res.json({ events: [], connected: false });
   const timeMin = String(req.query.timeMin || '');
@@ -3141,14 +3181,14 @@ app.get('/api/my-calendar/events', requireAuth, async (req, res) => {
     const key = `${me}|${timeMin}|${timeMax}`;
     const hit = myCalCache.get(key);
     if (hit && Date.now() - hit.at < MY_CAL_TTL_MS) {
-      return res.json({ events: hit.events, connected: true, cached: true });
+      return res.json({ events: await applyMyCalOverrides(me, hit.events), connected: true, cached: true });
     }
     const accessToken = await accessTokenFor(row);
     /* 連携しているカレンダーが全体予定表用に差し替えられている場合でも、
        ここで見たいのは本人の予定なので primary を固定で読む */
     const events = await google.listEventsInRange(accessToken, 'primary', timeMin, timeMax);
     myCalCache.set(key, { at: Date.now(), events });
-    res.json({ events, connected: true });
+    res.json({ events: await applyMyCalOverrides(me, events), connected: true });
   } catch (e) {
     /* 取れなくてもカレンダー画面は出したいので、空で返してログに残す */
     if (e.code === 'REFRESH_REVOKED' || e.code === 'CALENDAR_UNAVAILABLE') {
@@ -3157,6 +3197,49 @@ app.get('/api/my-calendar/events', requireAuth, async (req, res) => {
     console.error('自分のGoogleカレンダーの取得に失敗しました', e);
     res.json({ events: [], connected: true, error: 'failed' });
   }
+});
+
+/* 自分のGoogleカレンダーの予定を、このアプリの中だけで編集する。
+   Googleカレンダー本体には書き込まない（google.updateEventは呼ばない） */
+app.patch('/api/my-calendar/events/:id', requireAuth, async (req, res) => {
+  if (!GOOGLE_ENABLED) return res.status(400).json({ error: 'Googleカレンダー連携が無効です' });
+  const { title, start, end, all_day: allDay, location } = req.body || {};
+  if (!title || !String(title).trim()) return res.status(400).json({ error: 'タイトルを入力してください' });
+  const s = new Date(start);
+  if (!start || Number.isNaN(s.getTime())) return res.status(400).json({ error: '日時が正しくありません' });
+  const isAllDay = !!allDay;
+  let endVal = start;
+  if (!isAllDay) {
+    const en = new Date(end);
+    if (!end || Number.isNaN(en.getTime()) || en <= s) {
+      return res.status(400).json({ error: '終わりの時刻は、始まりより後にしてください' });
+    }
+    endVal = end;
+  }
+  await client.execute({
+    sql: `INSERT INTO my_calendar_overrides (user_id, google_event_id, hidden, title, start, end, all_day, location, updated_at)
+          VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(user_id, google_event_id) DO UPDATE SET
+            hidden = 0, title = excluded.title, start = excluded.start, end = excluded.end,
+            all_day = excluded.all_day, location = excluded.location, updated_at = excluded.updated_at`,
+    args: [req.authUser.id, req.params.id, String(title).trim(), start, endVal, isAllDay ? 1 : 0, String(location || ''), new Date().toISOString()],
+  });
+  myCalCache.clear();
+  res.json({ ok: true });
+});
+
+/* 自分のGoogleカレンダーの予定を、このアプリの表示からだけ消す。
+   Google側の予定は残ったまま（削除も google.deleteEvent も呼ばない） */
+app.delete('/api/my-calendar/events/:id', requireAuth, async (req, res) => {
+  if (!GOOGLE_ENABLED) return res.status(400).json({ error: 'Googleカレンダー連携が無効です' });
+  await client.execute({
+    sql: `INSERT INTO my_calendar_overrides (user_id, google_event_id, hidden, updated_at)
+          VALUES (?, ?, 1, ?)
+          ON CONFLICT(user_id, google_event_id) DO UPDATE SET hidden = 1, updated_at = excluded.updated_at`,
+    args: [req.authUser.id, req.params.id, new Date().toISOString()],
+  });
+  myCalCache.clear();
+  res.json({ ok: true });
 });
 
 /* =========================================================

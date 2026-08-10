@@ -2778,7 +2778,7 @@ function sharedItemsFor(y,m){
    全体予定表と同じ作りで、月ごとに取ってきて重ねるだけ。DBには保存しない。
    サーバーは「呼んだ本人のカレンダー」しか返さないので、
    ここに並ぶ予定が他の人の画面に出ることはない */
-let MY_CAL={events:{},loading:{},connected:null};
+let MY_CAL={events:{},loading:{},connected:null,byId:{}};
 function ensureMyCal(y,m){
   const key=sharedKey(y,m);
   if(MY_CAL.events[key])return MY_CAL.events[key];
@@ -2792,6 +2792,7 @@ function ensureMyCal(y,m){
       MY_CAL.loading[key]=false;
       if(!d)return;
       MY_CAL.events[key]=d.events||[];
+      MY_CAL.events[key].forEach(e=>{MY_CAL.byId[e.id]=e;});
       MY_CAL.connected=!!d.connected;
       if(MY_CAL.events[key].length)render();
     })
@@ -2799,15 +2800,82 @@ function ensureMyCal(y,m){
   return [];
 }
 /* 自分のGoogleカレンダーの予定を、支部イベントと同じ形に整えて並べる。
-   自分にしか見えないものなので、印を付けて見分けられるようにする */
+   自分にしか見えないものなので、印を付けて見分けられるようにする。
+   gid は編集・削除のAPIに渡す、元のGoogle側のイベントID */
 function myCalItemsFor(y,m){
   const list=ensureMyCal(y,m);
   return list.map(e=>({
-    id:'my_'+e.id,title:e.title,start:e.start,allDay:e.allDay,location:e.location,
+    id:'my_'+e.id,gid:e.id,title:e.title,start:e.start,end:e.end,allDay:e.allDay,location:e.location,
     shared:true,mine:true,
   }));
 }
-function reloadMyCal(){MY_CAL.events={};MY_CAL.loading={};render();}
+function reloadMyCal(){MY_CAL.events={};MY_CAL.loading={};MY_CAL.byId={};render();}
+/* 自分のGoogleカレンダーの予定を、このアプリの中だけで編集する画面。
+   保存してもGoogleカレンダー本体には書き込まない（このアプリの表示だけが変わる） */
+function openMyCalEventForm(gid){
+  const e=MY_CAL.byId[gid];
+  if(!e)return;
+  const allDay=!!e.allDay;
+  const st=new Date(e.start);
+  const en=e.end?new Date(e.end):st;
+  const dateVal=allDay?e.start:ymd(st);
+  const t1=allDay?'09:00':`${pad(st.getHours())}:${pad(st.getMinutes())}`;
+  const t2=allDay?'10:00':`${pad(en.getHours())}:${pad(en.getMinutes())}`;
+  openSheet(`<h3>予定を編集</h3>
+    <p class="page-sub" style="margin-top:0">あなたのGoogleカレンダーの予定です。ここでの変更はGoogleカレンダー本体には反映されません。</p>
+    <label class="fl">予定の名前</label>
+    <input id="mcTitle" placeholder="タイトルなし" value="${esc(e.title||'')}">
+    <input type="hidden" id="mcDate" value="${dateVal}">
+    ${allDay?`<div class="hint" style="margin-top:16px">${ic('calendar')}<span>終日の予定です。</span></div>`:`
+      <label class="fl" style="margin-top:16px">時間<span class="req">*</span></label>
+      <div class="timerange">
+        <select id="mcT1">${timeOpts(t1)}</select>
+        <span class="tr-sep">〜</span>
+        <select id="mcT2">${timeOpts(t2)}</select>
+      </div>`}
+    <div class="field-err" id="mcTimeE"></div>
+    <label class="fl" style="margin-top:16px">場所</label>
+    <input id="mcLoc" value="${esc(e.location||'')}">
+    <button class="btn pri block" style="margin-top:18px" onclick="saveMyCalEvent('${gid}')">更新する</button>
+    <button class="btn bad block" style="margin-top:10px" onclick="deleteMyCalEvent('${gid}')">この予定を削除</button>`);
+}
+async function saveMyCalEvent(gid){
+  const e=MY_CAL.byId[gid];
+  if(!e)return;
+  const title=document.getElementById('mcTitle').value.trim()||'タイトルなし';
+  const date=document.getElementById('mcDate').value;
+  const location=document.getElementById('mcLoc').value.trim();
+  const allDay=!!e.allDay;
+  let start,end;
+  if(allDay){
+    start=date;end=date;
+  }else{
+    const t1=document.getElementById('mcT1').value,t2=document.getElementById('mcT2').value;
+    const err=document.getElementById('mcTimeE');
+    err.classList.remove('show');
+    if(t2<=t1){err.textContent='終わりの時刻は、始まりより後にしてください';err.classList.add('show');return;}
+    start=new Date(`${date}T${t1}`).toISOString();
+    end=new Date(`${date}T${t2}`).toISOString();
+  }
+  const data=await apiPatch(`/api/my-calendar/events/${encodeURIComponent(gid)}`,{title,start,end,all_day:allDay,location});
+  if(!data)return;
+  const updated={...e,title,start,end,location};
+  MY_CAL.byId[gid]=updated;
+  Object.keys(MY_CAL.events).forEach(k=>{MY_CAL.events[k]=(MY_CAL.events[k]||[]).map(x=>x.id===gid?updated:x);});
+  closeSheet();
+  renderQuiet();
+  toast('予定を更新しました');
+}
+async function deleteMyCalEvent(gid){
+  if(!await confirmSheet('予定を削除','この予定をアプリの表示から削除します。Googleカレンダー本体の予定は変更されません。','削除する'))return;
+  const data=await apiDelete(`/api/my-calendar/events/${encodeURIComponent(gid)}`);
+  if(!data)return;
+  Object.keys(MY_CAL.events).forEach(k=>{MY_CAL.events[k]=(MY_CAL.events[k]||[]).filter(e=>e.id!==gid);});
+  delete MY_CAL.byId[gid];
+  closeSheet();
+  renderQuiet();
+  toast('予定を削除しました');
+}
 
 /* 終日の予定は "2026-07-15" のような日付だけの文字列で届く。
    そのまま new Date() に渡すとUTCの0時と解釈され、時差の分だけ日がずれることがある。
@@ -2857,7 +2925,8 @@ function openDaySheet(key){
 
   /* 全社カレンダー（Googleの取り込み）と確定済みの面談は、この画面からは
      編集できない。押しても何も起きない、確かめるだけの行のまま。
-     支部の予定（list）だけは押すとその予定を開き、編集・削除できるようにする */
+     支部の予定（list）と、自分のGoogleカレンダーの予定（mine）は
+     押すと開き、編集・削除できるようにする */
   const row=(color,title,sub,onclick)=>`<div class="dayrow${onclick?' click':''}"${onclick?` onclick="${onclick}"`:''}>
       <span class="dbar" style="background:${color}"></span>
       <span class="dtx"><b>${esc(title||'タイトルなし')}</b><small>${esc(sub)}</small></span>
@@ -2865,7 +2934,8 @@ function openDaySheet(key){
     </div>`;
   const items=[
     ...shared.map(e=>({t:sharedDate(e),html:row(e.mine?MY_CAL_COLOR:SHARED_CAL_COLOR,e.title,
-      `${e.allDay?'終日':hm(e.start)}${e.location?' ・ '+e.location:''} ・ ${e.mine?'あなたのGoogleカレンダー（自分だけに表示）':'全社カレンダー'}`)})),
+      `${e.allDay?'終日':hm(e.start)}${e.location?' ・ '+e.location:''} ・ ${e.mine?'あなたのGoogleカレンダー（自分だけに表示）':'全社カレンダー'}`,
+      e.mine?`openMyCalEventForm('${e.gid}')`:undefined)})),
     ...ivs.map(iv=>({t:new Date(iv.confirmed_datetime),html:row('var(--iv)',ivLabel(iv),
       `${hm(iv.confirmed_datetime)} ・ 確定した面談`)})),
     ...list.map(e=>({t:new Date(e.start_datetime),html:row(e.color||EVENT_COLORS[0].v,e.title,
@@ -2967,9 +3037,18 @@ function eventsSection(){
       <span class="tile-ic" style="width:38px;height:38px;background:var(--iv-soft);color:var(--iv);font-size:18px">${ic('calendar')}</span>
       <span><b>${esc(ivLabel(iv))}</b><br><span class="tile-d">${fmtDT(iv.confirmed_datetime)}</span></span>
     </div></div>`).join('');
-  // 選択日の全体予定表（読み取り専用。編集はGoogleカレンダー側で行う）
+  /* 選択日の全体予定表・自分のGoogleカレンダー。
+     全体予定表（org-wide）は読み取り専用。自分のGoogleカレンダーの分だけ、
+     このアプリの中で編集・削除できる（Google側には書き込まない） */
   const shBelow=calSel?shared.filter(e=>ymd(sharedDate(e))===calSel):[];
-  const shCards=shBelow.map(e=>`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
+  const shCards=shBelow.map(e=>e.mine?`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
+      <span class="tile-ic" style="width:38px;height:38px;background:${chipBg(MY_CAL_COLOR)};color:${chipFg(MY_CAL_COLOR)};font-size:18px">${ic('calendar')}</span>
+      <span style="flex:1"><b>${esc(e.title)}</b><br><span class="tile-d">${e.allDay?'終日':fmtDT(e.start)}${e.location?' ・ '+esc(e.location):''} ・ あなたのGoogleカレンダー</span></span>
+      <span style="display:flex;gap:6px">
+        <button class="btn sm iconly" onclick="openMyCalEventForm('${e.gid}')" aria-label="編集" title="編集">${ic('edit')}</button>
+        <button class="btn sm iconly bad" onclick="deleteMyCalEvent('${e.gid}')" aria-label="削除" title="削除">${ic('trash')}</button>
+      </span>
+    </div></div>`:`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
       <span class="tile-ic" style="width:38px;height:38px;background:${chipBg(SHARED_CAL_COLOR)};color:${chipFg(SHARED_CAL_COLOR)};font-size:18px">${ic('calendar')}</span>
       <span><b>${esc(e.title)}</b><br><span class="tile-d">${e.allDay?'終日':fmtDT(e.start)}${e.location?' ・ '+esc(e.location):''} ・ 全体予定表</span></span>
     </div></div>`).join('');
