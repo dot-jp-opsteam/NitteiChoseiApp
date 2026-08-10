@@ -21,4 +21,17 @@ function excludeOwnEvents(items, ownEventIds) {
   return (items || []).filter((ev) => !ownEventIds.has(ev && ev.id));
 }
 
-module.exports = { excludeOwnEvents };
+/* 面談の確定を取り消す／別日時で確定し直すと、古いGoogleイベントは
+   deleteGoogleEventFor で実際に削除される。しかし、そのイベントが
+   一度でも webhook 経由で「外部の予定」として不可時間（blocks）に
+   取り込まれていた場合、Google側の削除だけではそのブロックは消えず、
+   もう存在しない予定が不可時間に残り続けてしまう（2026-08-10 発見）。
+
+   ここでは、削除したGoogleイベントIDに一致する external-google ブロックを
+   blocks から取り除く。一致が無ければ何も変えない。 */
+function removeBlocksByEventId(blocks, googleEventId) {
+  if (!googleEventId) return blocks || [];
+  return (blocks || []).filter((b) => !(b.kind === 'external-google' && b.googleEventId === googleEventId));
+}
+
+module.exports = { excludeOwnEvents, removeBlocksByEventId };

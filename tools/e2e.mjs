@@ -1240,6 +1240,33 @@ async function testGoogleSyncFilter() {
   check('確定済み面談のgoogleEventIdとgoogleEventIdInternの両方を集めている',
     /function ownGoogleEventIdsFor[\s\S]{0,600}googleEventId[\s\S]{0,300}googleEventIdIntern/.test(serverSrc),
     true);
+
+  /* ---- 確定取消・作り直し時に、もう存在しないGoogle予定のブロックを掃除する ----
+     2026-08-10：不成立に戻す／別日時で確定し直すたびに、Google側では
+     削除済みのイベントに対応する external-google ブロックだけが
+     不可時間に残り続けるバグを発見（本番データに30件超が蓄積していた）・修正 */
+  const blk = (id, gid, note) => ({ id, kind: 'external-google', googleEventId: gid, note });
+  check('削除したイベントに対応するブロックが取り除かれる',
+    f.removeBlocksByEventId([blk('b1', 'gev_x', '面談: a'), blk('b2', 'gev_y', '面談: b')], 'gev_x')
+      .map((b) => b.id),
+    ['b2']);
+  check('一致するブロックが無ければ何も変えない',
+    f.removeBlocksByEventId([blk('b1', 'gev_x', 'x')], 'gev_zzz').map((b) => b.id),
+    ['b1']);
+  check('external-google以外のブロックは対象にしない',
+    f.removeBlocksByEventId([{ id: 'b1', kind: 'slot', googleEventId: 'gev_x' }], 'gev_x').length,
+    1);
+  check('googleEventIdが空なら何も削除しない',
+    f.removeBlocksByEventId([blk('b1', 'gev_x', 'x')], '').length, 1);
+  check('blocksがundefinedでも落ちない',
+    f.removeBlocksByEventId(undefined, 'gev_x').length, 0);
+
+  check('deleteGoogleEventForが不可時間ブロックの掃除も行う',
+    /async function deleteGoogleEventFor[\s\S]{0,600}removeExternalGoogleBlock/.test(serverSrc),
+    true);
+  check('removeExternalGoogleBlockがremoveBlocksByEventIdを使う',
+    /async function removeExternalGoogleBlock[\s\S]{0,600}removeBlocksByEventId/.test(serverSrc),
+    true);
 }
 
 async function testLockLogic() {

@@ -1082,16 +1082,44 @@ const IV_GOOGLE_SYNC_TARGETS = [
   { userIdField: 'intern_id', eventIdField: 'googleEventIdIntern', summary: (intern, staff) => `面談: ${staff ? staff.nickname : ''}さんと` },
 ];
 
+/* 確定を取り消す／別日時で確定し直すと、古いGoogleイベントは
+   deleteGoogleEventFor が実際に削除する。しかし、そのイベントが一度でも
+   webhook経由で「外部の予定」として不可時間（availability.blocks）に
+   取り込まれていた場合、Google側の削除だけではそのブロックは消えず、
+   もう存在しない予定が不可時間に残り続けてしまう。
+   （2026-08-10 発見。本番データに30件超のこの手のブロックが蓄積していた） */
+async function removeExternalGoogleBlock(userId, googleEventId) {
+  if (!userId || !googleEventId) return;
+  try {
+    await withDBLock(async () => {
+      const db = await readDBForWrite();
+      if (!db) return;
+      const av = db.availability && db.availability[userId];
+      if (!av || !av.blocks || !av.blocks.length) return;
+      const next = googleSyncFilter.removeBlocksByEventId(av.blocks, googleEventId);
+      if (next.length === av.blocks.length) return; // 該当なし。書き込みを増やさない
+      db.availability[userId] = { ...av, blocks: next };
+      await writeDB(db);
+    });
+  } catch (e) {
+    console.warn(`不可時間ブロックの削除に失敗しました（user ${userId}, event ${googleEventId}）`, e.message || e);
+  }
+}
+
 async function deleteGoogleEventFor(userId, eventId) {
   if (!userId || !eventId) return;
   try {
     const tokenRow = await getTokenRow(userId);
-    if (!tokenRow) return;
-    const accessToken = await accessTokenFor(tokenRow);
-    await google.deleteEvent(accessToken, tokenRow.calendar_id, eventId);
+    if (tokenRow) {
+      const accessToken = await accessTokenFor(tokenRow);
+      await google.deleteEvent(accessToken, tokenRow.calendar_id, eventId);
+    }
   } catch (e) {
     console.warn(`Googleイベント削除に失敗しました（user ${userId}, event ${eventId}）`, e.message || e);
   }
+  /* Google側の削除が（未連携などの理由で）できなくても、こちらのブロックは
+     掃除する。ここで諦めると、確定を取り消すたびに不可時間へゴミが積み上がる */
+  await removeExternalGoogleBlock(userId, eventId);
 }
 
 /* 面談1件ぶんの同期。確定に変わったら作り、確定でなくなったら消す。
