@@ -2463,6 +2463,21 @@ app.post('/api/requests/:id/trash', requireAuth, async (req, res) => {
   }
 });
 
+/* 削除リストから元に戻す。request_trash の行を消すだけで、依頼本体には触れない */
+app.post('/api/requests/:id/restore', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  try {
+    await client.execute({
+      sql: 'DELETE FROM request_trash WHERE request_id = ? AND user_id = ?',
+      args: [req.params.id, actor.id],
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('削除リストからの復元に失敗しました', e);
+    res.status(500).json({ error: '元に戻せませんでした' });
+  }
+});
+
 /* 削除リストを空にする。自分の行だけを対象に、7日を待たず今すぐ完全削除する */
 app.post('/api/requests/trash/empty', requireAuth, async (req, res) => {
   try {

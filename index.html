@@ -4867,7 +4867,7 @@ async function trashRequestRow(id){
 }
 
 /* 削除リストの画面。左メニューのボタンから開く。
-   一覧に出すだけで、押しても何も起きない（元に戻す操作は無い。空にするか7日待つかだけ） */
+   削除リストにある間は「元に戻す」で復元できる（空にするか7日たつと、その後は戻せない） */
 function openTrashList(){
   const list=trashedRequests();
   const rows=list.length?list.map(r=>{
@@ -4877,13 +4877,37 @@ function openTrashList(){
       <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
       <span class="rmain"><span class="rt">${esc(r.subject)}</span>
       <span class="rs">${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.trashed_at)}に削除</span></span>
+      <button class="btn sm" onclick="event.stopPropagation();restoreRequestRow('${r.id}')">元に戻す</button>
     </div>`;
   }).join('')
     :`<div class="empty" style="padding:26px"><div class="ei">${ic('trash')}</div><p>削除リストは空です。</p></div>`;
   openSheet(`<h3>削除リスト</h3>
-    <div class="hint">${ic('alert')}<span>削除した依頼は1週間たつと自動で完全に削除されます。元に戻すことはできません。</span></div>
+    <div class="hint">${ic('alert')}<span>削除した依頼は1週間たつと自動で完全に削除されます。それまでは「元に戻す」でいつでも復元できます。</span></div>
     <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>
     ${list.length?`<button class="btn ghost block" style="margin-top:16px" onclick="emptyTrash()">${ic('trash')}削除リストを空にする</button>`:''}`);
+}
+/* 削除リストから元に戻す。完了済みの依頼として、もとの一覧にすぐ戻る */
+async function restoreRequestRow(id){
+  const r=(DB.requests||[]).find(x=>x.id===id);
+  if(!r)return;
+  try{
+    const res=await api(`/api/requests/${encodeURIComponent(id)}/restore`,{method:'POST'});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'元に戻せませんでした。');
+      return;
+    }
+    delete r.trashed_at;
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('削除リストからの復元に失敗しました',e);
+    setSaveError('元に戻せていません。通信状況をご確認ください。');
+    return;
+  }
+  openTrashList();
+  renderQuiet();
+  toast('元に戻しました');
 }
 async function emptyTrash(){
   if(!await confirmSheet('削除リストを空にする',
