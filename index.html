@@ -1630,6 +1630,8 @@ function buildNav(){
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
     ${ME.role==='intern'?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
       <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`:''}
+    <button class="sb-item" onclick="openTrashList()" title="削除した依頼を見る">
+      <span class="si">${ic('trash')}</span><span class="sl">削除リスト</span></button>
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="${themeSwitchLabel()}">
       <span class="si">${ic(currentTheme()==='light'?'moon':'sun')}</span>
       <span class="sl">${themeSwitchLabel()}</span></button>`;
@@ -2353,7 +2355,7 @@ async function deleteInterviewRow(id){
   const ok=await apiDelete(`/api/interviews/${encodeURIComponent(id)}`);
   if(!ok)return;
   DB.interviews=(DB.interviews||[]).filter(x=>x.id!==id);
-  render();
+  renderQuiet();
   toast('一覧から削除しました');
 }
 function setIvFilter(key,val){IVFILTER[key]=val;render();}
@@ -4214,15 +4216,20 @@ async function saveMyDepartments(){
    ========================================================= */
 function canSendRequest(u){u=u||ME;return !!u&&(u.role==='staff'||u.role==='branch_admin');}
 function allRequests(){return DB.requests||[];}
-/* 自分が受け取った依頼（新しい順） */
+/* 自分が受け取った依頼（新しい順）。削除リストへ移したものは常に除く */
 function myRequests(){
-  return allRequests().filter(r=>(r.recipient_ids||[]).includes(ME.id))
+  return allRequests().filter(r=>(r.recipient_ids||[]).includes(ME.id)&&!r.trashed_at)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 }
-/* 自分が送った依頼（新しい順） */
+/* 自分が送った依頼（新しい順）。削除リストへ移したものは常に除く */
 function sentRequests(){
-  return allRequests().filter(r=>r.sender_id===ME.id)
+  return allRequests().filter(r=>r.sender_id===ME.id&&!r.trashed_at)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+}
+/* 削除リストの中身（削除した順） */
+function trashedRequests(){
+  return allRequests().filter(r=>r.trashed_at)
+    .sort((a,b)=>new Date(b.trashed_at)-new Date(a.trashed_at));
 }
 function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userId);}
 /* 自分が送った「日程調整」のうち、まだ日程を確定していないもの。
@@ -4374,7 +4381,8 @@ function requestList(list,kind){
       <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
       <span class="rmain"><span class="rt">${esc(r.subject)} ${badge}</span>
       <span class="rs">${sub}${dueRequestMeta(r)}</span></span>
-      <span class="tile-arrow">${ic('chevron')}</span></div>`;
+      ${kind==='done'?`<button class="btn sm iconly" onclick="event.stopPropagation();trashRequestRow('${r.id}')" aria-label="削除" title="削除">${ic('trash')}</button>`
+        :`<span class="tile-arrow">${ic('chevron')}</span>`}</div>`;
   }).join('');
   return `<div class="card"><div class="rowlist">${rows}</div></div>`;
 }
@@ -4750,6 +4758,74 @@ async function undoRequestCompletion(id){
   }
   closeSheet();render();
   toast('完了を取り消しました');
+}
+
+/* 「完了済みの依頼」の削除。自分の一覧からだけ消え、削除リストへ移る。
+   通常依頼・出欠確認のどちらも対象。削除リストの中身は openTrashList() が出す */
+async function trashRequestRow(id){
+  const r=(DB.requests||[]).find(x=>x.id===id);
+  if(!r)return;
+  if(!await confirmSheet('依頼を削除',
+    '削除リストへ移動します。1週間たつと自動で完全に削除されます。','削除する'))return;
+  try{
+    const res=await api(`/api/requests/${encodeURIComponent(id)}/trash`,{method:'POST'});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'削除できませんでした。');
+      return;
+    }
+    const {trashed_at}=await res.json();
+    r.trashed_at=trashed_at;
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('依頼の削除に失敗しました',e);
+    setSaveError('削除できていません。通信状況をご確認ください。');
+    return;
+  }
+  renderQuiet();
+  toast('削除リストへ移動しました');
+}
+
+/* 削除リストの画面。左メニューのボタンから開く。
+   一覧に出すだけで、押しても何も起きない（元に戻す操作は無い。空にするか7日待つかだけ） */
+function openTrashList(){
+  const list=trashedRequests();
+  const rows=list.length?list.map(r=>{
+    const att=isAttend(r);
+    const sender=findUser(r.sender_id);
+    return `<div class="row">
+      <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
+      <span class="rmain"><span class="rt">${esc(r.subject)}</span>
+      <span class="rs">${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.trashed_at)}に削除</span></span>
+    </div>`;
+  }).join('')
+    :`<div class="empty" style="padding:26px"><div class="ei">${ic('trash')}</div><p>削除リストは空です。</p></div>`;
+  openSheet(`<h3>削除リスト</h3>
+    <div class="hint">${ic('alert')}<span>削除した依頼は1週間たつと自動で完全に削除されます。元に戻すことはできません。</span></div>
+    <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>
+    ${list.length?`<button class="btn ghost block" style="margin-top:16px" onclick="emptyTrash()">${ic('trash')}削除リストを空にする</button>`:''}`);
+}
+async function emptyTrash(){
+  if(!await confirmSheet('削除リストを空にする',
+    '削除リストの依頼をすべていますぐ完全に削除します。元に戻せません。','空にする'))return;
+  try{
+    const res=await api('/api/requests/trash/empty',{method:'POST'});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      setSaveError(d.error||'空にできませんでした。');
+      return;
+    }
+    DB.requests=(DB.requests||[]).filter(r=>!r.trashed_at);
+    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
+    setSaveError(null);
+  }catch(e){
+    console.warn('削除リストを空にできませんでした',e);
+    setSaveError('空にできていません。通信状況をご確認ください。');
+    return;
+  }
+  openTrashList();
+  toast('削除リストを空にしました');
 }
 
 /* ---------- 依頼を出す ---------- */

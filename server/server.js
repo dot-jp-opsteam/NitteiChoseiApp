@@ -197,6 +197,18 @@ async function initDB() {
       PRIMARY KEY (request_id, option_id, user_id)
     )
   `);
+  /* 依頼の削除リスト（自分だけに効く）。1人1依頼につき1行。
+     ここに行がある間、その依頼は本人の一覧から常に除外される。
+     purgeRequestTrash() が7日後にこの行ごと「あて先から本人を外す」形で完全に消す */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS request_trash (
+      request_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      deleted_at TEXT NOT NULL,
+      PRIMARY KEY (request_id, user_id)
+    )
+  `);
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_request_trash_user ON request_trash(user_id)');
   /* 公開出欠の回答者。共有URLとは別のキーを持つ人だけが回答を変更できる。
      キーは漏えい時の影響を小さくするため、平文ではなくSHA-256だけを保存する */
   await client.execute(`
@@ -496,6 +508,8 @@ async function listRequestsFor(user) {
     });
   const rows = rs.rows.filter((r) => isAdmin || r.sender_id === user.id || parseIds(r.recipient_ids).includes(user.id));
   if (!rows.length) return [];
+  const trash = await client.execute({ sql: 'SELECT request_id, deleted_at FROM request_trash WHERE user_id = ?', args: [user.id] });
+  const trashedAt = new Map(trash.rows.map((t) => [t.request_id, t.deleted_at]));
   const reads = await client.execute('SELECT * FROM request_reads');
   const byRequest = new Map();
   for (const r of reads.rows) {
@@ -528,6 +542,7 @@ async function listRequestsFor(user) {
     due_date: r.due_date || undefined,
     due_time: r.due_time || undefined,
     read_by: byRequest.get(r.id) || [],
+    trashed_at: trashedAt.get(r.id) || null,
     kind: r.kind || 'normal',
     options: safeJson(r.options, []),
     confirmed: r.confirmed || null,
@@ -614,6 +629,48 @@ async function deleteOldFailedInterviews() {
     if (removed) console.log(`不成立から${FAILED_INTERVIEW_KEEP_DAYS}日たった面談を${removed}件削除しました`);
   } catch (e) {
     console.error('不成立の面談の自動削除に失敗しました', e);
+  }
+}
+
+/* 削除リストにある依頼を「本人だけあて先から外す」形で完全に消す。
+   依頼そのものは送った人・他のあて先には残るので、行き先はこの1行だけ。
+   recipient_ids に無い（管理者が削除した等）場合は何もしない=安全に空振りする */
+async function purgeRequestTrashRows(rows) {
+  let removed = 0;
+  for (const { request_id, user_id } of rows) {
+    try {
+      const rs = await client.execute({ sql: 'SELECT recipient_ids FROM requests WHERE id = ?', args: [request_id] });
+      const row = rs.rows[0];
+      if (row) {
+        const ids = parseIds(row.recipient_ids).filter((id) => id !== user_id);
+        await client.execute({
+          sql: 'UPDATE requests SET recipient_ids = ? WHERE id = ?',
+          args: [JSON.stringify(ids), request_id],
+        });
+        await client.execute({ sql: 'DELETE FROM request_reads WHERE request_id = ? AND user_id = ?', args: [request_id, user_id] });
+        await client.execute({ sql: 'DELETE FROM request_responses WHERE request_id = ? AND user_id = ?', args: [request_id, user_id] });
+      }
+      await client.execute({ sql: 'DELETE FROM request_trash WHERE request_id = ? AND user_id = ?', args: [request_id, user_id] });
+      removed++;
+    } catch (e) {
+      console.error(`削除リストの完全削除に失敗しました（request ${request_id} / user ${user_id}）`, e);
+    }
+  }
+  return removed;
+}
+
+/* 削除リストへ移してから7日たったものを、毎日まとめて完全削除する */
+const REQUEST_TRASH_KEEP_DAYS = 7;
+
+async function purgeOldRequestTrash() {
+  const cutoff = new Date(Date.now() - REQUEST_TRASH_KEEP_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const rs = await client.execute({ sql: 'SELECT request_id, user_id FROM request_trash WHERE deleted_at < ?', args: [cutoff] });
+    if (!rs.rows.length) return;
+    const removed = await purgeRequestTrashRows(rs.rows.map((r) => ({ request_id: r.request_id, user_id: r.user_id })));
+    if (removed) console.log(`削除リストで${REQUEST_TRASH_KEEP_DAYS}日たった依頼を${removed}件完全削除しました`);
+  } catch (e) {
+    console.error('削除リストの自動削除に失敗しました', e);
   }
 }
 
@@ -2365,6 +2422,42 @@ app.delete('/api/requests/:id/read', requireAuth, async (req, res) => {
   }
 });
 
+/* 依頼を削除リストへ移す。自分だけに効く（あて先の他の人・送った本人には見え続ける）。
+   通常依頼・出欠確認のどちらも対象。管理者は recipient_ids に無くても全件が見えるため、
+   あて先チェックは管理者だけ免除する */
+app.post('/api/requests/:id/trash', requireAuth, async (req, res) => {
+  const actor = req.authUser;
+  try {
+    const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '依頼が見つかりません' });
+    if (actor.role !== 'admin' && !parseIds(row.recipient_ids).includes(actor.id)) {
+      return res.status(403).json({ error: 'この依頼のあて先ではありません' });
+    }
+    const at = new Date().toISOString();
+    await client.execute({
+      sql: 'INSERT INTO request_trash (request_id, user_id, deleted_at) VALUES (?,?,?) ON CONFLICT(request_id, user_id) DO UPDATE SET deleted_at=excluded.deleted_at',
+      args: [req.params.id, actor.id, at],
+    });
+    res.json({ ok: true, trashed_at: at });
+  } catch (e) {
+    console.error('依頼の削除に失敗しました', e);
+    res.status(500).json({ error: '削除できませんでした' });
+  }
+});
+
+/* 削除リストを空にする。自分の行だけを対象に、7日を待たず今すぐ完全削除する */
+app.post('/api/requests/trash/empty', requireAuth, async (req, res) => {
+  try {
+    const rs = await client.execute({ sql: 'SELECT request_id FROM request_trash WHERE user_id = ?', args: [req.authUser.id] });
+    await purgeRequestTrashRows(rs.rows.map((r) => ({ request_id: r.request_id, user_id: req.authUser.id })));
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('削除リストを空にできませんでした', e);
+    res.status(500).json({ error: '削除リストを空にできませんでした' });
+  }
+});
+
 /* 出欠確認に答える。候補ごとに1行なので、何人が同時に押しても衝突しない。
    まとめて送れるようにしてあるのは、○△×を1つずつ通信すると
    候補が10件あれば10往復になり、電波の悪い場所で取りこぼすため */
@@ -3408,6 +3501,8 @@ initDB()
       setInterval(archiveOldRecords, 24 * 60 * 60 * 1000);
       deleteOldFailedInterviews();
       setInterval(deleteOldFailedInterviews, 24 * 60 * 60 * 1000);
+      purgeOldRequestTrash();
+      setInterval(purgeOldRequestTrash, 24 * 60 * 60 * 1000);
     });
   })
   .catch((e) => {
