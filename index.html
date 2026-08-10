@@ -1016,9 +1016,24 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ---------- sheet ---------- */
+/* シートの箱は使い回しなので、中身を入れ替えても前の表示位置が残る。
+   下まで送ったシート（長い依頼フォームなど）から次のシートへ移ると、
+   新しい画面が途中や下端から現れてしまうため、出すたびに先頭へ戻す。
+   同じシートをその場で作り直すだけのときは refreshSheet() を使う */
 function openSheet(html){const s=document.getElementById('sheet');
-  s.innerHTML='<div class="grab"></div>'+html;document.getElementById('scrim').classList.add('open');
+  s.innerHTML='<div class="grab"></div>'+html;
+  /* 先頭へ戻すのは表示してから。閉じている間は display:none で
+     高さを持たないため、その状態で scrollTop を入れても効かない */
+  document.getElementById('scrim').classList.add('open');
+  s.scrollTop=0;
   bindSheetSwipe();}
+/* いま開いているシートを作り直すとき用。見ていた位置をそのまま残す */
+function refreshSheet(fn){
+  const s=document.getElementById('sheet');
+  const y=s?s.scrollTop:0;
+  fn();
+  if(s)s.scrollTop=y;
+}
 /* 上のバーを持って下へ払うと閉じる。
    スマホでは画面の外まで指を伸ばして背景を押すのが面倒なので、その場で閉じられるようにする。
    途中で止めたときは、指を離した位置で閉じるか戻すかを決める */
@@ -4925,7 +4940,7 @@ async function restoreRequestRow(id){
     setSaveError('元に戻せていません。通信状況をご確認ください。');
     return;
   }
-  openTrashList();
+  refreshSheet(()=>openTrashList());   // 同じ一覧の作り直しなので位置を残す
   renderQuiet();
   toast('元に戻しました');
 }
@@ -5499,7 +5514,7 @@ function renderRequestForm(keepText){
     ? [colTarget+colText, reqDueFieldHTML()+reqOptionsHTML()]
     : [colTarget, colText+reqDueFieldHTML()];
 
-  openSheet(`<h3>${attend?'日程を決める':'連絡・お願い'}</h3>
+  const html=`<h3>${attend?'日程を決める':'連絡・お願い'}</h3>
     <p class="page-sub" style="margin-top:0">${branchName(ME.branch_id)}の中に、${attend?'日程の候補を出して、○△×を集めます。':'連絡や依頼を送ります。'}</p>
 
     <div class="sheet2">
@@ -5508,7 +5523,11 @@ function renderRequestForm(keepText){
     </div>
     <div class="field-err" id="reqErr"></div>
 
-    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'候補を送って都合を聞く':'この内容で送る'}</button>`);
+    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'候補を送って都合を聞く':'この内容で送る'}</button>`;
+  /* keepText が付くのは、候補日や締切を触ってその場で描き直すとき。
+     このときだけ表示位置を残す。初めて開くときは先頭から見せる */
+  if(keepText)refreshSheet(()=>openSheet(html));
+  else openSheet(html);
 }
 
 async function submitRequest(){
