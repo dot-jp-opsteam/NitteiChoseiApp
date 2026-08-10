@@ -1582,6 +1582,12 @@
   .view>*:nth-child(4){animation-delay:.17s}
   .view>*:nth-child(n+5){animation-delay:.22s}
   @keyframes v2-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  /* renderQuiet() が付ける。削除や背景の更新で画面を作り直すときは、
+     上の2つ（.view と .view>*）の登場アニメを通さない。
+     どちらも opacity:0 から始まるので、真っ黒な背景のダークテーマでは
+     画面ぜんぶが一度暗転して「一瞬読み込み直した」ように見えてしまう。
+     JS側の .reveal だけ抑えても、こちらのCSSアニメは新しい .view のたびに再生される */
+  .view.viewquiet,.view.viewquiet>*{animation:none}
 
   /* ---------- 3. カード ----------
      四隅のL字は今は「濃さが変わる」だけ。

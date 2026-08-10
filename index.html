@@ -1769,13 +1769,18 @@ function render(){
    背景の更新で呼ぶと画面がいったん消えてフェードで戻る＝暗転して見える。
    人が押した操作は render()、サーバーからの更新は renderQuiet() を使うこと。
 
+   演出は2系統あり、両方を止めないと暗転が残る。
+   1. JS側の .reveal（bindReveal）… .in まで最初から付けて透明の状態を通さない
+   2. CSS側の .view / .view>* の登場アニメ … viewquiet を付けて止める。
+      こちらは新しい .view を作るたびに必ず再生されるので、
+      1だけ抑えても画面ぜんぶが一度 opacity:0 になり、黒い背景では暗転して見える
+
    読んでいた位置がずれると結局じゃまになるので、縦の位置も戻す */
 function renderQuiet(){
   const m=document.getElementById('main');
   const t=currentTab;
   const y=window.scrollY;
-  m.innerHTML=`<div class="view ${TAB_ACC[t]||'a1'}">${homeBackBtn()}${viewFor(t)}</div>`;
-  // .in まで最初から付けるので、透明の状態を一度も通らない
+  m.innerHTML=`<div class="view viewquiet ${TAB_ACC[t]||'a1'}">${homeBackBtn()}${viewFor(t)}</div>`;
   m.querySelectorAll('.card,.hex').forEach(el=>el.classList.add('reveal','in'));
   window.scrollTo(0,y);
   updateBell();
