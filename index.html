@@ -3332,7 +3332,7 @@ async function deleteEvent(id){
     db.events=db.events.filter(e=>e.id!==id);
   });
   if(ok)DB.event_responses=(DB.event_responses||[]).filter(r=>r.event_id!==id);
-  render();
+  renderQuiet();
   if(ok)toast('イベントを削除しました');
 }
 
