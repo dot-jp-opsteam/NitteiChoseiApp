@@ -4231,7 +4231,8 @@ function sentUnconfirmedAttendCount(){
   return sentRequests().filter(r=>isAttend(r)&&!r.confirmed).length;
 }
 function requestNeedsAction(r){
-  return isAttend(r)?!attendResponses(r).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id);
+  // 出欠確認は日程が確定済みならもう答える意味が無いので、自分が未回答でも完了済みへ移す
+  return isAttend(r)?(!r.confirmed&&!attendResponses(r).some(a=>a.user_id===ME.id)):!hasConfirmed(r,ME.id);
 }
 function dueDateLabel(value,time){
   if(!value)return '';
@@ -4667,7 +4668,7 @@ async function confirmAttend(reqId,optId){
     console.warn('日程の確定に失敗しました',e);
     setSaveError('確定できていません。通信状況をご確認ください。');return;
   }
-  closeSheet();updateBell();render();
+  closeSheet();updateBell();renderQuiet();
   toast('日程を確定しました');
 }
 

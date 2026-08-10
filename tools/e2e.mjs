@@ -633,9 +633,9 @@ async function testAttendance() {
       && appHtml.includes("method:'DELETE'")
       && appHtml.includes("toast('完了しました')")
       && appHtml.includes("toast('完了を取り消しました')"), true);
-  check('未処理件数は未完了の通常依頼と未回答の出欠確認を数える',
+  check('未処理件数は未完了の通常依頼と未回答かつ未確定の出欠確認を数える',
     appHtml.includes('function requestNeedsAction(r)')
-      && appHtml.includes("isAttend(r)?!attendResponses(r).some(a=>a.user_id===ME.id):!hasConfirmed(r,ME.id)"), true);
+      && appHtml.includes("isAttend(r)?(!r.confirmed&&!attendResponses(r).some(a=>a.user_id===ME.id)):!hasConfirmed(r,ME.id)"), true);
   /* 回答済み・確認済みは出欠も通常も完了済みタブへ移る。
      以前は出欠確認だけ回答後も受けた依頼に残り続けていた */
   check('答えた出欠確認も完了済みへ移る',
