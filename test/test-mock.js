@@ -361,6 +361,9 @@
     start_datetime: at(2, 19, 0), end_datetime: at(2, 21, 0),
     location: '', branch_id: HOME_BRANCH, visibility: 'branch',
     color: '#56b8ac', meet_url: '', zoom_url: '',
+    /* 「日程を決める」で確定した予定なので、ここではもう○△×を取らない。
+       「参加を確認する」で作られた予定だけが votable: true になる */
+    votable: false,
   });
 
   /* 出欠確認は、依頼として届くのと合わせてメール履歴にも残る。

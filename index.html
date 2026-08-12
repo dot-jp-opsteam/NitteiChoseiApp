@@ -1643,13 +1643,6 @@ function buildNav(){
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
-    ${ME.role==='intern'
-      ?`<button class="sb-item" onclick="openMailHistory()" title="受け取った通知メールを見る">
-        <span class="si">${ic('mail')}</span><span class="sl">受信メール</span></button>`
-      /* スタッフのメール履歴はホームの六角形からここへ移した（入れ替わりでカレンダー連携がホームへ）。
-         面談の確定・不成立は実際にメールを送っているので、その控えを見る場所は残しておく */
-      :`<button class="sb-item" onclick="openMailHistory()" title="送ったメール・届いたメールの記録を見る">
-        <span class="si">${ic('mail')}</span><span class="sl">メール履歴</span></button>`}
     <button class="sb-item" onclick="openTrashList()" title="削除した依頼を見る">
       <span class="si">${ic('trash')}</span><span class="sl">削除リスト</span></button>
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="${themeSwitchLabel()}">
@@ -1874,7 +1867,7 @@ function viewHome(){
        移したため（2026-08-06）。詳しくは
        _archive/2026-08-06-インターン生の面談申請画面/README.md */
     /* ここは「これからやること」だけに絞る。
-       受信メール・カレンダー連携は左メニューへ移した */
+       カレンダー連携は左メニューへ移した */
     return hi+dueNotice+hexgrid([
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
       hex("go('requests')",'megaphone','受けた依頼','スタッフからの連絡',unread),
@@ -1892,8 +1885,7 @@ function viewHome(){
        曜日ごとの受付時間（面談を受けられる時間）は、その画面の中から開く。
        カレンダー連携はホームへ戻した。連携しないと自分の予定が「面談不可」に
        反映されず、空いていない時間に面談を入れられてしまうので、
-       左メニューの奥ではなく気づける場所に置く。
-       入れ替わりでメール履歴は左メニューへ移した */
+       左メニューの奥ではなく気づける場所に置く */
     items.push(
       hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
       hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread,sentUnconfirmed>0),
@@ -2055,12 +2047,11 @@ function renderGoogleCalendarSettings(data){
       <div class="hint" style="margin-top:8px">${ic('user')}<span>あなたのGoogleカレンダーの予定は、日調アプリのカレンダーにも並びます。
         <b>これはあなたにしか見えません</b>。他の人の画面には出ないので、私的な予定が入っていても大丈夫です。
         カレンダー右上の人のボタンで、いつでも隠せます。</span></div>
-      <p class="page-sub" style="margin-top:10px">Notion Calendarをお使いの場合も、表示しているアカウントが同じGoogleアカウントであれば自動的に反映されます。iPhone標準カレンダー（iCloud）は別対応が必要です。</p>
       ${openCalendarButton()}
       <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:var(--bad-line)" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に「面談を受けられない時間」として反映され、確定した面談も自動でカレンダーに追加されます。Notion CalendarでGoogleアカウントを表示している場合も対象です。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
+      <p class="page-sub">${isStaff?'あなたのGoogleカレンダーと連携すると、予定が自動的に「面談を受けられない時間」として反映され、確定した面談も自動でカレンダーに追加されます。':'あなたのGoogleカレンダーと連携すると、確定した面談が自動的にあなたのカレンダーに追加されます。'}</p>
       <div class="hint" style="margin-top:10px">${ic('user')}<span>連携すると、あなたのGoogleカレンダーの予定が日調アプリのカレンダーにも並びます。
         <b>これはあなたにしか見えません</b>（他の人の画面には出ません）。いつでも隠せます。</span></div>
       <button class="btn pri block" style="margin-top:16px" onclick="startGoogleConnect(this)">Googleカレンダーと連携する</button>
@@ -3154,16 +3145,20 @@ async function vote(evId,resp){
     console.warn('出欠の保存に失敗しました',e);
     setSaveError('回答を保存できていません。通信状況をご確認ください。');
   }
-  /* 押した予定の1枚だけを差し替える。render() で画面ごと作り直すと、
-     カードの登場アニメが再生し直されて一瞬黒く沈む（面談の枠選びと同じ理由）。
-     カードが画面に無いとき（別の画面から呼ばれたとき）だけ、従来どおり描き直す */
+  /* シートの中のカードから答えたときは、シートは作り直されないので、その1枚だけ差し替える。
+     編集ボタンを出すかどうかは開いている画面によって違うので、いま出ているかどうかで揃える
+     （出す設定でも、自分が作った予定でなければ元から出ていない） */
   const card=document.getElementById('evc_'+evId);
   const ev=(DB.events||[]).find(e=>e.id===evId);
-  if(card&&ev){
+  if(card&&ev&&document.getElementById('sheet').contains(card)){
     const box=document.createElement('div');
-    box.innerHTML=eventCard(ev);
+    box.innerHTML=eventCard(ev,!!card.querySelector('button[onclick^="openEventForm("]'));
     card.replaceWith(box.firstElementChild);
-  }else render();
+  }
+  /* 参加確認の依頼は「自分が答えたかどうか」で受けた依頼と完了済みに分かれる。
+     カード1枚だけ差し替えると一覧が古いままで、再読み込みするまで移らなかった。
+     renderQuiet() は登場アニメを通さないので、描き直しても暗転しない */
+  renderQuiet();
   if(ok)toast('回答を記録しました');
 }
 /* 畳んである予定カードを開く／閉じる。
@@ -4351,9 +4346,24 @@ function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userI
 function sentUnconfirmedAttendCount(){
   return sentRequests().filter(r=>isAttend(r)&&!r.confirmed).length;
 }
+/* 確定したあとも、自分がまだ○△×を答えられるか。
+   「日程を決める」は候補段階で答えを集め終わっているので、確定したらもう答えられない。
+   「参加を確認する」は確定した予定そのものに答えてもらう作り（votable:true）なので、
+   確定後こそが答える場面になる */
+function attendStillAnswerable(r){
+  if(!r.confirmed)return true;
+  if(!r.event_id)return false;          // 日程未定で確定したものは予定が無く、答えようがない
+  const ev=(DB.events||[]).find(e=>e.id===r.event_id);
+  /* votable が付く前に作られた昔の予定は、すべて「日程を決める」で確定したもの。
+     印が無いものまで答えられる扱いにすると、昔の確定済みが一斉に
+     受けた依頼へ戻ってきてしまうので、はっきり true のときだけにする */
+  return !!ev&&ev.votable===true;
+}
 function requestNeedsAction(r){
-  // 出欠確認は日程が確定済みならもう答える意味が無いので、自分が未回答でも完了済みへ移す
-  return isAttend(r)?(!r.confirmed&&!attendResponses(r).some(a=>a.user_id===ME.id)):!hasConfirmed(r,ME.id);
+  if(!isAttend(r))return !hasConfirmed(r,ME.id);
+  // もう答えられないものは、自分が未回答でも完了済みへ移す
+  if(!attendStillAnswerable(r))return false;
+  return !attendResponses(r).some(a=>a.user_id===ME.id);
 }
 function dueDateLabel(value,time){
   if(!value)return '';
@@ -4485,9 +4495,12 @@ function requestList(list,kind){
         ? `${esc(r.target_label||'')} ・ ${done}/${total}人が完了 ・ ${fmtRel(r.created_at)}`
         : `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`);
     let badge='';
-    if(att&&r.confirmed)badge='<span class="tag ok">確定</span>';
+    /* 受けた依頼に残っているのは自分がまだ答えていないものだけなので、
+       「確定」より先に「未回答」を出す。日にちが決まっている参加確認でも、
+       ここでやることは「答える」ことだと分かるようにする */
+    if(att&&kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
+    else if(att&&r.confirmed)badge='<span class="tag ok">確定</span>';
     else if(att&&kind==='sent')badge='<span class="tag" style="background:var(--bad-soft);color:var(--bad)">日程未確定</span>';
-    else if(att&&kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
     else if(att&&kind==='done')badge='<span class="tag ok">回答済み</span>';
     else if(!att&&kind==='inbox'&&!hasConfirmed(r,ME.id))badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>';
     else if(!att&&kind==='done')badge='<span class="tag ok">完了</span>';
@@ -5621,45 +5634,9 @@ async function submitRequest(){
   if(attend)openAttendDetail(request.id);
 }
 
-/* =========================================================
-   メール履歴の閲覧
-   ========================================================= */
-/* 送ったものと受け取ったものの両方を並べる。
-   以前はスタッフに送信済みしか出しておらず、出欠確認のように
-   「自分あてに届く記録」を受け取っても気づけなかった。
-   管理者にはサーバーが全員分を返すので、当事者のものだけに絞る */
-function openMailHistory(){
-  const mine=(DB.emails||[]).filter(m=>m.sender_id===ME.id||m.receiver_id===ME.id);
-  const list=mine.sort((a,b)=>new Date(b.sent_at||0)-new Date(a.sent_at||0));
-  const rows=list.length?list.map(m=>{
-    const got=m.receiver_id===ME.id;
-    const other=findUser(got?m.sender_id:m.receiver_id);
-    return `<div class="row" style="cursor:pointer" onclick="openMailDetail('${m.id}')">
-      <span class="av" style="border-radius:10px;background:var(--brand-soft);color:var(--brand-d);font-size:18px">${ic('mail')}</span>
-      <span class="rmain"><span class="rt">${esc(m.subject)}</span>
-      <span class="rs"><span class="tag ${got?'ok':''}">${got?'受信':'送信'}</span>
-        ${got?'差出人':'宛先'}：${esc(other?.nickname||'—')} ・ ${m.sent_at?fmtRel(m.sent_at):''}</span></span>
-      <span class="tile-arrow">${ic('chevron')}</span></div>`;}).join('')
-    :`<div class="empty" style="padding:26px"><div class="ei">${ic('mail')}</div><p>メールの記録はまだありません。</p></div>`;
-  openSheet(`<h3>メール履歴</h3>
-    <div class="hint">${ic('mail')}<span>面談の確定・不成立のお知らせはメールでも届きます。
-      それ以外はアプリ内の記録のみです。</span></div>
-    <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>`);
-}
-function openMailDetail(id){
-  const m=(DB.emails||[]).find(x=>x.id===id);if(!m)return;
-  const from=findUser(m.sender_id),to=findUser(m.receiver_id);
-  openSheet(`<h3>${esc(m.subject)}</h3>
-    <dl class="kv" style="margin:12px 0">
-      <dt>差出人</dt><dd>${esc(from?.nickname||'—')}</dd>
-      <dt>宛先</dt><dd>${esc(to?.nickname||'—')}</dd>
-      <dt>送信日時</dt><dd>${m.sent_at?fmtDT(m.sent_at):'—'}</dd>
-      <dt>メール</dt><dd>${m.delivered?'実際に送信済み':'アプリ内の記録のみ'}</dd>
-    </dl>
-    <div class="divider"></div>
-    <div style="white-space:pre-wrap;font-size:14px;line-height:1.7">${esc(m.body)}</div>
-    <button class="btn block" style="margin-top:16px" onclick="openMailHistory()">${ic('back')}一覧へ戻る</button>`);
-}
+/* メール履歴の画面はここにあったが、アプリから取り外した（2026-08-12）。
+   面談の確定・不成立のメールはこれまでどおり送られ、サーバー側の記録も
+   残り続ける（server.js の emails テーブル）。見る場所だけを無くした */
 
 /* =========================================================
    BOOT

@@ -633,9 +633,21 @@ async function testAttendance() {
       && appHtml.includes("method:'DELETE'")
       && appHtml.includes("toast('完了しました')")
       && appHtml.includes("toast('完了を取り消しました')"), true);
-  check('未処理件数は未完了の通常依頼と未回答かつ未確定の出欠確認を数える',
+  /* 出欠は「まだ答えられるのに答えていない」ものだけを未処理として数える。
+     日程を決める（確定するともう答えられない）は確定した時点で完了済みへ、
+     参加を確認する（確定後の予定に答える）は答えるまで受けた依頼に残る */
+  check('未処理件数は未完了の通常依頼と、まだ答えられる未回答の出欠確認を数える',
     appHtml.includes('function requestNeedsAction(r)')
-      && appHtml.includes("isAttend(r)?(!r.confirmed&&!attendResponses(r).some(a=>a.user_id===ME.id)):!hasConfirmed(r,ME.id)"), true);
+      && appHtml.includes('function attendStillAnswerable(r)')
+      && appHtml.includes("return !!ev&&ev.votable===true;")
+      && appHtml.includes('if(!attendStillAnswerable(r))return false;')
+      && appHtml.includes('return !attendResponses(r).some(a=>a.user_id===ME.id);')
+      && appHtml.includes('if(!isAttend(r))return !hasConfirmed(r,ME.id);'), true);
+  /* 答えた瞬間に一覧の振り分けまで更新する。カード1枚だけ差し替えていたころは
+     再読み込みするまで受けた依頼に残り続けていた */
+  check('出欠の回答後は一覧も静かに描き直す',
+    appHtml.includes('async function vote(evId,resp)')
+      && /renderQuiet\(\);\s*if\(ok\)toast\('回答を記録しました'\);/.test(appHtml), true);
   /* 回答済み・確認済みは出欠も通常も完了済みタブへ移る。
      以前は出欠確認だけ回答後も受けた依頼に残り続けていた */
   check('答えた出欠確認も完了済みへ移る',
