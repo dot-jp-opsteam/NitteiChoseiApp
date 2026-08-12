@@ -1580,10 +1580,9 @@ function validateDiff(oldDB, newDB, actor) {
 
 const app = express();
 /* Renderは前段のプロキシ越しに届くので、これを言っておかないと
-   req.ip が全員そのプロキシのアドレスになり、回数制限が
-   「利用者全員で1つの枠」になってしまう。
-   1 は「いちばん近い1段だけ信じる」指定で、
-   利用者が勝手に足した X-Forwarded-For には引きずられない */
+   req.protocol が http のままになり、URLを組み立てるところ
+   （招待URL・購読URLなど）が http:// で出てしまう。
+   なお回数制限の相手の見分けにはこれを当てにしていない（下の clientKey を参照）*/
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '5mb' }));
 
@@ -1600,14 +1599,34 @@ app.use((req, res, next) => {
   next();
 });
 
+/* 回数を数えるときの「相手」の見分け方。
+
+   req.ip をそのまま使うと、本番では数えられない。Renderは前段のプロキシが
+   複数あり、trust proxy の数え方だとその**プロキシ側**のアドレスを拾ってしまう。
+   プロキシは要求ごとに替わるので、毎回ちがう相手として数えられ、
+   いくら叩いても上限に達しない（2026-08-12に本番で実測。ローカルでは
+   プロキシが無いため正しく効いており、この差で見落としていた）。
+
+   そこで X-Forwarded-For の**先頭**＝実際の利用者のアドレスを直接見る。
+   この値は利用者が偽れるので、その気になれば制限を抜けられる。
+   ただし抜けて得られるのは「自分の枠を増やす」ことだけで、
+   他人を締め出すことはできない。ここで止めたいのは機械で延々と叩く動きなので、
+   この作りで足りる（厳密にやるなら認証を求めることになり、
+   ログイン不要という前提そのものと両立しない）。 */
+function clientKey(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '');
+  const first = xff.split(',')[0].trim();
+  return first || req.ip || (req.socket && req.socket.remoteAddress) || '';
+}
+
 /* ログイン不要の入口の回数制限。1分あたりの回数で、環境変数で加減できる。
    0 を指定すると制限しない（試験で大量に叩くときに使う）。
    書き込みは行が増えるので厳しく、読み取りは画面を開き直すだけなので緩くしてある */
 const num = (v, dflt) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? dflt : Number(v));
 const PUBLIC_WRITE_PER_MIN = num(process.env.PUBLIC_WRITE_PER_MIN, 20);
 const PUBLIC_READ_PER_MIN = num(process.env.PUBLIC_READ_PER_MIN, 120);
-const limitPublicWrite = rateLimit.limiter('public-write', PUBLIC_WRITE_PER_MIN);
-const limitPublicRead = rateLimit.limiter('public-read', PUBLIC_READ_PER_MIN);
+const limitPublicWrite = rateLimit.limiter('public-write', PUBLIC_WRITE_PER_MIN, clientKey);
+const limitPublicRead = rateLimit.limiter('public-read', PUBLIC_READ_PER_MIN, clientKey);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

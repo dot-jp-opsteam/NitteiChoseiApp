@@ -133,6 +133,52 @@ section('Expressに挟む形');
   check('上限0なら制限しない（試験用）', passed, true);
 }
 
+/* 2026-08-12に本番で踏んだ失敗の再発防止。
+   相手の見分けを req.ip 任せにしていたところ、Renderの前段プロキシが
+   要求ごとに替わるせいで毎回ちがう相手として数えられ、
+   いくら叩いても上限に達しなかった。ローカルにはプロキシが無いので気づけなかった。
+   ここではプロキシ越しの形（X-Forwarded-For 付き・req.ip は毎回別）を作って、
+   ちゃんと同じ相手として数えられることを確かめる */
+section('プロキシ越しでも同じ相手として数える（2026-08-12）');
+{
+  /* server.js の clientKey と同じ規則。
+     向こうを直したらこちらも直すこと（写しであることを承知で置いている）*/
+  const clientKey = (req) => {
+    const xff = String((req.headers && req.headers['x-forwarded-for']) || '');
+    const first = xff.split(',')[0].trim();
+    return first || req.ip || '';
+  };
+
+  rl._resetForTest();
+  const mw = rl.limiter('proxied', 3, clientKey);
+  const codes = [];
+  const send = (clientIp, proxyIp) => {
+    const res = {
+      code: 0, set() { return this; }, status(c) { this.code = c; return this; }, json() { return this; },
+    };
+    mw({ headers: { 'x-forwarded-for': `${clientIp}, 10.0.0.9` }, ip: proxyIp },
+      res, () => { res.code = 200; });
+    codes.push(res.code);
+  };
+  // 同じ利用者だが、前段プロキシのアドレスは毎回ちがう
+  send('203.0.113.5', '10.1.1.1');
+  send('203.0.113.5', '10.1.1.2');
+  send('203.0.113.5', '10.1.1.3');
+  send('203.0.113.5', '10.1.1.4');
+  check('プロキシが替わっても同じ相手として数える', codes, [200, 200, 200, 429]);
+
+  // 別の利用者は巻き添えにしない
+  const before = codes.length;
+  send('198.51.100.7', '10.1.1.5');
+  check('別の利用者は通る', codes[before], 200);
+
+  rl._resetForTest();
+  const mw2 = rl.limiter('noxff', 1, clientKey);
+  const res2 = { code: 0, set() { return this; }, status(c) { this.code = c; return this; }, json() { return this; } };
+  mw2({ headers: {}, ip: '1.2.3.4' }, res2, () => { res2.code = 200; });
+  check('X-Forwarded-For が無ければ req.ip を使う', res2.code, 200);
+}
+
 /* ---------------------------------------------------------- */
 console.log('\n────────────────────────────────────────────────────────');
 if (failures.length) {
