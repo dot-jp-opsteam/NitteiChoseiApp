@@ -584,7 +584,7 @@ async function connectStream(){
       while((i=buf.indexOf('\n\n'))>=0){
         const block=buf.slice(0,i);buf=buf.slice(i+2);
         // 生きている合図（: ping）は読み飛ばす
-        if(block.indexOf('event: refresh')===0)onServerRefresh();
+        if(block.indexOf('event: refresh')===0)scheduleServerRefresh();
       }
     }
   }catch(e){/* 切れただけ。下でつなぎ直す */}
@@ -599,10 +599,27 @@ async function connectStream(){
   STREAM_WAIT=Math.min(STREAM_WAIT*2,30000);
 }
 
+/* 押し出しを受けてから取り直すまで、少しだけ待つ。
+   1件の依頼を送ると、あて先の全員へ同時に合図が飛ぶ。そのまま全員が取りに行くと
+   同じ瞬間に人数分の /api/db が重なり、Renderの無料インスタンス1つに集中する。
+   0〜3秒のあいだにばらけさせるだけで山がならされる。人が見て分かる遅れではない。
+
+   待っている間に合図が続けて届いても取り直しは1回にまとめる
+   （どのみち最新をまるごと取り直すので、回数を増やしても得られるものがない）*/
+const REFRESH_JITTER_MS=3000;
+let REFRESH_TIMER=null;
+function scheduleServerRefresh(){
+  if(REFRESH_TIMER)return;
+  REFRESH_TIMER=setTimeout(()=>{REFRESH_TIMER=null;onServerRefresh();},
+    Math.random()*REFRESH_JITTER_MS);
+}
+
 /* 「更新があった」と言われたので取り直す。
    何が変わったかはサーバーから送られてこない（送ると権限の判定が二重になるため）*/
 async function onServerRefresh(){
-  if(SYNCING)return;
+  /* 取り直しの最中なら、その回では今の合図を拾えていないかもしれないので改めて待つ。
+     ここで捨てると、次の定期ポーリング（30秒後）まで反映が遅れる */
+  if(SYNCING){setTimeout(scheduleServerRefresh,500);return;}
   SYNCING=true;
   try{
     const before=((DB&&DB.notifications)||[]).length;

@@ -160,7 +160,15 @@ async function setupDB(dbPath) {
 function startServer(dbPath) {
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(ROOT, 'server'),
-    env: { ...process.env, PORT: String(PORT), TURSO_DATABASE_URL: 'file:' + dbPath, TURSO_AUTH_TOKEN: '' },
+    /* 公開ページの回数制限は切っておく。ここでは「100人が同時に申請しても
+       取りこぼさないか」を1つのIPから確かめるので、制限が効くと必ず落ちる。
+       制限そのものの検査は tools/test-ratelimit.mjs が受け持つ */
+    env: { ...process.env,
+      PORT: String(PORT),
+      TURSO_DATABASE_URL: 'file:' + dbPath,
+      TURSO_AUTH_TOKEN: '',
+      PUBLIC_WRITE_PER_MIN: '0',
+      PUBLIC_READ_PER_MIN: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const log = [];
@@ -1512,6 +1520,96 @@ async function run() {
     const survived = await getDB(TOKENS.staff);
     check('依頼が消えていない', (survived.requests || []).some((r) => r.id === REQ_ID), true);
     check('通知が消えていない', (survived.notifications || []).length > 0, true);
+  }
+
+  /* 2026-08-12 のレビュー対応。
+     どれも「気づかず元に戻すと、静かに穴が開く」たぐいの守りなので検査を残す */
+  console.log('\n─────── 予定の作成者・支部のすり替え（2026-08-12） ───────');
+  {
+    // 自分の予定を1件作ってから、それを他支部・別人へ書き換えられないことを見る
+    let res = await putDB(TOKENS.staff, (db) => {
+      db.events = [...(db.events || []), {
+        id: 'ev_own', creator_id: 'u_e2e_staff', branch_id: 'b1',
+        title: '自分の予定', date: '2026-05-01', visibility: 'branch',
+      }];
+    });
+    check('自分の支部の予定は作れる', res.status, 200);
+
+    res = await putDB(TOKENS.staff, (db) => {
+      db.events = (db.events || []).map((e) => (e.id === 'ev_own' ? { ...e, branch_id: 'b2' } : e));
+    });
+    check('あとから他支部へ付け替えられない', res.status, 403);
+
+    res = await putDB(TOKENS.staff, (db) => {
+      db.events = (db.events || []).map((e) => (e.id === 'ev_own' ? { ...e, creator_id: 'u_e2e_staff3' } : e));
+    });
+    check('あとから作成者を書き換えられない', res.status, 403);
+
+    res = await putDB(TOKENS.staff, (db) => {
+      db.events = (db.events || []).map((e) => (e.id === 'ev_own' ? { ...e, title: '題名だけ直す' } : e));
+    });
+    check('ふつうの編集はできる', res.status, 200);
+  }
+
+  console.log('\n─────── メールアドレスの配り先（2026-08-12） ───────');
+  {
+    const asStaff = await getDB(TOKENS.staff);
+    const me = (asStaff.users || []).find((u) => u.id === 'u_e2e_staff');
+    const other = (asStaff.users || []).find((u) => u.id === 'u_e2e_staff3');
+    const otherBranch = (asStaff.users || []).find((u) => u.id === 'u_e2e_staff2');
+    check('自分のアドレスは見える', me.email, 'e2e_staff@dot-jp.or.jp');
+    check('同じ支部の他人のアドレスは見えない', 'email' in other, false);
+    check('他支部の人のアドレスも見えない', 'email' in otherBranch, false);
+    check('名前は今までどおり見える', other.nickname, 'E2E-staff');
+
+    const asAdmin = await getDB(TOKENS.admin);
+    check('全体管理者には見える（ユーザー管理で使う）',
+      (asAdmin.users || []).find((u) => u.id === 'u_e2e_staff3').email, 'e2e_staff3@dot-jp.or.jp');
+  }
+
+  console.log('\n─────── イベント出欠の回答の見える範囲（2026-08-12） ───────');
+  {
+    /* ev_old は b2（大阪）のイベントで、そこへの回答 er_old が引っ越し済み。
+       b1のスタッフには、イベントも回答も見えてはいけない */
+    const asStaff = await getDB(TOKENS.staff);
+    check('他支部のイベントは見えない',
+      (asStaff.events || []).some((e) => e.id === 'ev_old'), false);
+    check('他支部のイベントへの回答も渡らない',
+      (asStaff.event_responses || []).some((r) => r.event_id === 'ev_old'), false);
+
+    const asOwner = await getDB(TOKENS.staff2);
+    check('自分の支部のイベントへの回答は見える',
+      (asOwner.event_responses || []).some((r) => r.event_id === 'ev_old'), true);
+  }
+
+  console.log('\n─────── 退会したときの片付け（2026-08-12） ───────');
+  {
+    // 使い捨てのスタッフを作り、ひもづく物を置いてから消す
+    const made = await api(TOKENS.admin, 'POST', '/api/admin/staff',
+      { email: 'e2e_gone@dot-jp.or.jp', full_name: '退会する人', branch_id: 'b1' });
+    check('片付け確認用のスタッフを作れた', made.status, 200);
+    const goneId = made.json.user.id;
+    const now = new Date().toISOString();
+    const db = createClient({ url: 'file:' + DB_PATH });
+    await db.execute({
+      sql: `INSERT INTO google_tokens (staff_id, access_token, refresh_token, token_expiry, calendar_id, connected_at)
+            VALUES (?,?,?,?,?,?)`,
+      args: [goneId, 'x', 'y', now, 'primary', now],
+    });
+    await db.execute({
+      sql: 'INSERT INTO calendar_subscriptions (user_id, subscription_key, created_at, updated_at) VALUES (?,?,?,?)',
+      args: [goneId, 'k'.repeat(40), now, now],
+    });
+
+    const del = await api(TOKENS.admin, 'DELETE', `/api/admin/users/${goneId}`);
+    check('退会させられる', del.status, 200);
+    const left = async (table, col) => Number((await db.execute({
+      sql: `SELECT COUNT(*) n FROM ${table} WHERE ${col} = ?`, args: [goneId],
+    })).rows[0].n);
+    check('Googleカレンダーの鍵が残らない', await left('google_tokens', 'staff_id'), 0);
+    check('カレンダー購読の合鍵が残らない', await left('calendar_subscriptions', 'user_id'), 0);
+    check('セッションが残らない', await left('sessions', 'user_id'), 0);
+    db.close();
   }
 
   /* インターン先マスタは 2026-08-05 に受け付けをやめた。

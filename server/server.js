@@ -44,6 +44,7 @@ const sharedCalFilter = require('./shared-cal-filter');
 const googleSyncFilter = require('./google-sync-filter');
 const slots = require('./slots');
 const push = require('./push');
+const rateLimit = require('./ratelimit');
 const { buildICalendar } = require('./ical');
 
 const PORT = process.env.PORT || 8080;
@@ -173,8 +174,14 @@ async function initDB() {
        confirmed  … 確定した候補のid。未確定なら null */
   for (const [col, type] of [['kind', 'TEXT'], ['options', 'TEXT'], ['confirmed', 'TEXT'],
     ['event_id', 'TEXT'], ['public_token', 'TEXT'], ['due_date', 'TEXT'], ['due_time', 'TEXT']]) {
-    try { await client.execute(`ALTER TABLE requests ADD COLUMN ${col} ${type}`); }
-    catch (e) { /* 既にある。SQLiteには IF NOT EXISTS が無いのでこれで判定する */ }
+    try {
+      await client.execute(`ALTER TABLE requests ADD COLUMN ${col} ${type}`);
+    } catch (e) {
+      /* 既にあるぶんだけを見逃す。SQLiteには IF NOT EXISTS が無いのでこれで判定する。
+         どんな失敗も見逃すと、通信が切れただけのときにも列が無いまま起動してしまい、
+         原因の分からない不具合になる（下の users への追加と同じ扱いに揃えてある）*/
+      if (!/duplicate column/i.test(e.message || '')) throw e;
+    }
   }
   /* 「確認しました」を依頼の行に配列で持つと、300人が同じ1行を奪い合うことになる。
      1人1行にすることで、何人が同時に押しても衝突しない */
@@ -513,6 +520,24 @@ async function migrateStoreToTables() {
 /* ---------- 専用テーブルの読み書き ---------- */
 const parseIds = (s) => { try { return JSON.parse(s) || []; } catch { return []; } };
 
+/* request_id で絞って引く。1回のSQLに入れられるプレースホルダには上限があるので、
+   多いときは分けて引いて1つにまとめる */
+const REQUEST_ID_CHUNK = 500;
+async function selectByRequestIds(sql, requestIds) {
+  const ids = [...new Set(requestIds || [])];
+  if (!ids.length) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i += REQUEST_ID_CHUNK) {
+    const part = ids.slice(i, i + REQUEST_ID_CHUNK);
+    const rs = await client.execute({
+      sql: `${sql} WHERE request_id IN (${part.map(() => '?').join(',')})`,
+      args: part,
+    });
+    out.push(...rs.rows);
+  }
+  return out;
+}
+
 /* 依頼を、フロントが期待する形（read_by 付き）に組み立てて返す */
 async function listRequestsFor(user) {
   const isAdmin = user.role === 'admin';
@@ -527,31 +552,34 @@ async function listRequestsFor(user) {
   if (!rows.length) return [];
   const trash = await client.execute({ sql: 'SELECT request_id, deleted_at FROM request_trash WHERE user_id = ?', args: [user.id] });
   const trashedAt = new Map(trash.rows.map((t) => [t.request_id, t.deleted_at]));
-  const reads = await client.execute('SELECT * FROM request_reads');
+
+  /* 付随する3つの表は、その人に見える依頼のぶんだけを引く。
+     以前は3つとも全件を読み、取ってからJSで捨てていた。
+     依頼が増えるほど、また同時に見る人が増えるほど無駄が積み上がる
+     （通知1件で全員が取り直すため、300人規模で顕著になる）*/
+  const ids = rows.map((r) => r.id);
+  const [reads, answers, publicPeople] = await Promise.all([
+    selectByRequestIds('SELECT * FROM request_reads', ids),
+    selectByRequestIds('SELECT * FROM request_responses', ids),
+    selectByRequestIds('SELECT request_id, respondent_id, display_name, created_at FROM public_attendance_respondents', ids),
+  ]);
   const byRequest = new Map();
-  for (const r of reads.rows) {
+  for (const r of reads) {
     if (!byRequest.has(r.request_id)) byRequest.set(r.request_id, []);
     byRequest.get(r.request_id).push({ user_id: r.user_id, at: r.read_at });
   }
-  /* 出欠の回答も一緒に返す。見える依頼のぶんだけに絞るので、
-     他の支部の出欠が混ざることはない */
-  const mine = new Set(rows.map((r) => r.id));
-  const [answers, publicPeople] = await Promise.all([
-    client.execute('SELECT * FROM request_responses'),
-    client.execute('SELECT request_id, respondent_id, display_name FROM public_attendance_respondents'),
-  ]);
   const respOf = new Map();
-  for (const a of answers.rows) {
-    if (!mine.has(a.request_id)) continue;
+  for (const a of answers) {
     if (!respOf.has(a.request_id)) respOf.set(a.request_id, []);
     respOf.get(a.request_id).push({ option_id: a.option_id, user_id: a.user_id, response: a.response });
   }
   const publicPeopleOf = new Map();
-  for (const p of publicPeople.rows) {
-    if (!mine.has(p.request_id)) continue;
+  // 番号の付き方をぶらさないため、登録順にそろえてから見分けを付ける
+  for (const p of [...publicPeople].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))) {
     if (!publicPeopleOf.has(p.request_id)) publicPeopleOf.set(p.request_id, []);
     publicPeopleOf.get(p.request_id).push({ id: p.respondent_id, name: p.display_name });
   }
+  for (const [rid, list] of publicPeopleOf) publicPeopleOf.set(rid, disambiguateNames(list));
   return rows.map((r) => ({
     id: r.id, sender_id: r.sender_id, branch_id: r.branch_id,
     subject: r.subject, body: r.body, target_label: r.target_label,
@@ -569,15 +597,45 @@ async function listRequestsFor(user) {
     responses: respOf.get(r.id) || [],
   }));
 }
+/* 同じ名前の回答者を見分けられるようにする。
+   公開の出欠は名乗るだけで答えられるので、同姓同名も、同じ人が
+   別の端末から答えて2人ぶんに増えるのも起こりうる。
+   名前がそのままだと集計表に「山田 太郎」が2行並び、どちらが誰か分からない。
+   先に答えた人はそのまま、あとの人に（2）（3）…を付ける。
+   並びは登録順に固定してあるので、あとから回答が増えても番号は入れ替わらない */
+function disambiguateNames(people) {
+  const seen = new Map();
+  return people.map((p) => {
+    const n = (seen.get(p.name) || 0) + 1;
+    seen.set(p.name, n);
+    return n === 1 ? p : { ...p, name: `${p.name}（${n}）` };
+  });
+}
+
 /* 壊れたJSONが入っていても画面ごと落とさない */
 function safeJson(text, fallback) {
   try { const v = JSON.parse(text || ''); return v == null ? fallback : v; }
   catch (e) { return fallback; }
 }
 
-async function listEventResponses() {
-  const rs = await client.execute('SELECT * FROM event_responses');
-  return rs.rows.map((r) => ({ id: r.id, event_id: r.event_id, user_id: r.user_id, response: r.response }));
+/* 出欠の回答は、その人に見えるイベントのぶんだけ返す。
+   以前は全件返しており、他支部のイベントや他人の「自分だけ」の予定に
+   誰が答えたかまで配っていた */
+async function listEventResponses(visibleEventIds) {
+  const ids = [...new Set(visibleEventIds || [])];
+  if (!ids.length) return [];
+  const rows = [];
+  /* SQLiteのプレースホルダには上限があるので、多いときは分けて引く */
+  const CHUNK = 500;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const part = ids.slice(i, i + CHUNK);
+    const rs = await client.execute({
+      sql: `SELECT * FROM event_responses WHERE event_id IN (${part.map(() => '?').join(',')})`,
+      args: part,
+    });
+    rows.push(...rs.rows);
+  }
+  return rows.map((r) => ({ id: r.id, event_id: r.event_id, user_id: r.user_id, response: r.response }));
 }
 
 async function listNotificationsFor(user) {
@@ -674,6 +732,28 @@ async function purgeRequestTrashRows(rows) {
     }
   }
   return removed;
+}
+
+/* 期限の切れたセッションと、使い終わった／期限切れのパスワード再設定を片付ける。
+   これまでは、そのセッションで誰かがアクセスしてきたときにだけ消えていたので、
+   二度と使われないまま残り続ける行が溜まっていた。
+   期限が切れている＝もう通らないので、消してよい */
+async function purgeExpiredSessions() {
+  const now = new Date().toISOString();
+  try {
+    const del = await client.execute({ sql: 'DELETE FROM sessions WHERE expires_at < ?', args: [now] });
+    const removed = Number(del.rowsAffected || 0);
+    if (removed) console.log(`期限切れのセッションを${removed}件片付けました`);
+  } catch (e) {
+    console.error('期限切れセッションの片付けに失敗しました', e);
+  }
+  /* パスワードによるログインは廃止したので、この表にはもう書き込まない。
+     残っている行を片付けるためだけに残してある */
+  try {
+    await client.execute({ sql: 'DELETE FROM password_resets WHERE expires_at < ? OR used_at IS NOT NULL', args: [now] });
+  } catch (e) {
+    console.error('期限切れの再設定の片付けに失敗しました', e);
+  }
 }
 
 /* 削除リストへ移してから7日たったものを、毎日まとめて完全削除する */
@@ -971,9 +1051,55 @@ async function updateUserRow(id, { nickname, branchId, role, staffId }) {
     await client.execute({ sql: 'UPDATE users SET staff_id=? WHERE id=?', args: [staffId || null, id] });
   }
 }
+/* ユーザーを消すときは、その人にひもづく物も一緒に片付ける。
+   以前は users と sessions しか消しておらず、いちばん問題なのは google_tokens で、
+   消したはずの人のGoogleカレンダーへ入れる鍵がサーバーに残り続けていた。
+   端末の通知先・カレンダー購読の合鍵も、放っておくと消した人へ届き続ける。
+
+   面談・依頼・メール履歴は消さない。担当していた記録はスタッフ側が使うため
+   （インターン生のアカウント廃止のときと同じ判断）。 */
 async function deleteUserRow(id) {
   await client.execute({ sql: 'DELETE FROM users WHERE id=?', args: [id] });
   await client.execute({ sql: 'DELETE FROM sessions WHERE user_id=?', args: [id] });
+
+  /* Googleカレンダーへのアクセス権。watchを張ったままだと通知も届き続けるので、
+     消す前に止めておく（止められなくても、鍵を消すことのほうが大事なので先へ進む） */
+  try {
+    const tokenRow = await getTokenRow(id);
+    if (tokenRow && tokenRow.channel_id) {
+      const accessToken = await accessTokenFor(tokenRow);
+      await google.stopWatch(accessToken, tokenRow.channel_id, tokenRow.resource_id);
+    }
+  } catch (e) {
+    console.warn(`退会時のwatch停止に失敗しました（user ${id}）`, e.message || e);
+  }
+
+  for (const sql of [
+    'DELETE FROM google_tokens WHERE staff_id=?',
+    'DELETE FROM push_subscriptions WHERE user_id=?',
+    'DELETE FROM calendar_subscriptions WHERE user_id=?',
+    'DELETE FROM my_calendar_overrides WHERE user_id=?',
+    'DELETE FROM request_trash WHERE user_id=?',
+  ]) {
+    try { await client.execute({ sql, args: [id] }); }
+    catch (e) { console.warn(`退会時の片付けに失敗しました（${sql}）`, e.message || e); }
+  }
+
+  /* store 側（1行JSON）に残る本人の設定も落とす。
+     読む→変える→書く なので鍵で囲む */
+  try {
+    await withDBLock(async () => {
+      const db = await readDBForWrite();
+      if (!db) return;
+      let changed = false;
+      if (db.availability && db.availability[id]) { delete db.availability[id]; changed = true; }
+      if (db.profiles && db.profiles[id]) { delete db.profiles[id]; changed = true; }
+      if (changed) await writeDB(db);
+    });
+  } catch (e) {
+    console.warn(`退会時の設定の片付けに失敗しました（user ${id}）`, e.message || e);
+    invalidateDBCache();
+  }
 }
 
 /* ---------- directory（スタッフ名簿）テーブル操作 ----------
@@ -1329,10 +1455,7 @@ function mergeScoped(oldDB, clientDB, user, users) {
      実際 requests / profiles / internships の追加時に並べ忘れがあり、
      全体管理者以外の保存が消える不具合になっていた（2026-08-02修正）。
      フロントのDBに項目を増やしたら、必ずここにも足すこと */
-  const keys = isAdmin
-    ? ['events']
-    : ['events'];
-  for (const key of keys) {
+  for (const key of ['events']) {
     const visibleIds = new Set((visible[key] || []).map((x) => x.id));
     const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
     merged[key] = [...hidden, ...(clientDB[key] || [])];
@@ -1406,6 +1529,13 @@ function validateDiff(oldDB, newDB, actor) {
     } else if (!sameJSON(prev, ev)) {
       if (prev.creator_id !== actor.id) errs.push('このイベントを編集する権限がありません');
       else if (actor.role === 'intern' && !isPrivate) errs.push('インターン生が作れるのは「自分だけ」の予定だけです');
+      /* 作成した後で支部や作成者を書き換えられると、新規作成時の確認をすり抜けて
+         他支部のカレンダーへ予定を差し込んだり、別人の作った予定に見せかけたりできる。
+         編集のときも新規と同じ条件で確かめる */
+      else if (ev.creator_id !== prev.creator_id) errs.push('予定の作成者は変更できません');
+      else if (!isAdmin && !isPrivate && ev.branch_id !== actor.branch_id) {
+        errs.push('他の支部のイベントには変更できません');
+      }
     }
   }
   const removedEventIds = new Set([...oldEv.keys()].filter((id) => !newEv.has(id)));
@@ -1449,7 +1579,35 @@ function validateDiff(oldDB, newDB, actor) {
 }
 
 const app = express();
+/* Renderは前段のプロキシ越しに届くので、これを言っておかないと
+   req.ip が全員そのプロキシのアドレスになり、回数制限が
+   「利用者全員で1つの枠」になってしまう。
+   1 は「いちばん近い1段だけ信じる」指定で、
+   利用者が勝手に足した X-Forwarded-For には引きずられない */
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '5mb' }));
+
+/* 全部の応答に付ける守りの指定。
+   nosniff … 中身を見て型を推測させない（テキストをスクリプトとして実行されるのを防ぐ）
+   DENY    … 他所のページの枠の中にこのアプリを埋め込ませない。
+             埋め込めると、透明にして上に重ね、押させたいボタンを押させることができる
+   Referrer-Policy … 出欠の共有URLなど、URL自体が合鍵になっているページから
+             外部リンクを踏んだときに、そのURLを相手へ渡さない */
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+/* ログイン不要の入口の回数制限。1分あたりの回数で、環境変数で加減できる。
+   0 を指定すると制限しない（試験で大量に叩くときに使う）。
+   書き込みは行が増えるので厳しく、読み取りは画面を開き直すだけなので緩くしてある */
+const num = (v, dflt) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? dflt : Number(v));
+const PUBLIC_WRITE_PER_MIN = num(process.env.PUBLIC_WRITE_PER_MIN, 20);
+const PUBLIC_READ_PER_MIN = num(process.env.PUBLIC_READ_PER_MIN, 120);
+const limitPublicWrite = rateLimit.limiter('public-write', PUBLIC_WRITE_PER_MIN);
+const limitPublicRead = rateLimit.limiter('public-read', PUBLIC_READ_PER_MIN);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
@@ -1604,7 +1762,7 @@ app.get('/api/bootstrap', async (req, res) => {
     const db = obj ? scopeDBForUser(obj, user, users) : {};
     db.users = scopeUsers(users, user);
     // 専用テーブルへ移した分（依頼・出欠・通知）もここで合わせて返す
-    Object.assign(db, await readTableBacked(user));
+    Object.assign(db, await readTableBacked(user, db.events));
     res.json({ config, user: toPublicUser(user), db });
   } catch (e) {
     console.error('起動情報の取得に失敗しました', e);
@@ -1660,7 +1818,12 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
         await linkGoogleAccount(byEmail.id, { googleSub: profile.sub, avatarUrl: profile.picture });
         user = await findUserById(byEmail.id);
       } else {
-        // 初めての人はインターン生として即利用開始。所属支部はログイン後の初回設定画面で選んでもらう
+        /* 初めての人はインターン生として行だけ作る。この役のままでは
+           requireAuth に弾かれて何もできないが、管理者のユーザー管理に
+           姿が出るので、そこでスタッフへ変えれば使えるようになる。
+           @dot-jp.or.jp を持たない人（外部の協力者・個人のGmail）を
+           迎え入れる道はこれしかないため、塞がないこと。
+           2026-08-12に一度塞いだが、この経路が要るとの判断で戻した */
         user = await insertUser({
           email: profile.email,
           passwordHash: '',
@@ -2085,11 +2248,11 @@ app.get('/api/db', requireAuth, async (req, res) => {
   try {
     const obj = await readDB();
     const users = await listActiveUsers();
-    if (!obj) return res.json({ users: scopeUsers(users, req.authUser), ...await readTableBacked(req.authUser) });
+    if (!obj) return res.json({ users: scopeUsers(users, req.authUser), ...await readTableBacked(req.authUser, []) });
     const scoped = scopeDBForUser(obj, req.authUser, users);
     scoped.users = scopeUsers(users, req.authUser);
     // 専用テーブルへ移した分を合成する。画面から見える形は今までと同じ
-    Object.assign(scoped, await readTableBacked(req.authUser));
+    Object.assign(scoped, await readTableBacked(req.authUser, scoped.events));
     res.json(scoped);
   } catch (e) {
     console.error(e);
@@ -2097,10 +2260,12 @@ app.get('/api/db', requireAuth, async (req, res) => {
   }
 });
 
-/* 専用テーブルへ移した項目を、フロントが期待するキー名で返す */
-async function readTableBacked(user) {
+/* 専用テーブルへ移した項目を、フロントが期待するキー名で返す。
+   scopedEvents は、その人に見えるイベント（出欠の回答をそこへ絞るために使う） */
+async function readTableBacked(user, scopedEvents) {
+  const eventIds = (scopedEvents || []).map((e) => e.id);
   const [requests, event_responses, notifications, emails, interviews] = await Promise.all([
-    listRequestsFor(user), listEventResponses(), listNotificationsFor(user),
+    listRequestsFor(user), listEventResponses(eventIds), listNotificationsFor(user),
     listEmailsFor(user), listInterviewsFor(user),
   ]);
   return { requests, event_responses, notifications, emails, interviews };
@@ -2109,9 +2274,28 @@ async function readTableBacked(user) {
 /* インターン生には、面談の申し込み先として必要な自支部のスタッフだけを見せる。
    全支部の全ユーザー一覧を配る必要はない */
 function scopeUsers(users, actor) {
-  if (actor.role !== 'intern') return users;
-  return users.filter((u) =>
-    u.id === actor.id || (u.branch_id === actor.branch_id && (u.role === 'staff' || u.role === 'branch_admin')));
+  const list = actor.role !== 'intern'
+    ? users
+    : users.filter((u) => u.id === actor.id
+      || (u.branch_id === actor.branch_id && (u.role === 'staff' || u.role === 'branch_admin')));
+  return list.map((u) => scrubEmail(u, actor));
+}
+
+/* メールアドレスは、必要な人にだけ渡す。
+   以前は全スタッフのブラウザへ全員分のアドレスが配られていた。
+   画面で要るのは (1) 自分のもの、(2) ユーザー管理で扱う相手のもの、
+   (3) 面談メールの宛先確認 の3つで、いずれも管理者・支部管理者か本人に限られる。
+   ふつうのスタッフが他人のアドレスを見る画面は無い */
+function canSeeEmailOf(actor, target) {
+  if (target.id === actor.id) return true;
+  if (actor.role === 'admin') return true;
+  if (actor.role === 'branch_admin') return target.branch_id === actor.branch_id;
+  return false;
+}
+function scrubEmail(u, actor) {
+  if (canSeeEmailOf(actor, u)) return u;
+  const { email, ...rest } = u;
+  return rest;
 }
 
 // DB全体を置き換えて保存する。users は専用APIでのみ変更するためここでは無視する
@@ -2272,7 +2456,7 @@ app.post('/api/requests', requireAuth, async (req, res) => {
 
 /* 公開出欠の共有URLを知っている人へ、回答に必要な最小限だけを返す。
    メールアドレス・支部のメンバー一覧など、出欠と無関係な情報は含めない */
-app.get('/api/attendance/:token', async (req, res) => {
+app.get('/api/attendance/:token', limitPublicRead, async (req, res) => {
   try {
     const rs = await client.execute({
       sql: `SELECT r.*, u.nickname AS sender_name
@@ -2285,14 +2469,19 @@ app.get('/api/attendance/:token', async (req, res) => {
 
     const [guestRows, answerRows, users] = await Promise.all([
       client.execute({
-        sql: 'SELECT respondent_id, display_name FROM public_attendance_respondents WHERE request_id = ?',
+        sql: `SELECT respondent_id, display_name FROM public_attendance_respondents
+               WHERE request_id = ? ORDER BY created_at`,
         args: [row.id],
       }),
       client.execute({ sql: 'SELECT option_id, user_id, response FROM request_responses WHERE request_id = ?', args: [row.id] }),
       listActiveUsers(),
     ]);
     const names = new Map(users.map((u) => [u.id, u.nickname]));
-    for (const g of guestRows.rows) names.set(g.respondent_id, g.display_name);
+    /* 名乗るだけで答えられるので、同姓同名や同じ人の二重登録が起こりうる。
+       登録順に見分けを付けてから名前として使う（disambiguateNames のコメント参照）*/
+    for (const g of disambiguateNames(guestRows.rows.map((r) => ({ id: r.respondent_id, name: r.display_name })))) {
+      names.set(g.id, g.name);
+    }
     const grouped = new Map();
     for (const a of answerRows.rows) {
       if (!names.has(a.user_id)) continue;
@@ -2319,7 +2508,7 @@ app.get('/api/attendance/:token', async (req, res) => {
 
 /* アカウントを持たない人の公開回答。初回だけ回答者キーを発行し、
    2回目以降はそのキーのハッシュが一致したときだけ同じ回答を更新する */
-app.put('/api/attendance/:token/response', async (req, res) => {
+app.put('/api/attendance/:token/response', limitPublicWrite, async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
   const suppliedKey = String(req.body?.respondent_key || '');
@@ -2693,7 +2882,7 @@ async function branchByInviteToken(token) {
 
 /* 申請ページの最初の読み込み。支部名と、選べるスタッフの一覧を返す。
    返すのは表示に要る分だけ。メールアドレスや権限は渡さない */
-app.get('/api/apply/:token', async (req, res) => {
+app.get('/api/apply/:token', limitPublicRead, async (req, res) => {
   try {
     const branch = await branchByInviteToken(req.params.token);
     if (!branch) return res.status(404).json({ error: 'このリンクは使えません。支部の担当者に確認してください' });
@@ -2741,7 +2930,7 @@ async function applyContextFor(token, staffId) {
 
 /* 選んだスタッフの空き枠を、今日から1週間ぶんの表として返す。
    画面はこれを並べるだけにして、枠の判断はサーバーだけが持つ */
-app.get('/api/apply/:token/slots', async (req, res) => {
+app.get('/api/apply/:token/slots', limitPublicRead, async (req, res) => {
   try {
     const ctx = await applyContextFor(req.params.token, req.query.staff_id);
     if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
@@ -2754,7 +2943,7 @@ app.get('/api/apply/:token/slots', async (req, res) => {
 
 /* 本名だけで面談を申請する。
    アカウントを作らないので、intern_id は空にして名前を data に持たせる */
-app.post('/api/apply/:token', async (req, res) => {
+app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
   const { name, staff_id, choices, note, all_day } = req.body || {};
   const internName = String(name || '').trim();
   if (!internName) return res.status(400).json({ error: 'お名前を入力してください' });
@@ -3601,6 +3790,8 @@ initDB()
       setInterval(deleteOldFailedInterviews, 24 * 60 * 60 * 1000);
       purgeOldRequestTrash();
       setInterval(purgeOldRequestTrash, 24 * 60 * 60 * 1000);
+      purgeExpiredSessions();
+      setInterval(purgeExpiredSessions, 24 * 60 * 60 * 1000);
     });
   })
   .catch((e) => {

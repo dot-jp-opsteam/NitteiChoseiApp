@@ -3,8 +3,10 @@
 _backup/
 
 node_modules/
-server/ops_nittyou.local.db
-server/ops_nittyou.sqlite
+# DBファイルは1つも上げない。個別に並べると、名前の違う物が漏れる
+# （実際 server/data.db が野放しになっていた。2026-08-12）
+server/*.db
+server/*.sqlite
 *.log
 管理者ログイン情報.txt
 index_backup_*.html

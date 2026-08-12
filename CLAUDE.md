@@ -66,13 +66,18 @@
 ## テスト（触ったら必ず走らせる）
 
 ```bash
-node tools/test-fmt.mjs        # 54件・約1秒。HTMLから関数を切り出して動かす
-node tools/e2e.mjs             # 355件・約3秒。実サーバーを8123番で起動して実APIを叩く
+node tools/test-fmt.mjs        # 70件・約1秒。HTMLから関数を切り出して動かす
+node tools/e2e.mjs             # 506件・約3秒。実サーバーを8123番で起動して実APIを叩く
 node tools/e2e.mjs --quiet     # 失敗したものだけ出す（ふだんはこちら）
 node tools/e2e.mjs --only 出欠  # 見出しに その語 を含む区画だけ出す
-node tools/test-stream.mjs     # SSE
+node tools/test-stream.mjs     # SSE（27件）
+node tools/test-ratelimit.mjs  # 公開ページの回数制限（20件）
 node tools/make-test-page.mjs  # test/デザイン確認用.html を作り直す（ログイン不要の見た目確認）
 ```
+
+**e2eでは公開ページの回数制限を切ってある**（`PUBLIC_WRITE_PER_MIN=0`）。
+1つのIPから100件を同時に送る検査があり、制限が効くと必ず落ちるため。
+制限そのものの検査は `test-ratelimit.mjs` が受け持つ。
 
 `e2e.mjs` には**HTMLやCSSの文字列を直接見る検査**が入っている。
 仕様を変えたら、その検査を**消さずに新しい仕様へ書き換える**こと。
@@ -88,6 +93,14 @@ node tools/make-test-page.mjs  # test/デザイン確認用.html を作り直す
 - **サーバーの時計は `process.env.TZ='Asia/Tokyo'` で固定してある。** Renderの実行環境はUTC
 - **Renderは Build 成功後の Deploy 段階で落ちることがある。** ログに理由が出ないときは
   Manual Deploy → Deploy latest commit をやり直せば通る
+- **初めてGoogleログインした人には intern の行ができる。これは塞がないこと**
+  （2026-08-12に一度塞いで戻した）。intern のままでは requireAuth に弾かれて何も
+  できないが、管理者のユーザー管理に姿が出るのでスタッフへ変えれば使えるようになる。
+  `@dot-jp.or.jp` を持たない人を迎え入れる道はこれしかない
+- **メールアドレスは本人・管理者・支部管理者にしか渡さない**（`scrubEmail`）。
+  画面で他人のアドレスが要る機能を足すときは、ここを緩めるのではなく専用APIを作る
+- **ログイン不要の口を足したら回数制限も付ける**（`server/ratelimit.js` の
+  `limitPublicWrite` / `limitPublicRead`）。合言葉は配布先が広く、漏れる前提で考える
 
 ## 本番へ出すまで
 
