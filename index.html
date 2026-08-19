@@ -1830,14 +1830,17 @@ function flushPendingRefresh(){
 /* ホームの入口タイル。参考サイトのポートフォリオに合わせて六角形で並べる。
    act には onclick にそのまま入るJSを渡す（go('my') でも openXxx() でもよい）。
    icon は ICON の名前（引数名を ic にすると同名の関数を隠してしまうので避けている）。
-   badge は右上に出す件数（0や未指定なら出さない） */
+   badge は右上に出す件数（0や未指定なら出さない）。
+   d（薄い字の説明）は画面に出さない。名前だけで用が足りるうえ、
+   一覧に説明が並ぶと読む量が増えて選びにくくなるため。
+   呼び出し側は説明を書いたまま残してあるので、必要になれば
+   <span class="hxd"> を戻すだけでまた出せる */
 function hex(act,icon,t,d,badge,dot){
   return `<button class="hex" onclick="${act}">
     ${badge?`<span class="hxb">${badge}</span>`:''}
     ${dot?`<span class="hxdot" title="日程が未確定の依頼があります"></span>`:''}
     <span class="hxi">${ic(icon)}</span>
-    <span class="hxt">${t}</span>
-    <span class="hxd">${d}</span></button>`;
+    <span class="hxt">${t}</span></button>`;
 }
 /* 入口タイルを2列で並べる。以前は六角形をハニカム状（1行4個・半個ずらし）に
    組んでいたが、角の丸い四角を2列に並べる形へ変えた。
@@ -3497,17 +3500,100 @@ function dragCellAt(e,col){
    ドラッグ中はセルの見た目だけを先に変えて操作内容をためておき、
    指を離した時点で1回だけ保存する（1マスごとに保存すると通信が大量に発生するため） */
 let AVDRAG=null;
+
+/* 指のときだけ「押さえてから」なぞれるようにする（申請画面と同じ作り）。
+   スマホでは画面を送ろうとして表の上に指が乗ることがあり、押した瞬間から
+   掴んでいると、送るつもりが枠を×にしてしまっていた。
+
+   ・押してすぐは何もしない。そのまま押さえていたらなぞりに入る
+   ・押さえきる前に指が動いたら、それは画面を送る操作。表は手を出さない
+   ・動かさずにポンと離したときは、押すつもりだったとみなして1マスだけ変える
+
+   マウスには効かせない。狙った場所を正確に押せるので待たせる理由がない。
+   数値は apply.html の HOLD_MS / HOLD_SLOP とそろえてある */
+const AV_HOLD_MS=50;    // ここまで押さえていれば「なぞるつもり」とみなす（ミリ秒）
+const AV_HOLD_SLOP=10;  // これ以上ずれたら「画面を送るつもり」とみなす（px）
+let AVHOLD=null;
+
 function avPointerDown(e,iso){
   if(e.button!==undefined&&e.button!==0)return;
+  if(e.pointerType==='touch'){beginAvHold(e,iso);return;}
   e.preventDefault();
-  const cell=e.currentTarget;
+  startAvDrag(e.currentTarget,iso);
+  document.addEventListener('pointermove',avDragMove);
+  document.addEventListener('pointerup',avDragEnd);
+  document.addEventListener('pointercancel',avDragEnd);
+}
+
+/* なぞりの開始。押し始めた枠の状態で「×にする／戻す」を固定し、
+   往復してもモードが入れ替わらないようにする */
+function startAvDrag(cell,iso){
   const mode=cell.classList.contains('block')?'unblock':'block';
   AVDRAG={mode,touched:new Set(),added:[],removedIds:[],col:dragColOf(cell)};
   document.body.classList.add('noselect');
   avDragApply(cell,iso);
-  document.addEventListener('pointermove',avDragMove);
-  document.addEventListener('pointerup',avDragEnd);
-  document.addEventListener('pointercancel',avDragEnd);
+}
+
+function beginAvHold(e,iso){
+  clearAvHold();
+  const cell=e.currentTarget;
+  AVHOLD={cell,iso,x:e.clientX,y:e.clientY,armed:false,timer:0};
+  AVHOLD.timer=setTimeout(()=>{
+    if(!AVHOLD)return;
+    AVHOLD.armed=true;
+    // 掴めたことを指に返す。対応していない端末では何も起きない
+    if(navigator.vibrate)navigator.vibrate(8);
+    startAvDrag(AVHOLD.cell,AVHOLD.iso);
+  },AV_HOLD_MS);
+  /* touchmove を passive でない形で見る。pointermove では画面送りを止められない。
+     押さえているあいだ指が止まっていれば画面はまだ動き出していないので、
+     ここで初めて preventDefault すれば送りに取られずになぞれる */
+  document.addEventListener('touchmove',avHoldMove,{passive:false});
+  document.addEventListener('touchend',avHoldEnd);
+  document.addEventListener('touchcancel',avHoldCancel);
+}
+
+function avHoldMove(e){
+  if(!AVHOLD)return;
+  const t=e.touches&&e.touches[0];
+  if(!t)return;
+  if(!AVHOLD.armed){
+    if(Math.abs(t.clientX-AVHOLD.x)>AV_HOLD_SLOP||Math.abs(t.clientY-AVHOLD.y)>AV_HOLD_SLOP){
+      clearAvHold();   // 画面を送ろうとしている。そのままブラウザに任せる
+    }
+    return;
+  }
+  e.preventDefault();  // ここから先は画面を動かさず、なぞって変える
+  const el=AVDRAG&&dragCellAt(t,AVDRAG.col);
+  if(el)avDragApply(el,el.dataset.iso);
+}
+
+function avHoldEnd(e){
+  const h=AVHOLD;
+  if(!h)return;
+  const armed=h.armed;
+  clearAvHold();
+  if(armed){avDragEnd();return;}
+  /* 押さえきる前に離した。指が動いていなければ「押すつもり」だったので1マスだけ変える。
+     動いていたときは avHoldMove がすでに手を引いているのでここへは来ない */
+  startAvDrag(h.cell,h.iso);
+  avDragEnd();
+  if(e&&e.cancelable)e.preventDefault();   // 続けて出るクリックを止める
+}
+
+function avHoldCancel(){
+  const armed=AVHOLD&&AVHOLD.armed;
+  clearAvHold();
+  if(armed)avDragEnd();
+}
+
+/* 押さえ待ちの後始末。なぞりそのものには触らない */
+function clearAvHold(){
+  if(AVHOLD&&AVHOLD.timer)clearTimeout(AVHOLD.timer);
+  AVHOLD=null;
+  document.removeEventListener('touchmove',avHoldMove,{passive:false});
+  document.removeEventListener('touchend',avHoldEnd);
+  document.removeEventListener('touchcancel',avHoldCancel);
 }
 /* 申請画面と同じく、なぞれるのは押し始めた日の列（縦）だけ */
 function avDragMove(e){

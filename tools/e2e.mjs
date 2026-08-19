@@ -1695,9 +1695,21 @@ async function run() {
         && applyHtml.includes('e.preventDefault();     // ここから先は画面を動かさず'), true);
       check('動かさずに離したときは1マス選ぶ',
         applyHtml.includes('function applyHoldEnd(') && applyHtml.includes('startApplyDrag(h.cell,h.iso);'), true);
+      /* 押さえ待ちの作りは受けられない時間の表（index.html）にも入れたので、
+         既定のスクロールを残す指定は .apbook 限定ではなく .bt-c 全体になった */
       check('申請ページの表は既定のスクロールを残す',
         applyHtml.includes('class="booktable apbook"')
-        && css.includes('.apbook .bt-c.ok{touch-action:auto'), true);
+        && css.includes('.bt-c.ok,.bt-c.block{touch-action:auto'), true);
+      const indexHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+      check('受けられない時間の表も押さえてからなぞる',
+        indexHtml.includes('function beginAvHold(')
+        && indexHtml.includes('AV_HOLD_MS') && indexHtml.includes('AV_HOLD_SLOP')
+        && indexHtml.includes("document.addEventListener('touchmove',avHoldMove,{passive:false})"), true);
+      check('入口タイルの薄い説明文は出さない',
+        indexHtml.includes('<span class="hxd">${d}</span>'), false);
+      check('入口タイルは中央に寄せ、パソコンでは1列にする',
+        css.includes('.hexrow{display:flex;justify-content:center;gap:var(--hgap)}')
+        && css.includes('.hexrow{flex-direction:column;align-items:center}'), true);
       check('選び方の一言が日時欄に出る',
         applyHtml.includes('押したまま上下になぞるとまとめて選べます'), true);
 

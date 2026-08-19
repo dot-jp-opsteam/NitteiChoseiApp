@@ -1185,14 +1185,13 @@
   .bt-c.block{cursor:pointer;background:var(--bad-soft);color:var(--bad);font-weight:800}
   .bt-c.block:hover{background:var(--bad-soft)}
   .bt-c.locked{cursor:not-allowed;background:var(--panel2);color:var(--disabled);font-size:11px;font-weight:700}
-  /* ドラッグでのまとめて不可・解除操作 */
-  .bt-c.ok,.bt-c.block{touch-action:none}
-  /* 申請ページ（apply.html）の表だけは、指を置いただけでは掴まない。
-     touch-action:none のままだと表の上から画面を送れず、送るつもりの指が
-     そのまま枠を選んでしまう。0.2秒押さえたときだけ touchmove を止めて
-     なぞりに切り替えるので、ここは既定のスクロールを生かしておく。
+  /* ドラッグでのまとめて不可・解除操作。
+     指を置いただけでは掴まないようにしてある。touch-action:none にすると
+     表の上から画面を送れず、送るつもりの指がそのまま枠を選んでしまうため、
+     ここは既定のスクロールを生かしておく。少し押さえたときだけ touchmove を
+     止めてなぞりに切り替える（申請ページ・受けられない時間の両方で同じ作り）。
      長押しで iOS の選択メニューが出ないように callout も切る */
-  .apbook .bt-c.ok{touch-action:auto;-webkit-touch-callout:none}
+  .bt-c.ok,.bt-c.block{touch-action:auto;-webkit-touch-callout:none}
   body.noselect{user-select:none;-webkit-user-select:none}
 
   /* filter bar */
@@ -1547,15 +1546,11 @@
   .hex::before{clip-path:none;border-radius:16.5px}
   .hex .hxi{font-size:min(24px,calc(var(--hw) * 0.14))}
   .hex .hxt{font-size:14px;letter-spacing:-.02em}
-  .hex .hxd{font-size:11px}
   /* 角が丸いだけで四隅まで面があるので、バッジと赤い印は角に寄せられる */
   .hex .hxb{top:10px;right:10px}
   .hex .hxdot{top:12px;left:12px}
   @media(max-width:520px){
-    /* 四角なら小さくても説明文が入るので、六角形のときのように隠さない */
-    .hex .hxd{display:-webkit-box}
     .hex .hxt{font-size:13px}
-    .hex .hxd{font-size:10.5px}
   }
 
   /* ユーザー一覧のアバターを六角形にする */
@@ -1837,4 +1832,32 @@
     .hex:hover,.hex:focus-visible{transform:none}
     .sb-item:hover,.rowlist .row:hover{padding-left:inherit}
     .card.click:hover{transform:none}
+  }
+
+  /* ---------- 入口タイルの並び直し（2026-08-19 その2） ----------
+     上の「読みやすさと動き」の層が --hw を六角形向けの値（190px／狭い画面は126px）に
+     戻してしまっていたため、四角のタイルが本来の幅まで広がらず、
+     行の余りが右側にまとめて出て左に寄って見えていた。
+     ここは全部の指定より後ろなので、この節が最後に効く。 */
+  .hexgrid{
+    --hgap:10px;
+    --hw:min(240px, calc((100cqw - (var(--cols) - 1) * var(--hgap)) / var(--cols)));
+    width:100%;
+  }
+  /* 余りが出ても左右に均等に配るので、タイルは常に画面の中央に来る */
+  .hexrow{display:flex;justify-content:center;gap:var(--hgap)}
+
+  /* パソコンでは横に余白が余るので、2列にせず1列に積んで横長のタイルにする。
+     JS側は2枚ずつの行に分けて出しているが、行を縦並びに変えれば
+     出した順（依頼→面談一覧→受けられる時間→カレンダー連携）のまま1列になる */
+  /* 761px は、左メニューが出しっぱなしになる境目（＝パソコンとみなす幅）。
+     他の指定とそろえてあるので、ここだけ別の数字にしないこと */
+  @media(min-width:761px){
+    .hexrow{flex-direction:column;align-items:center}
+    .hex{flex:none;width:100%;max-width:520px;aspect-ratio:auto;min-height:84px;
+      flex-direction:row;justify-content:flex-start;gap:14px;padding:0 22px;text-align:left}
+    .hex .hxi{font-size:26px}
+    .hex .hxt{font-size:15px}
+    /* 1列だと行の間だけ隙間が空くので、タイル同士の間隔をそろえる */
+    .hexrow>.hex+.hex{margin-top:var(--hgap)}
   }
