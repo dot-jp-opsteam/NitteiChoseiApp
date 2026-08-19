@@ -1851,6 +1851,27 @@ async function run() {
       check('manifest を読んでいる', appHtml.includes('rel="manifest" href="/manifest.webmanifest"'), true);
       check('検索結果用の説明文がある', appHtml.includes('<meta name="description"'), true);
 
+      /* ---- 2026-08-19（4回目）の改修 ---- */
+      {
+        const cssSrc = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+        /* 面談を確定する画面の説明（「下は○○さんが空けている時間です…」）は外した。
+           同じことは申請ページと希望入力（AVAIL_NOTE）でも言っている */
+        check('確定画面に候補の説明文は出さない',
+          appHtml.includes('この中から開始時刻を決めてください'), false);
+        /* ダークでも入口タイルの枠に色が付く。以前は地に近いグレーで色が見えなかった */
+        check('入口タイルの枠はダークでも色が付く',
+          cssSrc.includes('--hex-line:#2f7d78;')
+          && !cssSrc.includes('--hex-line:#262626'), true);
+        /* カレンダーの下の一覧は撤去。日付を押して出るシートに一本化した */
+        check('カレンダーの下に月の一覧を出さない',
+          appHtml.includes('${m+1}月のイベント') || appHtml.includes('${listBlock}'), false);
+        check('日付を押すとその日の予定のシートが開く',
+          appHtml.includes(`onclick="openDaySheet('\${key}')"`), true);
+        /* 依頼のタブ切り替えは、画面を読み込み直したように見えない描き方にする */
+        check('依頼のタブ切り替えは登場アニメをやり直さない',
+          appHtml.includes('function setReqTab(t){REQTAB=t;renderQuiet();}'), true);
+      }
+
       /* 面談一覧。1件ずつ開かないと希望日が分からない状態をやめた */
       check('面談一覧の行に第1希望を出す',
         appHtml.includes('function ivRowSub(iv)')

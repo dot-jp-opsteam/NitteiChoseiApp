@@ -2449,8 +2449,11 @@ function openInterview(id){
   };
   let actions='';
   if(iv.status==='applied'){
-    actions=`<div class="hint" style="margin-top:12px">${ic('bulb')}<span>下は<b>${internName?esc(internName)+'さんが':'相手が'}空けている時間</b>です。面談の長さではありません。この中から開始時刻を決めてください。</span></div>
-      <div class="choice-list">
+    /* 候補の上に出していた説明（「下は○○さんが空けている時間です…」）は外した。
+       同じことを申請ページ（apply.html）と本体の希望入力（AVAIL_NOTE）でも言っており、
+       確定する画面では候補と「これで確定」だけを見せたほうが迷わない。
+       戻すときは .choice-list の直前に hint の1行を足す */
+    actions=`<div class="choice-list">
         ${groups.map((g,i)=>choiceGroup(i+1,g)).join('')}</div>
       <button class="btn block" style="margin-top:14px" onclick="openCustomConfirm('${id}')">${ic('calendar')}候補以外の日時で確定する</button>
       <p class="fine" style="margin-top:6px">${esc(internName||'相手')}さんが出していない時間で決めるときに使います。</p>
@@ -2997,35 +3000,11 @@ function eventsSection(){
       ${body}
     </div></div>`;
 
-  // 選択日 or 当月のイベント（出欠カード）
-  let below=list.filter(e=>{const dt=new Date(e.start_datetime);
-    return calSel? ymd(dt)===calSel : (dt.getFullYear()===y&&dt.getMonth()===m);});
-  below.sort((a,b)=>new Date(a.start_datetime)-new Date(b.start_datetime));
-  // 選択日の確定面談（該当日のみ、補足表示）
-  const ivBelow=calSel?ivs.filter(iv=>ymd(new Date(iv.confirmed_datetime))===calSel):[];
-  const ivCards=ivBelow.map(iv=>`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
-      <span class="tile-ic" style="width:38px;height:38px;background:var(--iv-soft);color:var(--iv);font-size:18px">${ic('calendar')}</span>
-      <span><b>${esc(ivLabel(iv))}</b><br><span class="tile-d">${fmtDT(iv.confirmed_datetime)}</span></span>
-    </div></div>`).join('');
-  /* 選択日の全体予定表・自分のGoogleカレンダー。
-     全体予定表（org-wide）は読み取り専用。自分のGoogleカレンダーの分だけ、
-     このアプリの中で編集・削除できる（Google側には書き込まない） */
-  const shBelow=calSel?shared.filter(e=>ymd(sharedDate(e))===calSel):[];
-  const shCards=shBelow.map(e=>e.mine?`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
-      <span class="tile-ic" style="width:38px;height:38px;background:${chipBg(MY_CAL_COLOR)};color:${chipFg(MY_CAL_COLOR)};font-size:18px">${ic('calendar')}</span>
-      <span style="flex:1"><b>${esc(e.title)}</b><br><span class="tile-d">${e.allDay?'終日':fmtDT(e.start)}${e.location?' ・ '+esc(e.location):''} ・ あなたのGoogleカレンダー</span></span>
-      <span style="display:flex;gap:6px">
-        <button class="btn sm iconly" onclick="openMyCalEventForm('${e.gid}')" aria-label="編集" title="編集">${ic('edit')}</button>
-        <button class="btn sm iconly bad" onclick="deleteMyCalEvent('${e.gid}')" aria-label="削除" title="削除">${ic('trash')}</button>
-      </span>
-    </div></div>`:`<div class="card"><div class="cb" style="display:flex;align-items:center;gap:10px">
-      <span class="tile-ic" style="width:38px;height:38px;background:${chipBg(SHARED_CAL_COLOR)};color:${chipFg(SHARED_CAL_COLOR)};font-size:18px">${ic('calendar')}</span>
-      <span><b>${esc(e.title)}</b><br><span class="tile-d">${e.allDay?'終日':fmtDT(e.start)}${e.location?' ・ '+esc(e.location):''} ・ 全体予定表</span></span>
-    </div></div>`).join('');
-  const listTitle=calSel?`${Number(calSel.split('-')[1])}/${Number(calSel.split('-')[2])} の予定`:`${m+1}月のイベント`;
-  const clearBtn=calSel?`<button class="btn ghost sm" onclick="calSelect(null)">絞り込み解除</button>`:'';
-  const cards=(below.length||ivBelow.length||shBelow.length)?shCards+ivCards+below.map(eventCard).join('')
-    :`<div class="empty"><div class="ei">${ic('calendar')}</div><p>${calSel?'この日の予定はありません。':'この月のイベントはありません。'}</p></div>`;
+  /* カレンダーの下に出していた一覧（「8月のイベント」／日を選んだときの「8/3 の予定」）は
+     出さない。日付を押せば openDaySheet がその日の予定を全部出し、そこから中身も
+     編集・削除もできるので、同じものが下にもう一度並んでいる状態だった。
+     縦に長くなるぶん、カレンダー自体が画面から押し出されて見えにくくなっていた。
+     戻すときは、ここで下向きの一覧を組み立てて listBlock として下の return に足す */
 
   /* 全社カレンダーそのものを見たいときのための出口。
      このアプリは読み取りだけなので、書き込みや細かい確認はGoogleカレンダー側で行う。
@@ -3043,18 +3022,15 @@ function eventsSection(){
         aria-label="${hidden?'全社カレンダーの予定を表示する':'全社カレンダーの予定を隠す'}">${ic(hidden?'eye-off':'eye')}</button>`
     : '';
   const viewTabs=sharedBtn;
-  const listBlock=`<div style="display:flex;align-items:center;margin:16px 2px 8px"><h3 style="margin:0;font-size:15px">${listTitle}</h3><span style="margin-left:auto">${clearBtn}</span></div>
-    ${cards}`;
 
   /* 全画面。説明文やお知らせは出さず、操作バーとカレンダーだけにする。
-     選んだ日の予定は、これまでどおり下にスクロールすれば読める */
+     日の予定は、その日を押して出るシートで読む */
   if(calFull){
     return `<div class="calfull-bar">
         <button class="btn ghost sm" onclick="setCalFull(false)">${ic('back')}戻る</button>
         <span class="calfull-tabs">${viewTabs}</span>
       </div>
-      ${cal}
-      <div style="padding:0 12px">${listBlock}</div>`;
+      ${cal}`;
   }
 
   return `<div class="divider" style="margin:22px 0 14px"></div>
@@ -3067,8 +3043,7 @@ function eventsSection(){
     ${unreviewed.length?`<div class="hint mock" style="background:var(--brand-soft);border-color:var(--line-h);cursor:pointer" onclick="openVisibilityCleanup()">
       ${ic('lock')}<span>公開範囲を選べるようになる前に作った予定が <b>${unreviewed.length}件</b> あります。
       いまも支部の全員に見えているので、<b>個人的なものを「自分だけ」に変えられます</b>。タップして見直す。</span></div>`:''}
-    ${cal}
-    ${listBlock}`;
+    ${cal}`;
 }
 function calShift(delta){let m=calYM.m+delta,y=calYM.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}calYM={y,m};calSel=null;render();}
 function calSelect(key){calSel=(key&&key!==calSel)?key:null;render();}
@@ -4446,11 +4421,15 @@ function interviewHomeReminder(){
 
 let REQTAB='inbox'; // 'inbox' | 'done' | 'sent'
 let REQBACKTAB='inbox';
-function setReqTab(t){REQTAB=t;render();}
+/* 依頼の中でのタブ切り替えは renderQuiet で描き直す。
+   render() だと画面ぜんぶが登場アニメをやり直すので、
+   同じ画面の中で一覧を差し替えただけなのに、読み込み直したように見えていた
+   （縦の位置も先頭へ戻ってしまう）。renderQuiet は演出を通さず位置も保つ */
+function setReqTab(t){REQTAB=t;renderQuiet();}
 function toggleSentRequests(){
   if(REQTAB==='sent')REQTAB=REQBACKTAB;
   else{REQBACKTAB=REQTAB;REQTAB='sent';}
-  render();
+  renderQuiet();
 }
 
 /* 受けた依頼の並び。まだ答えていないものは締切が早い順（締切なしは末尾）、
