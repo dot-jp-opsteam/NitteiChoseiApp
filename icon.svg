@@ -1,14 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ドット日調">
-  <!-- アプリアイコン。白地・黒文字2行・エメラルドグリーンの枠。
-       すべてベクトル（矩形と文字）で描いてあるので、どの大きさでも輪郭が崩れない。
-       枠の色はライトテーマのブランド色 #56b8ac にそろえてある。 -->
-  <title>ドット日調</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="日調">
+  <title>日調</title>
+  <!--
+    アプリアイコン。白地・黒の「日調」・エメラルドグリーンの枠。
+    枠の色はライトテーマのブランド色（#56b8ac）にそろえてある。
+
+    文字はフォント指定ではなく、字画を1本ずつ線で組んで描いてある。
+    フォントで書くと、入っている書体が端末ごとに違うので見た目が変わってしまい、
+    太さや字間も選べる範囲でしか調整できなかった。
+    ここでは線幅と位置を直接持っているので、小さく表示しても字がつぶれない。
+
+    座標の決まりごと
+      ・字の高さは 132px、上下の中心は y=256
+      ・外側の太い画は 17px、内側の細かい画は 13px
+      ・線の端は角のまま（linecap:butt）。丸めると印刷物のような柔らかさになり、
+        枠の直線的な感じと合わない
+  -->
   <rect x="0" y="0" width="512" height="512" rx="114" ry="114" fill="#ffffff"/>
   <rect x="30" y="30" width="452" height="452" rx="88" ry="88"
         fill="none" stroke="#56b8ac" stroke-width="26"/>
-  <g fill="#111111" font-family="'Hiragino Sans','Yu Gothic','Noto Sans JP','Meiryo',sans-serif"
-     font-weight="700" text-anchor="middle">
-    <text x="256" y="232" font-size="124">ドット</text>
-    <text x="256" y="374" font-size="124">日調</text>
+
+  <!-- 字全体は右に少しはみ出す形で組んであるので、7px 左へ寄せて枠の中央にそろえる -->
+  <g stroke="#111111" fill="none" stroke-linecap="butt" stroke-linejoin="miter" transform="translate(-7 0)">
+    <!-- 日：外わくと中の横画 -->
+    <g stroke-width="17">
+      <rect x="112" y="190" width="92" height="132"/>
+      <path d="M112 256 H204"/>
+    </g>
+
+    <!-- 調（へん）：言。上の点・横3本・口 の7画をそのまま線にしている -->
+    <g stroke-width="12">
+      <path d="M258 190 H282"/>
+      <path d="M236 214 H300"/>
+      <path d="M244 238 H292"/>
+      <path d="M244 260 H292"/>
+      <rect x="242" y="282" width="52" height="40"/>
+    </g>
+
+    <!-- 調（つくり）：周のかまえ -->
+    <g stroke-width="17">
+      <path d="M318 322 V190 H414 V322"/>
+    </g>
+    <!-- 調（つくり）：かまえの中の 土 と 口 -->
+    <g stroke-width="12">
+      <path d="M344 224 H392"/>
+      <path d="M368 224 V252"/>
+      <path d="M336 252 H400"/>
+      <rect x="342" y="276" width="52" height="38"/>
+    </g>
   </g>
 </svg>

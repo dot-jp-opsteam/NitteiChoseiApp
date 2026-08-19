@@ -607,6 +607,16 @@ async function testAttendance() {
   check('出欠の宛先先頭に「誰でも回答OK」がある',
     publicModePos >= 0
       && publicModePos < appHtml.indexOf("{id:'all_staff',   label:'支部の全スタッフ'}"), true);
+  /* タスクは自分あてにも送れる。他の選び方は自分を必ず外すので、
+     支部に自分しか居ない人はどこにも送れなかった（2026-08-19の指摘） */
+  check('タスクのあて先に「自分」がある',
+    appHtml.includes("{id:'me',          label:'自分'}")
+    && appHtml.includes("if(m==='me')return {ids:[ME.id],label:'自分'};"), true);
+  check('「自分」はタスクだけ、「誰でも回答OK」は日程だけに出す',
+    appHtml.includes("REQ_MODES.filter(o=>o.id==='public'?attend:(o.id==='me'?!attend:true))"), true);
+  check('あて先が0人のときは、選び方に応じた言い方をする',
+    appHtml.includes('支部にほかのスタッフがいません。「自分」を選ぶか、管理者にご連絡ください')
+    && appHtml.includes("'あて先の相手を選んでください'"), true);
   check('出欠確認を開くと公開モードが初期選択される',
     appHtml.includes("mode:kind==='attend'?'public':'all_staff'"), true);
   check('公開モードを送信APIへ明示する',
@@ -1823,6 +1833,16 @@ async function run() {
         && fs.existsSync(path.join(ROOT, 'icon.svg'))
         && fs.existsSync(path.join(ROOT, 'icon-192.png'))
         && fs.existsSync(path.join(ROOT, 'icon-512.png')), true);
+      /* 字はフォントで書かず、線を1本ずつ置いて組んである。フォントで書くと
+         端末に入っている書体しだいで太さも字形も変わってしまうため */
+      check('アイコンの字は図形として描いてある',
+        (() => {
+          const svg = fs.readFileSync(path.join(ROOT, 'icon.svg'), 'utf8');
+          return !svg.includes('font-family') && !svg.includes('<text');
+        })(), true);
+      check('ホーム画面に出る名前はアイコンと同じ「日調」',
+        fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8')
+          .includes('"short_name": "日調"'), true);
       check('新しいアイコンはPUBLIC_FILESで配信を許可してある',
         serverSource.includes("'/icon.svg': 'icon.svg'")
         && serverSource.includes("'/icon-192.png': 'icon-192.png'")

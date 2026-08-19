@@ -5024,6 +5024,7 @@ let REQFORM=null; // {mode, picked:Set相当の配列}
    ※ 残る2つの mode を処理する側のコードは、過去の依頼を読むために残してある */
 const REQ_MODES=[
   {id:'public',label:'誰でも回答OK'},
+  {id:'me',          label:'自分'},
   {id:'all_staff',   label:'支部の全スタッフ'},
   {id:'pick_staff',  label:'スタッフを選ぶ'},
   {id:'by_dept',     label:'部署で選ぶ'},
@@ -5062,6 +5063,9 @@ function branchInterns(){
 function resolveRecipients(){
   const m=REQFORM.mode, picked=REQFORM.picked;
   if(m==='public')return {ids:[ME.id],label:'誰でも回答OK'};
+  /* 自分あて。やることを自分の一覧へ置いておくための口で、
+     他の選び方では自分を必ず外している（下の filter）ので、ここだけ別に用意する */
+  if(m==='me')return {ids:[ME.id],label:'自分'};
   if(m==='all_staff'){
     const list=branchStaff().filter(u=>u.id!==ME.id);  // 自分あては含めない
     return {ids:list.map(u=>u.id),label:'支部の全スタッフ'};
@@ -5103,7 +5107,7 @@ function reqPickerHTML(){
   /* 「支部の全スタッフ」「支部の全インターン生」は選ぶものが無い。
      以前は届く人数を書いた案内を出していたが、説明文はすべて外す方針にしたので
      何も出さない（2026-08-19） */
-  if(m==='all_staff'||m==='all_intern')return '';
+  if(m==='all_staff'||m==='all_intern'||m==='me')return '';
   if(m==='pick_staff'){
     const list=branchStaff().filter(u=>u.id!==ME.id);
     if(!list.length)return `<div class="empty" style="padding:20px"><p>ほかにスタッフがいません。</p></div>`;
@@ -5385,7 +5389,9 @@ function renderRequestForm(keepText){
   const {ids,label}=resolveRecipients();
   const attend=REQFORM.kind==='attend';
 
-  const modes=attend?REQ_MODES:REQ_MODES.filter(o=>o.id!=='public');
+  /* 「誰でも回答OK」は日程を決めるときだけ。「自分」はタスクのときだけ
+     （日程を決めるほうは送った人が必ず回答者に入るので、自分あては意味がない） */
+  const modes=REQ_MODES.filter(o=>o.id==='public'?attend:(o.id==='me'?!attend:true));
   const modeBtns=modes.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
     onclick="setReqMode('${o.id}')">${o.label}</button>`).join('');
 
@@ -5436,7 +5442,19 @@ async function submitRequest(){
   err.classList.remove('show');
 
   const {ids,label}=resolveRecipients();
-  if(!ids.length){err.textContent='あて先を選んでください';err.classList.add('show');return;}
+  /* あて先が0人のときの言い方を、選び方ごとに変える。
+     「支部の全スタッフ」なのに0人＝支部に自分しか居ない、という意味なので、
+     ひとくちに「あて先を選んでください」と言われても直しようがなかった。
+     自分あては上の resolveRecipients が必ず1人返すので、ここには来ない */
+  if(!ids.length){
+    const m=REQFORM.mode;
+    err.textContent=
+      m==='all_staff'?'支部にほかのスタッフがいません。「自分」を選ぶか、管理者にご連絡ください'
+      :m==='all_intern'?'支部にインターン生がいません'
+      :m==='by_dept'?'部署を選んでください（選んだ部署に人がいないときは別の部署をお試しください）'
+      :'あて先の相手を選んでください';
+    err.classList.add('show');return;
+  }
   if(!subject){err.textContent='件名を入力してください';err.classList.add('show');return;}
 
   const attend=REQFORM.kind==='attend';
