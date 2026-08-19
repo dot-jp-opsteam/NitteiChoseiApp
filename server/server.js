@@ -828,7 +828,8 @@ async function listEmailsFor(user) {
 }
 
 /* 候補の日時を「9/12(土) 19:00〜21:00」の形にする。
-   利用者は全員日本にいるので、サーバーの時間帯に関係なく日本時間で出す */
+   利用者は全員日本にいるので、サーバーの時間帯に関係なく日本時間で出す。
+   end_time が無い候補（終了時刻の入力欄を廃止したあとの新しい候補）は開始だけになる */
 function fmtSlotJP(o) {
   if (o?.has_date === false) {
     return `${o.start_time || ''}${o.end_time ? '〜' + o.end_time : ''}（日程未定）`;
@@ -838,7 +839,7 @@ function fmtSlotJP(o) {
   const day = f(o.start, { month: 'numeric', day: 'numeric', weekday: 'short' });
   if (o?.has_time === false) return day;
   const from = f(o.start, { hour: '2-digit', minute: '2-digit', hour12: false });
-  const to = o.end ? f(o.end, { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+  const to = o.end_time ? f(o.end, { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
   return `${day} ${from}${to ? '〜' + to : ''}`;
 }
 
@@ -892,19 +893,30 @@ function normalizeAttendOption(raw, id) {
   if (!hasDate && !hasTime) return null;
   const date = String(o.date || '');
   const startTime = String(o.start_time || '');
-  const endTime = String(o.end_time || '');
+  // 終了時刻の入力欄は廃止した。指定があれば従来どおり検証して保存するが、
+  // 無くても候補として成立させる（過去のデータとの後方互換のため、あれば表示する）
+  const endTimeRaw = o.end_time == null ? '' : String(o.end_time);
   if (hasDate && !validAttendDate(date)) return null;
-  if (hasTime && (!validAttendTime(startTime) || !validAttendTime(endTime) || endTime <= startTime)) return null;
+  if (hasTime && !validAttendTime(startTime)) return null;
+  if (hasTime && endTimeRaw && (!validAttendTime(endTimeRaw) || endTimeRaw <= startTime)) return null;
 
   const normalized = { id, has_date: hasDate, has_time: hasTime };
   if (hasDate) normalized.date = date;
   if (hasTime) {
     normalized.start_time = startTime;
-    normalized.end_time = endTime;
+    if (endTimeRaw) normalized.end_time = endTimeRaw;
   }
   if (hasDate) {
     normalized.start = new Date(`${date}T${hasTime ? startTime : '01:00'}:00+09:00`).toISOString();
-    normalized.end = new Date(`${date}T${hasTime ? endTime : '01:30'}:00+09:00`).toISOString();
+    if (!hasTime) {
+      normalized.end = new Date(`${date}T01:30:00+09:00`).toISOString();
+    } else if (endTimeRaw) {
+      normalized.end = new Date(`${date}T${endTimeRaw}:00+09:00`).toISOString();
+    } else {
+      // 終了時刻が無いときは、確定時にGoogleカレンダーへ登録するための内部値として
+      // 開始の1時間後を既定にする。end_time が無いぶん、表示（fmtSlot/fmtSlotJP）には出ない
+      normalized.end = new Date(new Date(normalized.start).getTime() + 60 * 60 * 1000).toISOString();
+    }
   }
   return normalized;
 }

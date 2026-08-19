@@ -800,15 +800,18 @@ async function testAttendance() {
       return !sharedSeg.includes('openDayEventDetail') && !ivSeg.includes('openDayEventDetail');
     })(), true);
   check('日程なし切替は取り除かれている', appHtml.includes('日程を設定しない'), false);
-  check('候補一覧に時間設定切替がある', appHtml.includes('時間を設定する'), true);
+  /* 終了時刻の入力欄は廃止し、開始時刻だけを30分刻みのプルダウンで選ぶ形にした */
+  check('候補一覧に時間設定のプルダウンがある',
+    appHtml.includes('id="reqAddTime"') && appHtml.includes('時間を設定しない'), true);
   /* 日付は入力欄をやめてカレンダーで選ぶ形にした */
   check('候補の日付は入力欄ではなくラベルで出す',
     appHtml.includes('class="optdate"') && !appHtml.includes('id="ro_d${i}"'), true);
-  /* 時刻はOS標準の入力欄で受ける。自前のホイールはスマホで当たり判定が悪くやめた */
-  check('時刻はOS標準の時刻入力欄で受ける',
-    appHtml.includes('<input type="time" class="optt"')
+  check('時刻は30分刻みのプルダウンで受ける',
+    appHtml.includes('<select class="optt"')
       && appHtml.includes('function setReqOptTime('), true);
-  check('時刻の入力欄はダークテーマでも読める',
+  check('終了時刻の入力欄は残っていない',
+    appHtml.includes('候補${i+1}の終了時刻'), false);
+  check('時刻のプルダウンはダークテーマでも読める',
     styleSource.includes(':root:not([data-theme="light"]) .optt{color-scheme:dark}'), true);
   check('自前の時刻ホイールは残っていない',
     appHtml.includes('REQWHEEL') || styleSource.includes('.reqwheel'), false);
@@ -819,27 +822,27 @@ async function testAttendance() {
   check('消した関数の呼び出しが残っていない',
     ['normalizeReqTime', 'handleReqTimeInput', 'handleReqTimeBlur', 'selectReqTimeInput',
      'addReqOption', 'shiftReqTimeRange', 'setReqNoDate',
-     'openReqWheel', 'closeReqWheelIfOpen', 'reqWheelHTML', 'commitReqWheel']
+     'openReqWheel', 'closeReqWheelIfOpen', 'reqWheelHTML', 'commitReqWheel',
+     'reqApplyTimeChange', 'setReqWithTime']
       .filter((name) => appHtml.includes(name)), []);
   check('同じ日をふやすボタンがある',
     appHtml.includes('duplicateReqOption(') && appHtml.includes("ic('copy')"), true);
-  check('ふやすボタンは時間を設定しているときだけ出す',
-    appHtml.includes('${REQFORM.withTime?`<span class="opttime">')
-      && appHtml.includes('class="optcopy"'), true);
+  check('ふやすボタンは時間を設定している候補だけに出す',
+    appHtml.includes('${o.t1?`<button type="button" class="optcopy"'), true);
   /* 選んだ日は1件ずつ縦に積む。横に折り返すチップは一覧として読みにくかった */
   check('選んだ日程は縦1列に並べる',
     appHtml.includes('class="optrow"')
       && styleSource.includes('.optlist{display:flex;flex-direction:column'), true);
   check('候補の行は角丸の四角で、丸いピルではない',
     styleSource.includes('.optrow{') && !styleSource.includes('.optchip'), true);
-  check('時間の切替はカレンダーの下に置く',
-    appHtml.indexOf('${reqCalendarHTML()}') < appHtml.indexOf('時間を設定する</button>'), true);
+  check('時間を設定するプルダウンはカレンダーの下に置く',
+    appHtml.indexOf('${reqCalendarHTML()}') < appHtml.indexOf('id="reqAddTime"'), true);
   check('カレンダーの空きマスは汎用の .empty を使わない',
     appHtml.includes('class="rc-d blank"') && styleSource.includes('.rc-d.blank'), true);
   check('カレンダーのマスは高さを決め打ちにする（7列が親幅に収まらなくなるため）',
     styleSource.includes('.rc-d{height:36px'), true);
   check('出欠確認の候補は空で始まる（日付はカレンダーで選ぶ）',
-    appHtml.includes('opts:[],withTime:false'), true);
+    appHtml.includes("opts:[],addTime:''"), true);
   check('候補を自動で作る仕組みは残っていない',
     !appHtml.includes('addReqOption') && !appHtml.includes('shiftReqTimeRange'), true);
   check('スタッフ画面は日付だけの内部時刻を表示しない',

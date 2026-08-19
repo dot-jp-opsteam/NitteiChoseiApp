@@ -334,6 +334,13 @@
   :root:not([data-theme="light"]) input[type="time"]{color-scheme:dark}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
   textarea{resize:vertical;min-height:96px;line-height:1.6}
+  /* 依頼・出欠の件名（イベント名）だけ下線のみにする。枠が無いぶん本文との
+     区別が付きにくいので、フォーカス時は太さでも分かるようにしてある */
+  .field-underline{border:none;border-bottom:1px solid var(--line);border-radius:0;
+    padding:8px 2px;background:transparent}
+  .field-underline:focus{box-shadow:none;border-bottom:2px solid var(--brand);padding-bottom:7px}
+  /* 依頼・出欠の本文。既定の96pxだと縦に伸びすぎるため、この欄だけ低くする */
+  .textarea-compact{min-height:72px}
   .field-err{color:var(--bad);font-size:12px;margin-top:5px;display:none}
   .field-err.show{display:block}
   .seg{display:flex;gap:8px;flex-wrap:wrap}
@@ -632,9 +639,9 @@
   /* 「8月1日(金)」と「8月12日(火)」で長さが違う。幅を揃えないと行ごとに時刻がずれる */
   .optdate{flex:none;min-width:7.2em;font-weight:700;font-size:14px;white-space:nowrap}
   .opttime{display:flex;align-items:center;gap:6px}
-  /* OS標準の時刻入力欄。色の明暗を color-scheme で伝えないと、
-     ダークテーマでピッカーの中身が白地のまま出る */
-  .optt{width:106px;flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:8px;
+  /* 30分刻みのプルダウン。「時間を設定しない」も選べるので、時刻だけの幅より広めにする。
+     色の明暗を color-scheme で伝えないと、ダークテーマで中身が白地のまま出る */
+  .optt{width:136px;flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:8px;
     background:var(--panel);color:var(--ink);font:inherit;font-size:14px;font-weight:700;
     font-variant-numeric:tabular-nums;color-scheme:light}
   :root:not([data-theme="light"]) .optt{color-scheme:dark}
@@ -656,7 +663,7 @@
        日付だけを上の行に出して折り返す。枠の角丸は12pxのままでよい */
     .optrow:has(.opttime){flex-wrap:wrap;gap:6px 8px;padding:8px 12px}
     .optrow:has(.opttime) .optdate{flex:1 1 100%;min-width:0}
-    .optt{width:96px}
+    .optt{width:124px}
   }
 
   /* 候補の日時のミニカレンダー。押した日がそのまま候補になる。

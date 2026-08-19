@@ -110,7 +110,7 @@ console.log('\n[ スタッフ画面 index.html の候補日時の計算 ]');
 {
   const I = load('index.html',
     ['pad', 'ymd', 'reqMins', 'reqHHMM', 'reqShiftDate', 'reqDateRange',
-     'copyReqOption', 'reqApplyTimeChange', 'reqCalendarCells']);
+     'copyReqOption', 'reqCalendarCells']);
 
   check('時刻を分に直す', I.reqMins('19:30'), 19 * 60 + 30);
   check('分を時刻に戻す', I.reqHHMM(19 * 60 + 30), '19:30');
@@ -126,35 +126,23 @@ console.log('\n[ スタッフ画面 index.html の候補日時の計算 ]');
     ['2026-08-17', '2026-08-18', '2026-08-19']);
   check('同じ日なら1件', I.reqDateRange('2026-08-17', '2026-08-17'), ['2026-08-17']);
 
-  /* コピーの長さは1時間で固定。もとの長さを引き継ぐと
-     19-21 → 21-23 と枠が伸びていき、たいてい後から手で直すことになっていた */
-  check('コピーは前の終わりから1時間ぶん',
-    I.copyReqOption({ date: '2026-08-17', t1: '19:00', t2: '21:00' }),
-    { date: '2026-08-17', t1: '21:00', t2: '22:00' });
-  check('短い枠をコピーしても1時間になる',
-    I.copyReqOption({ date: '2026-08-17', t1: '10:00', t2: '10:30' }),
-    { date: '2026-08-17', t1: '10:30', t2: '11:30' });
-  check('その日に収まらないぶんは翌日の先頭へ',
-    I.copyReqOption({ date: '2026-08-17', t1: '21:00', t2: '23:00' }),
-    { date: '2026-08-18', t1: '00:00', t2: '01:00' });
-  check('終わりが24:00になる場合も翌日へ送る',
-    I.copyReqOption({ date: '2026-08-17', t1: '22:00', t2: '23:00' }),
-    { date: '2026-08-18', t1: '00:00', t2: '01:00' });
+  /* コピーは前の開始から1時間後。終了時刻の概念は廃止したので、
+     開始時刻(t1)だけを見て次の候補をつくる */
+  check('コピーは前の開始から1時間後',
+    I.copyReqOption({ date: '2026-08-17', t1: '19:00' }),
+    { date: '2026-08-17', t1: '20:00' });
+  check('日をまたがなければ同じ日のまま',
+    I.copyReqOption({ date: '2026-08-17', t1: '22:30' }),
+    { date: '2026-08-17', t1: '23:30' });
+  check('日をまたぐ分は翌日の0時へ',
+    I.copyReqOption({ date: '2026-08-17', t1: '23:30' }),
+    { date: '2026-08-18', t1: '00:00' });
+  check('ちょうど24:00になる場合も翌日へ送る',
+    I.copyReqOption({ date: '2026-08-17', t1: '23:00' }),
+    { date: '2026-08-18', t1: '00:00' });
   check('月末をコピーすると翌月へ',
-    I.copyReqOption({ date: '2026-08-31', t1: '22:00', t2: '23:00' }),
-    { date: '2026-09-01', t1: '00:00', t2: '01:00' });
-
-  const base = { t1: '19:00', t2: '21:00' };
-  check('終わりを後ろへ動かすと開始はそのまま',
-    I.reqApplyTimeChange(base, 't2', '22:00'), { t1: '19:00', t2: '22:00' });
-  check('終わりを開始より前に回すと開始も一緒に下がる',
-    I.reqApplyTimeChange(base, 't2', '18:00'), { t1: '16:00', t2: '18:00' });
-  check('開始を終わりより後ろに回すと終わりも一緒に上がる',
-    I.reqApplyTimeChange(base, 't1', '22:00'), { t1: '22:00', t2: '23:59' });
-  check('開始を前へ動かすと終わりはそのまま',
-    I.reqApplyTimeChange(base, 't1', '17:00'), { t1: '17:00', t2: '21:00' });
-  check('終わりを0時へ回しても開始が負にならない',
-    I.reqApplyTimeChange(base, 't2', '00:30'), { t1: '00:00', t2: '00:30' });
+    I.copyReqOption({ date: '2026-08-31', t1: '23:30' }),
+    { date: '2026-09-01', t1: '00:00' });
 
   /* 2026年8月は土曜はじまりで31日まで。1日の前に6つの空きが要る */
   const cells = I.reqCalendarCells(2026, 7, ['2026-08-17'], '2026-08-10');
@@ -164,6 +152,86 @@ console.log('\n[ スタッフ画面 index.html の候補日時の計算 ]');
   check('今日は past ではない', cells[6 + 9], { date: '2026-08-10', day: 10, on: false, past: false });
   check('末尾は7の倍数まで埋める', cells.length % 7, 0);
   check('マスの数は 6 + 31 を7で丸めた数', cells.length, 42);
+}
+
+/* 候補1件の表示。終了時刻の入力欄は廃止したので、
+   終了時刻があるとき（過去のデータ）だけ範囲表示になる */
+console.log('\n[ スタッフ画面 index.html の候補1件の表示 fmtSlot ]');
+{
+  const I = load('index.html', ['pad', 'hm', 'fmtDate', 'fmtSlot'],
+    "const WD_JP=['日','月','火','水','木','金','土'];");
+  const start = iso(19, 0, 12), end = iso(21, 0, 12);
+  check('終了時刻があれば範囲で出す',
+    I.fmtSlot({ has_date: true, has_time: true, start, end, end_time: '21:00' }),
+    '8/12(水) 19:00〜21:00');
+  check('終了時刻が無ければ開始だけ',
+    I.fmtSlot({ has_date: true, has_time: true, start, end }),
+    '8/12(水) 19:00');
+  check('時間を設定していない候補は日付だけ',
+    I.fmtSlot({ has_date: true, has_time: false, start }),
+    '8/12(水)');
+}
+
+console.log('\n[ 出欠公開ページ attendance.html の候補1件の表示 fmtSlot ]');
+{
+  const A = load('attendance.html', ['jstParts', 'fmtSlot'],
+    "const hm=(iso)=>{const p=jstParts(iso);return `${p.hour}:${p.minute}`;};");
+  const start = '2026-08-12T19:00:00+09:00', end = '2026-08-12T21:00:00+09:00';
+  check('終了時刻があれば範囲で出す',
+    A.fmtSlot({ has_date: true, has_time: true, start, end, end_time: '21:00' }),
+    '8/12(水) 19:00〜21:00');
+  check('終了時刻が無ければ開始だけ',
+    A.fmtSlot({ has_date: true, has_time: true, start, end }),
+    '8/12(水) 19:00');
+  check('時間を設定していない候補は日付だけ',
+    A.fmtSlot({ has_date: true, has_time: false, start }),
+    '8/12(水)');
+}
+
+console.log('\n[ server/server.js の候補正規化 normalizeAttendOption ]');
+{
+  const S = load('server/server.js', ['validAttendDate', 'validAttendTime', 'normalizeAttendOption']);
+  const withEnd = S.normalizeAttendOption(
+    { has_date: true, has_time: true, date: '2026-08-12', start_time: '19:00', end_time: '21:00' }, 'op0');
+  check('終了時刻を指定すれば保存される', withEnd && withEnd.end_time, '21:00');
+  check('終了時刻ありのendは指定どおり21時',
+    withEnd && withEnd.end, new Date('2026-08-12T21:00:00+09:00').toISOString());
+
+  const noEnd = S.normalizeAttendOption(
+    { has_date: true, has_time: true, date: '2026-08-12', start_time: '19:00' }, 'op1');
+  check('終了時刻を省略しても作れる', noEnd, {
+    id: 'op1', has_date: true, has_time: true, date: '2026-08-12',
+    start_time: '19:00',
+    start: new Date('2026-08-12T19:00:00+09:00').toISOString(),
+    end: new Date('2026-08-12T20:00:00+09:00').toISOString(),
+  });
+  check('終了時刻を省略したらend_timeは保存しない（表示に出さないため）', noEnd && ('end_time' in noEnd), false);
+
+  const badEnd = S.normalizeAttendOption(
+    { has_date: true, has_time: true, date: '2026-08-12', start_time: '19:00', end_time: '18:00' }, 'op2');
+  check('終了時刻が開始より前なら弾く', badEnd, null);
+
+  const badStart = S.normalizeAttendOption(
+    { has_date: true, has_time: true, date: '2026-08-12', start_time: '25:99' }, 'op3');
+  check('開始時刻の形がおかしければ弾く', badStart, null);
+}
+
+console.log('\n[ server/server.js の候補1件の表示 fmtSlotJP ]');
+{
+  const S = load('server/server.js', ['fmtSlotJP']);
+  const start = '2026-08-12T19:00:00+09:00', end = '2026-08-12T21:00:00+09:00';
+  check('終了時刻があれば範囲で出す',
+    S.fmtSlotJP({ has_date: true, has_time: true, start, end, end_time: '21:00' }),
+    '8/12(水) 19:00〜21:00');
+  check('終了時刻が無ければ開始だけ',
+    S.fmtSlotJP({ has_date: true, has_time: true, start, end }),
+    '8/12(水) 19:00');
+  check('時間を設定していない候補は日付だけ',
+    S.fmtSlotJP({ has_date: true, has_time: false, start }),
+    '8/12(水)');
+  check('日付未定の候補はこれまでどおり',
+    S.fmtSlotJP({ has_date: false, start_time: '20:00', end_time: '22:00' }),
+    '20:00〜22:00（日程未定）');
 }
 
 /* 締切の計算。通知は日で数え、締切を過ぎたかどうかだけ時刻まで見る */

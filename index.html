@@ -919,31 +919,14 @@ function reqDateRange(a,b){
   while(d<=end){out.push(ymd(d));d.setDate(d.getDate()+1);}
   return out;
 }
-/* 同じ日をもう1件ふやす。前の終わりから1時間ぶん。
-   もとの長さは引き継がない。2時間の候補をふやすたびに 19-21 → 21-23 と
-   枠が伸びていき、たいてい後から手で直すことになっていたため。
+/* 同じ日をもう1件ふやす。前の開始から1時間後。終了時刻の入力欄は廃止したので、
+   開始時刻(t1)だけを見て次の候補をつくる。
    その日に収まらないときは翌日の 0 時へ送る（23:59 が上限なので、
-   終わりがちょうど 24:00 になる場合も収まらない扱いにする） */
+   ちょうど 24:00 になる場合も収まらない扱いにする） */
 function copyReqOption(opt){
-  const len=60;
-  const from=reqMins(opt.t2);
-  if(from+len>1439)return {date:reqShiftDate(opt.date,1),t1:'00:00',t2:reqHHMM(len)};
-  return {date:opt.date,t1:reqHHMM(from),t2:reqHHMM(from+len)};
-}
-/* ホイールで片方を動かしたときの、開始と終わりの組。
-   逆転した状態を作らせないよう、長さを保ったまま相手も引き連れて動かす */
-function reqApplyTimeChange(opt,field,value){
-  const len=Math.max(1,reqMins(opt.t2)-reqMins(opt.t1));
-  if(field==='t1'){
-    const from=reqMins(value);
-    let to=reqMins(opt.t2);
-    if(to<=from)to=Math.min(from+len,1439);
-    return {t1:reqHHMM(Math.min(from,to-1)),t2:reqHHMM(to)};
-  }
-  const to=reqMins(value);
-  let from=reqMins(opt.t1);
-  if(from>=to)from=Math.max(to-len,0);
-  return {t1:reqHHMM(from),t2:reqHHMM(Math.max(to,from+1))};
+  const from=reqMins(opt.t1)+60;
+  if(from>1439)return {date:reqShiftDate(opt.date,1),t1:'00:00'};
+  return {date:opt.date,t1:reqHHMM(from)};
 }
 /* カレンダーに並べるマス。前の月にはみ出すぶんは null で埋め、
    末尾は行がそろうまで null を足す。dates に入っている日を on にする */
@@ -4747,12 +4730,14 @@ function attendPerson(uid,r){
   return `<span class="atp"><span class="av">${avatarInner(u)}</span>
     <span>${esc((u||{}).nickname||publicPerson?.name||'—')}</span></span>`;
 }
-/* 候補1件の見せ方。「9/12(土) 19:00〜21:00」 */
+/* 候補1件の見せ方。「9/12(土) 19:00〜21:00」。
+   終了時刻の入力欄は廃止したので、end_time が無い（=新しい仕様で作った）候補は
+   「9/12(土) 19:00」と開始だけになる。end_time があるのは過去のデータ */
 function fmtSlot(o){
   if(o?.has_date===false)return `${o.start_time}${o.end_time?'〜'+o.end_time:''}（日程未定）`;
   if(o?.has_time===false)return fmtDate(o.start);
-  const s=new Date(o.start),e=o.end?new Date(o.end):null;
-  return `${s.getMonth()+1}/${s.getDate()}(${WD_JP[s.getDay()]}) ${hm(s)}${e?'〜'+hm(e):''}`;
+  const s=new Date(o.start);
+  return `${s.getMonth()+1}/${s.getDate()}(${WD_JP[s.getDay()]}) ${hm(s)}${o.end_time?'〜'+hm(new Date(o.end)):''}`;
 }
 let ATTANS={};   // 画面上で選んでいる自分の回答 {候補id:'ok'|'may'|'no'}
 function pickAttend(optId,v){
@@ -5044,7 +5029,7 @@ function openRequestForm(kind){
   /* 締切は月・日・時刻で持つ。年は送るときに dueResolveDate が決める。
      時刻の既定は 23:59＝その日いっぱい */
   REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',
-    opts:[],withTime:false,dueMonth:'',dueDay:'',dueTime:'23:59'};
+    opts:[],addTime:'',dueMonth:'',dueDay:'',dueTime:'23:59'};
   renderRequestForm();
 }
 
@@ -5068,10 +5053,10 @@ function openRsvpForm(){
     <div class="sheet2">
       <section class="s2col">
         <label class="fl" style="margin-top:0">予定の名前<span class="req">*</span></label>
-        <input id="rsvpTitle" autocomplete="off" placeholder="例）7月度 支部定例ミーティング">
+        <input id="rsvpTitle" class="field-underline" autocomplete="off" placeholder="例）7月度 支部定例ミーティング">
         <div class="field-err" id="rsvpTitleE"></div>
         <label class="fl">説明</label>
-        <textarea id="rsvpBody" rows="4" placeholder="伝えたいことがあれば書いてください。"></textarea>
+        <textarea id="rsvpBody" class="textarea-compact" rows="3" placeholder="伝えたいことがあれば書いてください。"></textarea>
       </section>
       <section class="s2col">
         <label class="fl" style="margin-top:0">日付<span class="req">*</span></label>
@@ -5262,9 +5247,10 @@ function setReqKind(kind){
   if(kind!=='attend'&&REQFORM.mode==='public')REQFORM.mode='all_staff';
   renderRequestForm(true);
 }
-function setReqWithTime(on){
-  syncReqOptions();
-  REQFORM.withTime=on;
+/* カレンダーで日付を選んだ瞬間の時刻。ここで選んだ値が、そのとき足す候補に
+   焼き付く（あとから候補ごとに直すこともできる。reqOptionsHTML参照） */
+function setReqAddTime(value){
+  REQFORM.addTime=value;
   renderRequestForm(true);
 }
 function removeReqOption(i){
@@ -5276,16 +5262,13 @@ function removeReqOption(i){
    呼び出し口が多いので関数は残してある */
 function syncReqOptions(){}
 /* ===== 候補の時刻 =====
-   時刻はOS標準の入力欄（input type=time）で受け取る。iPhoneでは画面下から
-   純正のホイールが出て、パソコンでは数字をそのまま打てる。自前のホイールは
-   スマホでの当たり判定が悪く、みんなの慣れた動きから外れるのでやめた */
-function setReqOptTime(i,field,value){
+   30分刻みのプルダウンで選ぶ。終了時刻の入力欄は廃止したので、
+   候補は開始時刻(t1)だけを持つ（無ければ「時間を設定しない」候補） */
+function setReqOptTime(i,value){
   const o=REQFORM.opts[i];
   if(!o)return;
-  /* 取り消しや打ちかけで空になることがある。そのときは元の値に戻す */
-  if(!/^[0-9]{2}:[0-9]{2}$/.test(value)){renderRequestForm(true);return;}
-  const next=reqApplyTimeChange(o,field,value);
-  o.t1=next.t1;o.t2=next.t2;
+  if(value&&!/^[0-9]{2}:[0-9]{2}$/.test(value)){renderRequestForm(true);return;}
+  o.t1=value;
   reqSortOptions();
   renderRequestForm(true);
 }
@@ -5333,10 +5316,9 @@ function reqDateLabel(date){
   const d=new Date(date+'T00:00');
   return `${d.getMonth()+1}月${d.getDate()}日(${'日月火水木金土'[d.getDay()]})`;
 }
-/* 新しい日の初期の時刻は、直前の候補と同じにする。1件も無ければ 19:00〜21:00 */
+/* 新しい候補の初期の時刻は、そのとき「時間を設定」で選んでいる値をそのまま使う */
 function reqNewOption(date){
-  const last=REQFORM.opts[REQFORM.opts.length-1];
-  return {date:date,t1:last?last.t1:'19:00',t2:last?last.t2:'21:00'};
+  return {date:date,t1:REQFORM.addTime||''};
 }
 /* 日付順、同じ日なら開始が早い順。カレンダーの並びと一覧の並びをそろえるため */
 function reqSortOptions(){
@@ -5415,32 +5397,36 @@ function reqCalUp(){
   document.removeEventListener('pointerup',reqCalUp);
   document.removeEventListener('pointercancel',reqCalUp);
 }
+/* 「時間を設定」プルダウンの中身。時間を設定しない＋30分刻み（00:00〜23:30）。
+   候補ごとの行にも、この同じ並びをそのまま使う */
+function reqTimeOptionsHTML(selected){
+  let out=`<option value="" ${selected?'':'selected'}>時間を設定しない</option>`;
+  for(let m=0;m<24*60;m+=30){
+    const v=reqHHMM(m);
+    out+=`<option value="${v}" ${selected===v?'selected':''}>${v}</option>`;
+  }
+  return out;
+}
 function reqOptionsHTML(){
   if(REQFORM.kind!=='attend')return '';
-  /* 選んだ日は1件ずつ縦に積む。時間を設定しているときは
-     時刻の入力欄と「同じ日をふやす」も同じ行の中に入れる */
+  /* 選んだ日は1件ずつ縦に積む。時間が付いている候補は
+     プルダウンと「同じ日をふやす」も同じ行の中に入れる */
   const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
       <span class="optdate">${reqDateLabel(o.date)}</span>
-      ${REQFORM.withTime?`<span class="opttime">
-        <input type="time" class="optt" value="${esc(o.t1)}"
-          aria-label="候補${i+1}の開始時刻" onchange="setReqOptTime(${i},'t1',this.value)">
-        <span class="tr-sep">〜</span>
-        <input type="time" class="optt" value="${esc(o.t2)}"
-          aria-label="候補${i+1}の終了時刻" onchange="setReqOptTime(${i},'t2',this.value)">
+      <span class="opttime">
+        <select class="optt" aria-label="${reqDateLabel(o.date)}の時刻" onchange="setReqOptTime(${i},this.value)">${reqTimeOptionsHTML(o.t1)}</select>
+        ${o.t1?`<button type="button" class="optcopy" onclick="duplicateReqOption(${i})"
+          aria-label="${reqDateLabel(o.date)}と同じ日をもう1件ふやす" title="同じ日をふやす">${ic('copy')}</button>`:''}
       </span>
-      <button type="button" class="optcopy" onclick="duplicateReqOption(${i})"
-        aria-label="${reqDateLabel(o.date)}と同じ日をもう1件ふやす" title="同じ日をふやす">${ic('copy')}</button>`:''}
       <button type="button" class="optx" onclick="removeReqOption(${i})"
         ${REQFORM.opts.length<=1?'disabled':''} aria-label="この候補を消す">×</button>
     </div>`).join('');
   return `<label class="fl" style="margin-top:16px">候補の日時<span class="req">*</span>
       <span class="fl-sub">答える人は候補ごとに ○△× を選びます</span></label>
     ${reqCalendarHTML()}
-    <div class="modechips" style="margin:0 0 10px">
-      <button type="button" class="modechip ${REQFORM.withTime?'on':''}" aria-pressed="${REQFORM.withTime}"
-        onclick="setReqWithTime(!REQFORM.withTime)">時間を設定する</button>
-    </div>
-    <div class="optlist">${rows}</div>`;
+    <label class="fl" for="reqAddTime">時間を設定</label>
+    <select id="reqAddTime" onchange="setReqAddTime(this.value)">${reqTimeOptionsHTML(REQFORM.addTime)}</select>
+    <div class="optlist" style="margin-top:10px">${rows}</div>`;
 }
 
 /* ===== 回答の締切 =====
@@ -5535,9 +5521,9 @@ function renderRequestForm(keepText){
     ${currentTargetHint}`;
   const colText=`
     <label class="fl" style="margin-top:0">件名<span class="req">*</span></label>
-    <input id="reqSubj" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
+    <input id="reqSubj" class="field-underline" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
     <label class="fl">本文</label>
-    <textarea id="reqBody" rows="${attend?4:6}" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>`;
+    <textarea id="reqBody" class="textarea-compact" rows="3" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>`;
   /* 候補日のカレンダーは背が高い。日程調整のときは
      「あて先＋件名・本文」を左、「締切＋候補日」を右にすると、左右の高さが釣り合う */
   const cols=attend
@@ -5582,27 +5568,24 @@ async function submitRequest(){
     if(!REQFORM.opts.length){err.textContent='候補の日時を1件以上追加してください';err.classList.add('show');return;}
     for(const o of REQFORM.opts){
       if(!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
-      if(REQFORM.withTime){
-        // 時刻はホイールでしか変えられないので崩れないはずだが、
-        // 送ってしまう前にもう一度だけ確かめる（サーバー側も同じ形で弾く）
-        const ok=v=>/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v);
-        if(!ok(o.t1)||!ok(o.t2)){err.textContent='時刻の形がおかしくなっています。選び直してください';err.classList.add('show');return;}
-        if(o.t2<=o.t1){err.textContent='終わりの時刻は始まりより後にしてください';err.classList.add('show');return;}
+      // 時刻はプルダウンでしか変えられないので崩れないはずだが、
+      // 送ってしまう前にもう一度だけ確かめる（サーバー側も同じ形で弾く）
+      if(o.t1&&!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(o.t1)){
+        err.textContent='時刻の形がおかしくなっています。選び直してください';err.classList.add('show');return;
       }
     }
     // 同じ日時が2つあると集計の見分けがつかないので弾く
     const seen=new Set();
     for(const o of REQFORM.opts){
-      const key=[o.date,REQFORM.withTime?`${o.t1}-${o.t2}`:''].join('|');
+      const key=[o.date,o.t1||''].join('|');
       if(seen.has(key)){err.textContent='同じ日時の候補が重なっています';err.classList.add('show');return;}
       seen.add(key);
     }
     options=REQFORM.opts.map(o=>({
       date:o.date,
-      start_time:REQFORM.withTime?o.t1:undefined,
-      end_time:REQFORM.withTime?o.t2:undefined,
+      start_time:o.t1||undefined,
       has_date:true,
-      has_time:REQFORM.withTime,
+      has_time:!!o.t1,
     }));
   }
 

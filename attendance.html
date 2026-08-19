@@ -62,14 +62,15 @@ function jstParts(iso){
   return p;
 }
 const hm=(iso)=>{const p=jstParts(iso);return `${p.hour}:${p.minute}`;};
-/* 候補1件の見せ方。「9/12(土) 19:00〜21:00」。index.html の fmtSlot と同じ形 */
+/* 候補1件の見せ方。「9/12(土) 19:00〜21:00」。index.html の fmtSlot と同じ形。
+   end_time が無い候補（終了時刻の入力欄を廃止したあとの新しい候補）は開始だけになる */
 function fmtSlot(o){
   if(!o)return '';
   if(o.has_date===false)return `${o.start_time}${o.end_time?'〜'+o.end_time:''}（日程未定）`;
   const p=jstParts(o.start);
   const day=`${p.month}/${p.day}(${p.weekday})`;
   if(o.has_time===false)return day;
-  return `${day} ${hm(o.start)}${o.end?'〜'+hm(o.end):''}`;
+  return `${day} ${hm(o.start)}${o.end_time?'〜'+hm(o.end):''}`;
 }
 const todayYmd=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',
   year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
