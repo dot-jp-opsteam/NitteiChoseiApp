@@ -1717,9 +1717,10 @@ async function run() {
         && indexHtml.includes("document.addEventListener('touchmove',avHoldMove,{passive:false})"), true);
       check('入口タイルの薄い説明文は出さない',
         indexHtml.includes('<span class="hxd">${d}</span>'), false);
-      check('入口タイルは中央に寄せ、パソコンでは1列にする',
+      check('入口タイルは中央に寄せ、パソコンでは横1列にする',
         css.includes('.hexrow{display:flex;justify-content:center;gap:var(--hgap)}')
-        && css.includes('.hexrow{flex-direction:column;align-items:center}'), true);
+        && css.includes('.hexgrid{flex-direction:row;justify-content:center;gap:var(--hgap)}')
+        && css.includes('.hexrow{display:contents}'), true);
       check('選び方の一言が日時欄に出る',
         applyHtml.includes('押したまま上下になぞるとまとめて選べます'), true);
 

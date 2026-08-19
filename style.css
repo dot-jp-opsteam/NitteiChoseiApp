@@ -1846,18 +1846,28 @@
   }
   /* 余りが出ても左右に均等に配るので、タイルは常に画面の中央に来る */
   .hexrow{display:flex;justify-content:center;gap:var(--hgap)}
+  /* 左右の余白は、六角形のときの「幅の13%」（240pxなら31px）のままだと
+     四角では効きすぎて、「受けられる時間」が3行に折り返していた。
+     四隅まで面がある四角では、細く一定に取れば足りる */
+  .hex{padding:0 10px}
 
-  /* パソコンでは横に余白が余るので、2列にせず1列に積んで横長のタイルにする。
-     JS側は2枚ずつの行に分けて出しているが、行を縦並びに変えれば
-     出した順（依頼→面談一覧→受けられる時間→カレンダー連携）のまま1列になる */
-  /* 761px は、左メニューが出しっぱなしになる境目（＝パソコンとみなす幅）。
+  /* パソコンでは横に余白が余るので、2枚ずつ折り返さず、全部を横1列に並べる。
+     JS側は2枚ずつの行（.hexrow）に分けて出しているが、行を display:contents に
+     すると箱として消えて、中のタイルが .hexgrid の直接の子として1列に並ぶ。
+     出した順（依頼→面談一覧→受けられる時間→カレンダー連携）はそのまま保たれる。
+
+     761px は、左メニューが出しっぱなしになる境目（＝パソコンとみなす幅）。
      他の指定とそろえてあるので、ここだけ別の数字にしないこと */
   @media(min-width:761px){
-    .hexrow{flex-direction:column;align-items:center}
-    .hex{flex:none;width:100%;max-width:520px;aspect-ratio:auto;min-height:84px;
-      flex-direction:row;justify-content:flex-start;gap:14px;padding:0 22px;text-align:left}
-    .hex .hxi{font-size:26px}
-    .hex .hxt{font-size:15px}
-    /* 1列だと行の間だけ隙間が空くので、タイル同士の間隔をそろえる */
-    .hexrow>.hex+.hex{margin-top:var(--hgap)}
+    .hexgrid{flex-direction:row;justify-content:center;gap:var(--hgap)}
+    .hexrow{display:contents}
+    /* 枚数が増えても横に収まるよう、余った幅を等分する。
+       上限（--hw）は残すので、2枚しかないインターン生の画面で
+       1枚が間延びすることはない */
+    .hex{flex:1 1 0;max-width:var(--hw);aspect-ratio:1/0.78;
+      /* 1枚の幅は「余りの等分」で決まるので、--hw からは分からない。
+         タイル自身を基準（コンテナ）にして、名前がはみ出す幅のときだけ
+         文字を小さくする。「受けられる時間」が2行に割れるのを防ぐ */
+      container-type:inline-size}
+    .hex .hxt{font-size:min(13.5px, 11.5cqw)}
   }
