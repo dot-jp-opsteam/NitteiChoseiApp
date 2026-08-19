@@ -7,8 +7,9 @@
 <!-- 支部ごとの合言葉が入ったURLなので、検索結果に出さない -->
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#dbe9e7">
-<link rel="icon" href="/icon-120.png" sizes="120x120" type="image/png">
-<link rel="apple-touch-icon" href="/icon-120.png">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <!-- テーマはライト固定。アプリ本体と違い、切り替えの設定を持たない画面なので
      localStorage は読まず、data-theme を最初から light にしてある -->
 <!-- OS側がダーク設定の端末だと、style.cssが届くまでの一瞬だけ
@@ -284,10 +285,6 @@ function viewApply(){
 
   return '<div class="applyhead"><h1 class="page">面談を申請</h1>'
       +'<span class="brand">'+esc(BRANCH_NAME)+'</span></div>'
-    +'<p class="page-sub">お名前と担当スタッフを選ぶと、空いている枠が表に出ます。'
-      +'空いている枠を上下になぞって選び、下の一覧で希望順に並べ替えてください'
-      +'（なぞれるのは同じ日の中だけです）。続けて選んだ時間はひとつの希望にまとまります。'
-      +'担当スタッフが日程を確定します。</p>'
     +'<div class="card"><div class="cb">'
       /* 必須の赤い＊は、まだ入っていないあいだだけ出す。
          入れ終わった欄からは消えるので、残りどこを埋めればよいかがひと目で分かる */
@@ -303,8 +300,7 @@ function viewApply(){
          インターン生はこの画面に初めて来るので、表が出てから読むのでは遅い。
          色を付けた囲み（.hint）ではなく本文と同じ黒字にしてある。
          囲みにすると「補足」に見えて読み飛ばされるため */
-      +'<div class="guide">下のカレンダーから、<b>あなたが空いている時間帯</b>を選択してください。<br>'
-        +'面談の長さを決めるものではありません。担当スタッフがこの中から開始時刻を決めます。<br>'
+      +'<div class="guide">下のカレンダーから、<b>空いている時間帯</b>を選択してください。<br>'
         +'選べる時間が多いほど日程が決まりやすくなります。</div>'
       +weekBlock(groups)
       +'<div class="divider"></div>'

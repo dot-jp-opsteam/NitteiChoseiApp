@@ -611,8 +611,13 @@ async function testAttendance() {
     appHtml.includes("mode:kind==='attend'?'public':'all_staff'"), true);
   check('公開モードを送信APIへ明示する',
     appHtml.includes("public_access:attend&&REQFORM.mode==='public'"), true);
-  check('公開モードでは「いまのあて先」の行を出力しない',
-    appHtml.includes("const currentTargetHint=REQFORM.mode==='public'?'':"), true);
+  /* 依頼フォームの説明文はすべて撤去した（2026-08-19）。
+     「いまのあて先：○○」の行もその一部で、宛先の欄そのものを見れば分かる */
+  check('依頼フォームに「いまのあて先」の行は無い',
+    appHtml.includes('いまのあて先'), false);
+  check('宛先の見出しは「宛先」の2文字',
+    appHtml.includes('<label class="fl" style="margin-top:0">宛先</label>')
+      && !appHtml.includes('あて先の選び方'), true);
   check('通常依頼の差出人・あて先・送信日時を控えめな1行にまとめる',
     appHtml.includes('<p class="rq-meta">差出人：${esc(sender?sender.nickname')
       && appHtml.includes(' ・ あて先：${esc(r.target_label')
@@ -668,26 +673,21 @@ async function testAttendance() {
   check('完了済みの依頼は新しい順のまま',
     appHtml.includes('function myRequests(){')
       && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
-  /* 入口は「＋ 新しく送る」の1つだけ。
-     以前は「＋日程調整／＋出欠確認／＋依頼を出す」が同じ色・同じ大きさで
-     横に3つ並び、名前だけでは違いが分からなかった。
-     押すと openSendPicker() が説明付きの3択を出す */
-  check('依頼画面の入口は「新しく送る」1つだけ',
-    appHtml.includes('onclick="openSendPicker()">${ic(\'plus\')}新しく送る</button>')
-      && !appHtml.includes('＋ 日程調整')
-      && !appHtml.includes('＋ 出欠確認')
-      && !appHtml.includes('＋ 依頼を出す'), true);
-  /* 3択は「日程を決める」「参加を確認する」「連絡・お願い」の順。
-     それぞれ何をするものかと、あて先が誰かを言葉で書いてある */
-  check('送るものの3択が説明とあて先つきで並ぶ',
-    /openRequestForm\('attend'\)[\s\S]*日程を決める[\s\S]*openRsvpForm\(\)[\s\S]*参加を確認する[\s\S]*openRequestForm\(\)[\s\S]*連絡・お願い/.test(appHtml)
-      && appHtml.includes("${ic('send')}あて先：${to}")
-      && (appHtml.match(/'選んだ相手'\)/g) || []).length === 2
-      && appHtml.includes("'支部の全スタッフ')"), true);
+  /* 入口は「日程を決める」「タスクを追加」の2つ（2026-08-19）。
+     以前は「新しく送る」1つに入ってから、中でもう一度3択を出していたが、
+     ボタンを分けたほうが1タップ短く、名前だけで用途が分かる */
+  check('依頼画面の入口は日程・タスクの2つのボタン',
+    appHtml.includes('onclick="openRequestForm(\'attend\')">${ic(\'calendar\')}日程を決める</button>')
+      && appHtml.includes('onclick="openRequestForm()">${ic(\'megaphone\')}タスクを追加</button>'), true);
+  check('旧「新しく送る」の入口は残っていない',
+    appHtml.includes('新しく送る</button>') || appHtml.includes('openSendPicker('), false);
+  /* 「参加を確認する」は機能ごと撤去した（2026-08-19）。
+     日にちが決まっている予定の出欠は「日程を決める」を候補1件で使えば足りる */
+  check('参加を確認するの作成画面は残っていない',
+    appHtml.includes('openRsvpForm') || appHtml.includes('RSVPCAL') || appHtml.includes('submitRsvp'), false);
   check('旧「出欠を確認する」の文言は残っていない', appHtml.includes('出欠を確認する'), false);
   /* フォームの中の「送るもの」二重切り替えは撤去した。
-     外で選んだのに中でもう一度選ぶ形になっていて、しかも
-     「参加を確認する」だけがその切り替えに入っていなかった */
+     外で選んだのに中でもう一度選ぶ形になっていた */
   check('依頼フォームに「送るもの」の切り替えは無い',
     appHtml.includes('<label class="fl">送るもの</label>'), false);
   check('3状態の言い方は ○参加／△未定／×不参加 に統一されている',
@@ -696,27 +696,11 @@ async function testAttendance() {
       && !attendHtml.includes('参加できる')
       && !attendHtml.includes('参加できない'), true);
 
-  /* ---- 出欠確認（1件だけの予定に○△×で答える新タブ） ----
-     日程調整（候補を複数出して絞る）とは別物。中身は出欠確認（kind:'attend'）を
-     候補1件で作り、その場ですぐ確定させるだけで、専用のAPIは足していない */
-  check('出欠確認フォームは名前・説明・日付の3つだけ',
-    appHtml.includes('function openRsvpForm()')
-      && appHtml.includes('id="rsvpTitle"') && appHtml.includes('id="rsvpBody"') && appHtml.includes('id="rsvpCalWrap"')
-      && !appHtml.includes('id="rsvpTime"'), true);
-  /* 日付は入力欄ではなく、日程調整と同じカレンダーから選ぶ。
-     ただしなぞって複数選ぶ仕組みは無く、押した1日だけが選択になる */
-  check('出欠確認の日付はカレンダーから1日だけ選ぶ',
-    appHtml.includes('function rsvpCalendarHTML()')
-      && appHtml.includes('function pickRsvpDate(date)')
-      && appHtml.includes('RSVPCAL.date=RSVPCAL.date===date?\'\':date;')
-      && !appHtml.includes('type="date" id="rsvpDate"'), true);
-  check('出欠確認は支部の全スタッフ固定で対象を選ばせない',
-    appHtml.includes("target_label:'支部の全スタッフ',recipient_ids:ids")
-      && appHtml.includes('const ids=branchStaff().filter(u=>u.id!==ME.id).map(u=>u.id);'), true);
-  check('出欠確認は作成した直後にその場で確定させる',
-    appHtml.includes("kind:'attend',options:[{date,has_date:true,has_time:false}]")
-      && appHtml.includes('/confirm`,')
-      && appHtml.includes('option_id:request.options[0].id'), true);
+  /* ---- 「参加を確認する」は撤去済み（2026-08-19） ----
+     過去に送った分の予定は votable:true のまま残るので、
+     カレンダー側の回答欄（下の検査）は今までどおり動く */
+  check('参加を確認するの入力欄は残っていない',
+    appHtml.includes('id="rsvpTitle"') || appHtml.includes('id="rsvpCalWrap"'), false);
 
   /* 確定した出欠確認は、依頼の詳細を開いてもカレンダーと同じイベントカードを見せる。
      ○△×の回答場所はカレンダー側（event_responses）に一本化されているため、
@@ -756,8 +740,11 @@ async function testAttendance() {
       && appHtml.includes('回答者を見る（${resp.length}）'), true);
   check('確定後の集計はvotableがfalseなら候補段階の回答をそのまま使う',
     appHtml.includes('if(ev&&ev.votable===false)return r.responses||[];'), true);
-  check('出欠確認は確定するとき出欠を取り続けるよう申告する',
-    appHtml.includes('option_id:request.options[0].id,keep_votable:true'), true);
+  /* keep_votable を送る口（参加を確認する）は撤去したが、サーバー側の受け口は
+     残してある。過去に votable:true で作られた予定を読む側の処理と対になっており、
+     消しても得るものが無いため */
+  check('画面から keep_votable を送る口はもう無い',
+    appHtml.includes('keep_votable'), false);
 
   /* 予定の作成・編集フォーム。日付は入力欄をやめ、開いた日に固定する。
      説明は一番下、色は時間のすぐ下に移した。名前は空でも「タイトルなし」になる */
@@ -1104,100 +1091,21 @@ async function testICalendarFormatting() {
   check('iCalendar全体をCRLFで終える', /\r\n$/.test(calendar) && !/(^|[^\r])\n/.test(calendar), true);
 }
 
-/* ---------- iCalendar 購読API ---------- */
+/* ---------- カレンダー購読（撤去済み）----------
+   iPhone/Googleカレンダーへ .ics を購読させる機能は 2026-08-19 に取り除いた。
+   使う人がほとんど居ないわりに、合鍵つきの公開URLという重い仕組みを
+   抱え込んでいたため。戻したくなったときのために、消えていることを検査する */
 async function testCalendarSubscription() {
-  console.log('\n─────── iCalendar購読API ───────');
-  const now = new Date();
-  const at = (days, hour = 10) => {
-    const d = new Date(now.getTime() + days * 86400000);
-    d.setUTCHours(hour, 0, 0, 0);
-    return d.toISOString();
-  };
-  const allDayStart = at(3, 15);
-  const saved = await putDB(TOKENS.staff, (db) => {
-    db.events = [...(db.events || []),
-      { id: 'ev_ics_branch', title: '購読テスト,支部;予定', description: '外に出さない本文',
-        start_datetime: at(2), end_datetime: at(2, 11), has_time: true,
-        location: '東京\\会場', branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
-      { id: 'ev_ics_all_day', title: '終日支部イベント', description: '', start_datetime: allDayStart,
-        end_datetime: new Date(new Date(allDayStart).getTime() + 1800000).toISOString(), has_time: false,
-        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
-      { id: 'ev_ics_too_old', title: '古すぎる予定', start_datetime: at(-100), end_datetime: at(-100, 11),
-        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
-      { id: 'ev_ics_too_far', title: '先すぎる予定', start_datetime: at(370), end_datetime: at(370, 11),
-        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
-      { id: 'ev_ics_legacy', title: '終了時刻のない旧予定', start_datetime: at(7),
-        branch_id: 'b1', visibility: 'branch', creator_id: 'u_e2e_staff', created_at: now.toISOString() },
-    ];
-  });
-  check('購読テスト用の支部イベントを保存できる', saved.status, 200);
-  await putDB(TOKENS.staff3, (db) => {
-    db.events = [...(db.events || []), { id: 'ev_ics_private', title: '他人の非公開予定',
-      start_datetime: at(4), end_datetime: at(4, 11), branch_id: 'b1', visibility: 'private',
-      creator_id: 'u_e2e_staff3', created_at: now.toISOString() }];
-  });
-  await putDB(TOKENS.staff2, (db) => {
-    db.events = [...(db.events || []), { id: 'ev_ics_other_branch', title: '他支部の予定',
-      start_datetime: at(5), end_datetime: at(5, 11), branch_id: 'b2', visibility: 'branch',
-      creator_id: 'u_e2e_staff2', created_at: now.toISOString() }];
-  });
-
-  const c = createClient({ url: 'file:' + DB_PATH });
-  await c.execute({
-    sql: 'INSERT OR REPLACE INTO interviews (id,intern_id,staff_id,branch_id,status,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
-    args: ['iv_ics_fixed', '', 'u_e2e_staff', 'b1', 'fixed', JSON.stringify({
-      intern_name: '購読 面談子', confirmed_datetime: at(6), meeting_type: 'meet',
-    }), now.toISOString(), now.toISOString()],
-  });
-  c.close();
-
-  const noAuth = await api(null, 'GET', '/api/calendar/subscription');
-  check('購読URLの取得にはログインが必要', noAuth.status, 401);
+  console.log('\n─────── カレンダー購読の撤去 ───────');
   const issued = await api(TOKENS.staff, 'GET', '/api/calendar/subscription');
-  check('初回アクセスで購読URLを発行する', issued.status, 200);
-  const firstUrl = issued.json.url || '';
-  const key = /\/api\/calendar\/([A-Za-z0-9_-]+)\.ics$/.exec(firstUrl)?.[1] || '';
-  check('購読キーはURL安全な32文字以上', key.length >= 32, true);
-  const again = await api(TOKENS.staff, 'GET', '/api/calendar/subscription');
-  check('作り直すまでは同じ購読URLを返す', again.json.url, firstUrl);
-  if (!firstUrl) return;
-
-  const feedResponse = await fetch(firstUrl);
-  const feed = await feedResponse.text();
-  check('購読URLはログインなしで取得できる', feedResponse.status, 200);
-  check('購読URLはtext/calendarで返す', feedResponse.headers.get('content-type'), 'text/calendar; charset=utf-8');
-  check('自分が担当する確定面談を含める', feed.includes('面談: 購読 面談子さん'), true);
-  check('自分の支部イベントを含める', feed.includes('SUMMARY:購読テスト\\,支部\\;予定'), true);
-  check('終了時刻のない既存イベントも購読全体を壊さない',
-    feedResponse.status === 200 && feed.includes('終了時刻のない旧予定'), true);
-  check('終日イベントをVALUE=DATEで含める', feed.includes('DTSTART;VALUE=DATE:'), true);
-  check('イベント本文をDESCRIPTIONへ載せすぎない', feed.includes('外に出さない本文'), false);
-  check('他人の非公開予定を含めない', feed.includes('他人の非公開予定'), false);
-  check('他支部の予定を含めない', feed.includes('他支部の予定'), false);
-  check('3か月より古い予定を含めない', feed.includes('古すぎる予定'), false);
-  check('1年より先の予定を含めない', feed.includes('先すぎる予定'), false);
-
-  const missing = await fetch(BASE + '/api/calendar/' + 'x'.repeat(43) + '.ics');
-  check('存在しない購読キーは404', missing.status, 404);
-  const regenerated = await api(TOKENS.staff, 'POST', '/api/calendar/subscription/regenerate', {});
-  check('購読キーを作り直せる', regenerated.status, 200);
-  check('作り直すとURLが変わる', regenerated.json.url !== firstUrl, true);
-  check('作り直すと古いURLは404', (await fetch(firstUrl)).status, 404);
-  check('新しいURLはログインなしで取得できる', (await fetch(regenerated.json.url)).status, 200);
-
+  check('購読URLの発行APIは無い', issued.status, 404);
+  const regen = await api(TOKENS.staff, 'POST', '/api/calendar/subscription/regenerate', {});
+  check('購読キーの再発行APIは無い', regen.status, 404);
+  const feed = await fetch(BASE + '/api/calendar/' + 'x'.repeat(43) + '.ics');
+  check('.ics の配信口も無い', feed.status, 404);
   const appHtml = await (await fetch(BASE + '/')).text();
-  const appCss = await (await fetch(BASE + '/style.css')).text();
-  check('プロフィール設定に「カレンダーに登録」がある', appHtml.includes('カレンダーに登録'), true);
-  check('設定画面が購読URL APIを使う', appHtml.includes("api('/api/calendar/subscription')"), true);
-  check('購読URLをコピーする操作がある', appHtml.includes('copyCalendarSubscriptionUrl()'), true);
-  check('キーの作り直し前に既存確認シートを使う',
-    appHtml.includes("confirmSheet('購読キーを作り直しますか？'"), true);
-  check('iPhoneの購読手順を表示する',
-    appHtml.includes('設定 → カレンダー → アカウント → その他 → 照会するカレンダーを追加'), true);
-  check('Googleカレンダーの購読手順を表示する',
-    appHtml.includes('他のカレンダー → URLで追加'), true);
-  check('購読欄のCSSクラスはics接頭辞を使う',
-    appHtml.includes('class="ics-url"') && appCss.includes('.ics-url'), true);
+  check('プロフィール設定から「カレンダーに登録」を消した',
+    appHtml.includes("'カレンダーに登録'") || appHtml.includes('openCalendarSubscriptionSettings'), false);
 }
 
 async function testSharedCalFilter() {
@@ -1753,12 +1661,15 @@ async function run() {
        どこで何を選ぶのかが分かる一文が要る（設計書 2節） */
     {
       const applyHtml = fs.readFileSync(path.join(ROOT, 'apply.html'), 'utf8');
-      const GUIDE = '下のカレンダーから、<b>あなたが空いている時間帯</b>を選択してください。';
+      const GUIDE = '下のカレンダーから、<b>空いている時間帯</b>を選択してください。';
       check('申請画面にカレンダーで選ぶ旨の説明がある', applyHtml.includes(GUIDE), true);
-      /* 「10:00〜10:30」を面談の長さと読み違えられないよう、
-         選ぶのは空いている時間帯だと必ず書いておく（2026-08-10 の指摘） */
-      check('選ぶのは空き時間で面談の長さではないと書いてある',
-        applyHtml.includes('面談の長さを決めるものではありません'), true);
+      /* 説明は2行に短くした（2026-08-19）。長い注意書きは読まれないうえ、
+         画面がその分だけ下へ伸びてカレンダーが遠のくため */
+      check('選び方の説明は2行に収めてある',
+        applyHtml.includes('選べる時間が多いほど日程が決まりやすくなります。')
+        && !applyHtml.includes('面談の長さを決めるものではありません'), true);
+      check('表の上の長い手順説明は消してある',
+        applyHtml.includes('お名前と担当スタッフを選ぶと、空いている枠が表に出ます'), false);
       check('説明は担当スタッフ欄とカレンダーの間にある',
         applyHtml.indexOf('のスタッフから選べます') < applyHtml.indexOf(GUIDE)
         && applyHtml.indexOf(GUIDE) < applyHtml.indexOf('weekBlock(groups)'), true);
@@ -1890,9 +1801,20 @@ async function run() {
 
       // アイコン。iPhoneはホーム画面に追加したときだけ通知が届くので、通知の前提でもある
       check('3つの画面すべてにアイコンがある',
-        appHtml.includes('rel="apple-touch-icon" href="/icon-120.png"')
-        && applySrc.includes('rel="apple-touch-icon" href="/icon-120.png"')
-        && attendSrc.includes('rel="apple-touch-icon" href="/icon-120.png"'), true);
+        appHtml.includes('rel="apple-touch-icon" href="/icon-192.png"')
+        && applySrc.includes('rel="apple-touch-icon" href="/icon-192.png"')
+        && attendSrc.includes('rel="apple-touch-icon" href="/icon-192.png"'), true);
+      /* アイコンの原本はベクター（icon.svg）。PNGはそこから書き出したもので、
+         大きさを変えたいときは icon.svg を直してPNGを作り直す */
+      check('アイコンの原本はベクターで持つ',
+        appHtml.includes('rel="icon" href="/icon.svg" type="image/svg+xml"')
+        && fs.existsSync(path.join(ROOT, 'icon.svg'))
+        && fs.existsSync(path.join(ROOT, 'icon-192.png'))
+        && fs.existsSync(path.join(ROOT, 'icon-512.png')), true);
+      check('新しいアイコンはPUBLIC_FILESで配信を許可してある',
+        serverSource.includes("'/icon.svg': 'icon.svg'")
+        && serverSource.includes("'/icon-192.png': 'icon-192.png'")
+        && serverSource.includes("'/icon-512.png': 'icon-512.png'"), true);
       check('manifest を読んでいる', appHtml.includes('rel="manifest" href="/manifest.webmanifest"'), true);
       check('検索結果用の説明文がある', appHtml.includes('<meta name="description"'), true);
 

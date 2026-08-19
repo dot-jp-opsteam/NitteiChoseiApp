@@ -1524,6 +1524,40 @@
      見えなくなる。25%〜75%は横幅いっぱいの帯になるので、その範囲の左端に置く */
   .hex .hxdot{position:absolute;top:26%;left:9%;width:10px;height:10px;
     border-radius:999px;background:var(--bad);border:2px solid var(--panel)}
+  /* ---------- 入口タイルを角の丸い四角にする（2026-08-19） ----------
+     上の指定は六角形のハニカム用に書かれている。世界観に合わせて六角形にしていたが、
+     文字が上下の尖った部分にかかって窮屈だったため、角の丸い四角の2列に改めた。
+     クラス名（.hex / .hexgrid / .hexrow）はJSと差し色の指定が参照しているので変えず、
+     形にかかわる指定だけをここで上書きする。この節を消すと六角形に戻る */
+  .hexgrid{
+    /* 2列ぶんの幅。六角形のときより1枚が横に広いので上限を上げる */
+    --hgap:10px;
+    --hw:min(240px, calc((100cqw - (var(--cols) - 1) * var(--hgap)) / var(--cols)));
+    width:100%;
+  }
+  .hexrow{width:100%}
+  /* 噛み合わせは不要になったので、行はまっすぐ縦に積む */
+  .hexrow+.hexrow{margin-top:var(--hgap)}
+  .hexrow.off{margin-left:0}
+  .hex{
+    /* 六角形の切り抜きをやめ、横長の角丸にする。左右の余白も詰められる */
+    clip-path:none;aspect-ratio:1/0.72;border-radius:18px;
+    padding:0 12px;gap:6px;flex:1 1 0;width:auto;max-width:var(--hw);
+  }
+  .hex::before{clip-path:none;border-radius:16.5px}
+  .hex .hxi{font-size:min(24px,calc(var(--hw) * 0.14))}
+  .hex .hxt{font-size:14px;letter-spacing:-.02em}
+  .hex .hxd{font-size:11px}
+  /* 角が丸いだけで四隅まで面があるので、バッジと赤い印は角に寄せられる */
+  .hex .hxb{top:10px;right:10px}
+  .hex .hxdot{top:12px;left:12px}
+  @media(max-width:520px){
+    /* 四角なら小さくても説明文が入るので、六角形のときのように隠さない */
+    .hex .hxd{display:-webkit-box}
+    .hex .hxt{font-size:13px}
+    .hex .hxd{font-size:10.5px}
+  }
+
   /* ユーザー一覧のアバターを六角形にする */
   .av.hexav{border-radius:0;width:34px;height:39px;
     clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}

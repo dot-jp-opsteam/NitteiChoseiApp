@@ -40,6 +40,9 @@ services:
         # プッシュ通知の受け取り役（Service Worker）
         - sw.js
         # アプリのアイコンと、ホーム画面に追加するための情報
+        - icon.svg
+        - icon-512.png
+        - icon-192.png
         - icon-120.png
         - manifest.webmanifest
     envVars:

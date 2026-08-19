@@ -22,8 +22,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'OPS日調アプリ';
   const options = {
     body: data.body || '',
-    icon: '/icon-120.png',
-    badge: '/icon-120.png',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     /* 同じ種類の知らせは1つにまとめる。申請が続けて5件来たときに
        通知欄が5行埋まると、かえって読まれなくなる */
     tag: data.tag || 'ops',

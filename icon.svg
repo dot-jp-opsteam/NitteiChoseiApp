@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ドット日調">
+  <!-- アプリアイコン。白地・黒文字2行・エメラルドグリーンの枠。
+       すべてベクトル（矩形と文字）で描いてあるので、どの大きさでも輪郭が崩れない。
+       枠の色はライトテーマのブランド色 #56b8ac にそろえてある。 -->
+  <title>ドット日調</title>
+  <rect x="0" y="0" width="512" height="512" rx="114" ry="114" fill="#ffffff"/>
+  <rect x="30" y="30" width="452" height="452" rx="88" ry="88"
+        fill="none" stroke="#56b8ac" stroke-width="26"/>
+  <g fill="#111111" font-family="'Hiragino Sans','Yu Gothic','Noto Sans JP','Meiryo',sans-serif"
+     font-weight="700" text-anchor="middle">
+    <text x="256" y="232" font-size="124">ドット</text>
+    <text x="256" y="374" font-size="124">日調</text>
+  </g>
+</svg>

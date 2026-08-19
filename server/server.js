@@ -45,7 +45,6 @@ const googleSyncFilter = require('./google-sync-filter');
 const slots = require('./slots');
 const push = require('./push');
 const rateLimit = require('./ratelimit');
-const { buildICalendar } = require('./ical');
 
 const PORT = process.env.PORT || 8080;
 const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.TOKEN_ENCRYPTION_KEY && process.env.PUBLIC_BASE_URL);
@@ -3477,171 +3476,6 @@ app.delete('/api/my-calendar/events/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* =========================================================
-   iCalendar購読
-   ---------------------------------------------------------
-   subscription_key 自体が閲覧用の合鍵。発行・再発行だけはログイン必須、
-   .ics はカレンダーアプリが直接読むためログイン不要にする。
-   ========================================================= */
-const ICAL_CACHE_TTL_MS = 5 * 60 * 1000;
-const icalCache = new Map(); // userId -> { at, body }
-
-function newCalendarSubscriptionKey() {
-  return crypto.randomBytes(32).toString('base64url');
-}
-
-function calendarSubscriptionUrl(req, key) {
-  const base = String(process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-  return `${base}/api/calendar/${key}.ics`;
-}
-
-async function ensureCalendarSubscription(userId) {
-  let rs = await client.execute({
-    sql: 'SELECT subscription_key FROM calendar_subscriptions WHERE user_id = ?', args: [userId],
-  });
-  if (rs.rows[0]) return rs.rows[0].subscription_key;
-  const key = newCalendarSubscriptionKey();
-  const now = new Date().toISOString();
-  await client.execute({
-    sql: `INSERT INTO calendar_subscriptions (user_id, subscription_key, created_at, updated_at)
-          VALUES (?,?,?,?) ON CONFLICT(user_id) DO NOTHING`,
-    args: [userId, key, now, now],
-  });
-  rs = await client.execute({
-    sql: 'SELECT subscription_key FROM calendar_subscriptions WHERE user_id = ?', args: [userId],
-  });
-  return rs.rows[0].subscription_key;
-}
-
-function calendarRange(now = new Date()) {
-  const from = new Date(now);
-  from.setUTCMonth(from.getUTCMonth() - 3);
-  const to = new Date(now);
-  to.setUTCFullYear(to.getUTCFullYear() + 1);
-  return { from, to };
-}
-
-function inCalendarRange(value, range) {
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) && time >= range.from.getTime() && time <= range.to.getTime();
-}
-
-async function calendarItemsFor(user, now = new Date()) {
-  const range = calendarRange(now);
-  const [store, interviewRows, users] = await Promise.all([
-    readDB(),
-    client.execute({
-      sql: `SELECT * FROM interviews
-            WHERE status = 'fixed' AND (staff_id = ? OR intern_id = ?)`,
-      args: [user.id, user.id],
-    }),
-    listActiveUsers(),
-  ]);
-  const userById = new Map(users.map((item) => [item.id, item]));
-  const items = [];
-
-  for (const row of interviewRows.rows) {
-    const iv = rowToInterview(row);
-    if (!iv.confirmed_datetime || !inCalendarRange(iv.confirmed_datetime, range)) continue;
-    const otherName = user.id === iv.staff_id
-      ? (userById.get(iv.intern_id)?.nickname || iv.intern_name || '面談相手')
-      : (userById.get(iv.staff_id)?.nickname || '担当スタッフ');
-    const start = new Date(iv.confirmed_datetime);
-    items.push({
-      id: `interview-${iv.id}`,
-      uid: `interview-${iv.id}@ops-nittyou`,
-      updatedAt: row.updated_at || iv.created_at || now,
-      start,
-      end: new Date(start.getTime() + 30 * 60000),
-      summary: `面談: ${otherName}さん`,
-      description: 'OPS日調アプリで確定した面談です。',
-      location: iv.location || iv.meeting_location || '',
-    });
-  }
-
-  for (const event of store?.events || []) {
-    /* 購読対象は支部イベント。個人の非公開予定や他支部の予定は合鍵が正しくても出さない。 */
-    if (event.visibility === 'private' || !user.branch_id || event.branch_id !== user.branch_id) continue;
-    if (!inCalendarRange(event.start_datetime, range)) continue;
-    const start = new Date(event.start_datetime);
-    const allDay = event.has_time === false;
-    const storedEnd = new Date(event.end_datetime);
-    const timedEnd = Number.isFinite(storedEnd.getTime()) && storedEnd > start
-      ? storedEnd : new Date(start.getTime() + 60 * 60 * 1000);
-    items.push({
-      id: `event-${event.id}`,
-      uid: `event-${event.id}@ops-nittyou`,
-      updatedAt: event.updated_at || event.created_at || now,
-      allDay,
-      start,
-      end: allDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : timedEnd,
-      summary: event.title || '支部イベント',
-      /* 依頼本文などを購読URLの先へ広げない。必要最小限の種別だけを載せる。 */
-      description: 'OPS日調アプリの支部イベントです。',
-      location: event.location || '',
-    });
-  }
-  return items.sort((a, b) => new Date(a.start) - new Date(b.start));
-}
-
-app.get('/api/calendar/subscription', requireAuth, async (req, res) => {
-  try {
-    const key = await ensureCalendarSubscription(req.authUser.id);
-    res.json({ url: calendarSubscriptionUrl(req, key) });
-  } catch (e) {
-    console.error('カレンダー購読URLの発行に失敗しました', e);
-    res.status(500).json({ error: '購読URLを発行できませんでした' });
-  }
-});
-
-app.post('/api/calendar/subscription/regenerate', requireAuth, async (req, res) => {
-  try {
-    const key = newCalendarSubscriptionKey();
-    const now = new Date().toISOString();
-    await client.execute({
-      sql: `INSERT INTO calendar_subscriptions (user_id, subscription_key, created_at, updated_at)
-            VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
-              subscription_key = excluded.subscription_key, updated_at = excluded.updated_at`,
-      args: [req.authUser.id, key, now, now],
-    });
-    icalCache.delete(req.authUser.id);
-    res.json({ url: calendarSubscriptionUrl(req, key) });
-  } catch (e) {
-    console.error('カレンダー購読キーの再発行に失敗しました', e);
-    res.status(500).json({ error: '購読キーを作り直せませんでした' });
-  }
-});
-
-app.get(/^\/api\/calendar\/([A-Za-z0-9_-]{32,})\.ics$/, async (req, res) => {
-  try {
-    const rs = await client.execute({
-      sql: `SELECT u.* FROM calendar_subscriptions c
-            JOIN users u ON u.id = c.user_id
-            WHERE c.subscription_key = ? AND u.status = 'active'`,
-      args: [req.params[0]],
-    });
-    const user = rs.rows[0];
-    if (!user) return res.status(404).type('text/plain; charset=utf-8').send('カレンダーが見つかりません');
-
-    const hit = icalCache.get(user.id);
-    let body;
-    if (hit && Date.now() - hit.at < ICAL_CACHE_TTL_MS) {
-      body = hit.body;
-    } else {
-      body = buildICalendar(await calendarItemsFor(user), { calendarName: 'OPS日程調整' });
-      icalCache.set(user.id, { at: Date.now(), body });
-    }
-    res.set('Content-Type', 'text/calendar; charset=utf-8');
-    res.set('Cache-Control', 'private, max-age=300');
-    res.set('X-Content-Type-Options', 'nosniff');
-    res.status(200).send(body);
-  } catch (e) {
-    /* キーはURLに含まれるため、エラー時もreq.pathやSQL引数をログへ出さない。 */
-    console.error('iCalendarの生成に失敗しました', e.message || e);
-    res.status(500).type('text/plain; charset=utf-8').send('カレンダーを取得できませんでした');
-  }
-});
-
 /* この人（staff_idにもintern_idにも使われるGoogle連携ユーザーID）が持つ、
    確定済み面談としてこのアプリ自身がGoogleカレンダーに書き込んだイベントID。
    webhookで戻ってきた変更がこれと一致するときは、「外部の予定」として
@@ -3764,10 +3598,13 @@ const PUBLIC_FILES = {
   '/style.css': 'style.css',
   // 祝日の計算。index.html と apply.html の両方が読む
   '/holidays.js': 'holidays.js',
-  /* アプリのアイコン。/favicon.ico もこのPNGを返す（拡張子ではなく
-     実ファイルから型が決まるので image/png で配信される）。
-     いまは120×120しか素材が無く、ホーム画面用の180pxは拡大表示になる。
-     大きい原本が手に入ったら icon-120.png を差し替えてサイズ表記も直すこと */
+  /* アプリのアイコン。原本は icon.svg（白地・黒文字2行・エメラルドの枠）で、
+     PNGはそこから書き出したもの。大きさを変えたいときは icon.svg を直してから
+     PNGを作り直すこと。/favicon.ico はPNGを返す（拡張子ではなく
+     実ファイルから型が決まるので image/png で配信される） */
+  '/icon.svg': 'icon.svg',
+  '/icon-512.png': 'icon-512.png',
+  '/icon-192.png': 'icon-192.png',
   '/icon-120.png': 'icon-120.png',
   '/favicon.ico': 'icon-120.png',
   '/manifest.webmanifest': 'manifest.webmanifest',
