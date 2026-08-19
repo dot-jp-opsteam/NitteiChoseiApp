@@ -282,5 +282,14 @@ console.log('\n[ スタッフ画面 index.html の締切通知の計算 ]');
   check('ふつうの年の2月は28日まで', I.dueMonthDays(2, '2026-06-01'), 28);
 }
 
+/* ブラウザの「戻る／進む」で、アプリ内の直前画面を復元するための履歴状態。 */
+console.log('\n[ スタッフ画面 index.html の画面履歴 ]');
+{
+  const I = load('index.html', ['historyTab']);
+  check('履歴に保存したタブを復元する', I.historyTab({ tab: 'requests' }), 'requests');
+  check('タブを持たない履歴は復元しない', I.historyTab({}), null);
+  check('アプリ以外の履歴は復元しない', I.historyTab(null), null);
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

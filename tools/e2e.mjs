@@ -1872,10 +1872,22 @@ async function run() {
           appHtml.includes('function setReqTab(t){REQTAB=t;renderQuiet();}'), true);
       }
 
-      /* 面談一覧。1件ずつ開かないと希望日が分からない状態をやめた */
+      /* 面談一覧。申請からの経過時間や支部名ではなく、面談日時を優先して読む。 */
+      const interviewListSource = appHtml.slice(
+        appHtml.indexOf('function ivRowSub(iv)'),
+        appHtml.indexOf('async function deleteInterviewRow(id)'));
       check('面談一覧の行に第1希望を出す',
-        appHtml.includes('function ivRowSub(iv)')
-        && appHtml.includes('`第1希望 ${fmtGroupRange(g)} ・ 申請 ${fmtRel(iv.created_at)}`'), true);
+        interviewListSource.includes('return `第1希望 ${fmtGroupRange(g)}`;'), true);
+      check('面談一覧に担当件数・支部タグ・申請からの経過時間を出さない',
+        !interviewListSource.includes('あなたが担当する面談 ${all.length}件')
+        && !interviewListSource.includes('<span class="tag">${branchName(ivInternBranch(iv))}</span>')
+        && !interviewListSource.includes('申請 ${fmtRel(iv.created_at)}'), true);
+      check('確定済みの面談日時は強調表示する',
+        interviewListSource.includes("iv.status==='fixed'?' iv-datetime':''")
+        && styleCss.includes('.row .iv-datetime{font-size:16px;font-weight:800;color:var(--ink)}'), true);
+      check('確定・未実施のゾーン見出しを出さない',
+        !interviewListSource.includes("label:'面談予定（確定・未実施）'")
+        && interviewListSource.includes("key:'fixed',label:''"), true);
       check('面談一覧を希望日が近い順に並べ替えられる',
         appHtml.includes("let IVSORT='new'")
         && appHtml.includes('function ivWishTime(iv)')

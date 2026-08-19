@@ -1316,7 +1316,7 @@ function openDeepLink(){
   sessionStorage.removeItem(DEEPLINK_KEY);   // 一度使ったら捨てる
   const id=new URLSearchParams(location.search).get('req')||kept;
   if(!id)return;
-  history.replaceState(null,'',location.pathname);
+  history.replaceState({tab:currentTab},'',location.pathname);
   const r=allRequests().find(x=>x.id===id);
   if(!r){toast('この参加確認は見つかりませんでした');return;}
   if(!isAttend(r))return openRequestDetail(id);
@@ -1611,6 +1611,11 @@ const NAV={
 let currentTab='home';
 let calYM=null, calSel=null; // イベントカレンダーの表示月・選択日
 let calFull=false;           // カレンダーだけを画面いっぱいに出しているか
+/* ブラウザ履歴には、URLを変えずに表示中のアプリ画面だけを記録する。
+   Googleログイン後のURLや、出欠回答用の ?req= はそのまま保つ。 */
+function historyTab(state){
+  return state&&typeof state.tab==='string'&&state.tab?state.tab:null;
+}
 /* 予定の見せ方。以前は「ドット（色の丸）」と「文字」を切り替えられたが、
    ドットだと何の予定か分からず一覧を開き直す手間があったため、文字だけに一本化した。
    狭い画面では文字が途中で切れるので、CSS側でセルの高さと文字サイズを詰めている */
@@ -1740,7 +1745,7 @@ async function copyInviteLink(url){
     toast('コピーできませんでした。選択した文字をコピーしてください');
   }
 }
-function go(tab){
+function go(tab,saveHistory=true){
   currentTab=tab;
   if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
   if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
@@ -1748,9 +1753,15 @@ function go(tab){
   if(tab!=='home'&&calFull){calFull=false;document.documentElement.setAttribute('data-calfull','0');}
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
   document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  if(saveHistory)history.pushState({tab},'',location.href);
   window.scrollTo(0,0);
   render();
 }
+/* 戻る／進むは、画面遷移として再描画するだけで履歴を増やさない。 */
+window.addEventListener('popstate',e=>{
+  const tab=historyTab(e.state);
+  if(tab)go(tab,false);
+});
 /* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
    そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
 const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',
@@ -2240,10 +2251,10 @@ function ivWishTime(iv){
    申請が溜まるとタップと戻るを繰り返すことになる。
    確定済みは確定日時のほうが知りたいので、そちらを優先して出す */
 function ivRowSub(iv){
-  if(iv.status==='fixed')return `確定 ${fmtDT(iv.confirmed_datetime)} ・ 申請 ${fmtRel(iv.created_at)}`;
+  if(iv.status==='fixed')return fmtDT(iv.confirmed_datetime);
   const g=ivTopGroup(iv);
-  if(!g)return `申請 ${fmtRel(iv.created_at)}`;
-  return `第1希望 ${fmtGroupRange(g)} ・ 申請 ${fmtRel(iv.created_at)}`;
+  if(!g)return '';
+  return `第1希望 ${fmtGroupRange(g)}`;
 }
 // 確定済みのうち、確定日時をもう過ぎているもの＝実施済み
 function ivDone(iv){return iv.status==='fixed'&&!!iv.confirmed_datetime&&new Date(iv.confirmed_datetime)<new Date();}
@@ -2252,7 +2263,7 @@ function ivDone(iv){return iv.status==='fixed'&&!!iv.confirmed_datetime&&new Dat
    同じ塊に混ざると「あと誰と話せばいいか」が一覧からひと目で分からないため */
 const IV_ZONES=[
   {key:'applied',label:'申請中',match:iv=>iv.status==='applied',del:false},
-  {key:'fixed',label:'面談予定（確定・未実施）',match:iv=>iv.status==='fixed'&&!ivDone(iv),del:true},
+  {key:'fixed',label:'',match:iv=>iv.status==='fixed'&&!ivDone(iv),del:true},
   {key:'done',label:'実施済み',match:iv=>ivDone(iv),del:true},
   {key:'failed',label:'不成立',match:iv=>iv.status==='failed',del:true},
 ];
@@ -2263,8 +2274,8 @@ function ivRow(iv,zone){
   return `<div class="row" onclick="openInterview('${iv.id}')">
       <span class="av ${accOf(intern?.id||iv.id)}">${esc(initials(nm))}</span>
       <span class="rmain">
-        <span class="rt">${esc(nm)} <span class="tag">${branchName(ivInternBranch(iv))}</span></span>
-        <span class="rs">${esc(ivRowSub(iv))}</span>
+        <span class="rt">${esc(nm)}</span>
+        <span class="rs${iv.status==='fixed'?' iv-datetime':''}">${esc(ivRowSub(iv))}</span>
       </span>
       <span class="pill ${s.c}">${label}</span>
       ${zone.del?`<button class="btn sm iconly" onclick="event.stopPropagation();deleteInterviewRow('${iv.id}')" aria-label="一覧から削除" title="一覧から削除">${ic('trash')}</button>`:''}
@@ -2305,15 +2316,13 @@ function viewStaffInterviews(){
       <button class="${IVSORT==='wish'?'on':''}" onclick="setIvSort('wish')">希望日が近い順</button>
     </div>`;
   if(!list.length)return `<h1 class="page">面談一覧</h1>
-    <p class="page-sub">あなたが担当する面談 ${all.length}件</p>
     ${filterBar}
     <div class="empty"><div class="ei">${ic('search')}</div><p>条件に一致する面談がありません。</p></div>`;
   const zones=IV_ZONES.map(z=>({z,items:list.filter(z.match)})).filter(g=>g.items.length);
   const zoneHtml=zones.map(({z,items})=>`
-      <div class="iv-zoneh">${z.label}<span style="opacity:.7"> ${items.length}</span></div>
+      ${z.label?`<div class="iv-zoneh">${z.label}<span style="opacity:.7"> ${items.length}</span></div>`:''}
       <div class="rowlist">${items.map(iv=>ivRow(iv,z)).join('')}</div>`).join('');
   return `<h1 class="page">面談一覧</h1>
-    <p class="page-sub">あなたが担当する面談 ${all.length}件${cnt.applied?` ・ 確定待ち ${cnt.applied}件`:''}${list.length!==all.length?` ・ 表示中 ${list.length}件`:''}</p>
     ${filterBar}
     <div class="card">${zoneHtml}</div>`;
 }

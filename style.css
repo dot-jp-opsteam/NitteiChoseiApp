@@ -374,6 +374,7 @@
   .row .rmain{flex:1;min-width:0}
   .row .rt{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .row .rs{font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .iv-datetime{font-size:16px;font-weight:800;color:var(--ink)}
 
   .meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--sub);margin:2px 0}
   .meta b{color:var(--ink);font-weight:600}
