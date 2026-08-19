@@ -5288,15 +5288,16 @@ function reqTimeOptionsHTML(selected){
 }
 function reqOptionsHTML(){
   if(REQFORM.kind!=='attend')return '';
-  /* 選んだ日は1件ずつ縦に積む。時間が付いている候補は
-     プルダウンと「同じ日をふやす」も同じ行の中に入れる */
+  /* 選んだ日は1件ずつ縦に積む。上の「時間を設定」がオフの間は、
+     保存済みの時刻を残したまま候補行の時刻欄だけ隠す */
+  const showTime=!!REQFORM.addTime;
   const rows=REQFORM.opts.map((o,i)=>`<div class="optrow">
       <span class="optdate">${reqDateLabel(o.date)}</span>
-      <span class="opttime">
+      ${showTime?`<span class="opttime">
         <select class="optt" aria-label="${reqDateLabel(o.date)}の時刻" onchange="setReqOptTime(${i},this.value)">${reqTimeOptionsHTML(o.t1)}</select>
         ${o.t1?`<button type="button" class="optcopy" onclick="duplicateReqOption(${i})"
           aria-label="${reqDateLabel(o.date)}と同じ日をもう1件ふやす" title="同じ日をふやす">${ic('copy')}</button>`:''}
-      </span>
+      </span>`:''}
       <button type="button" class="optx" onclick="removeReqOption(${i})"
         ${REQFORM.opts.length<=1?'disabled':''} aria-label="この候補を消す">×</button>
     </div>`).join('');

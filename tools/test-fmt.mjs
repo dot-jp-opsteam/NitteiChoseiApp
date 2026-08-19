@@ -291,5 +291,14 @@ console.log('\n[ スタッフ画面 index.html の画面履歴 ]');
   check('アプリ以外の履歴は復元しない', I.historyTab(null), null);
 }
 
+/* 日程調整の候補行。時刻を残したまま、上の設定がオフなら入力欄だけ隠す。 */
+console.log('\n[ スタッフ画面 index.html の日程候補の時刻欄 ]');
+{
+  const I = load('index.html', ['pad', 'reqHHMM', 'reqTimeOptionsHTML', 'reqDateLabel', 'reqOptionsHTML'],
+    "var REQFORM={kind:'attend',addTime:'',opts:[{date:'2026-08-20',t1:'09:30'}]}; function reqCalendarHTML(){return '<calendar>';}; function ic(){return ''};");
+  const html = I.reqOptionsHTML();
+  check('時間を設定しない間は候補行の時刻欄を隠す', html.includes('class=\"opttime\"'), false);
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
