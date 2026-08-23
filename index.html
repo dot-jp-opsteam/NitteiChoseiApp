@@ -4434,7 +4434,12 @@ let REQBACKTAB='inbox';
    render() だと画面ぜんぶが登場アニメをやり直すので、
    同じ画面の中で一覧を差し替えただけなのに、読み込み直したように見えていた
    （縦の位置も先頭へ戻ってしまう）。renderQuiet は演出を通さず位置も保つ */
-function setReqTab(t){REQTAB=t;renderQuiet();}
+function setReqTab(t){
+  REQTAB=t;
+  // 空き時間の一覧は開いたときに取りに行く。ほかのタブを見ている間は要らない
+  if(t==='free')loadFreeslots();
+  renderQuiet();
+}
 function toggleSentRequests(){
   if(REQTAB==='sent')REQTAB=REQBACKTAB;
   else{REQBACKTAB=REQTAB;REQTAB='sent';}
@@ -4476,16 +4481,20 @@ function viewRequests(){
       <span class="segb">受けた依頼${pending?`（${pending}）`:''}</span></label>
     <label><input type="radio" name="reqTab" ${REQTAB==='done'?'checked':''} onchange="setReqTab('done')">
       <span class="segb">完了済みの依頼</span></label>
+    <label><input type="radio" name="reqTab" ${REQTAB==='free'?'checked':''} onchange="setReqTab('free')">
+      <span class="segb">空き時間${FSLIST.length?`（${FSLIST.length}）`:''}</span></label>
   </div>`;
   /* 以前は「新しく送る」1つに入ってから中でもう一度種類を選ばせていたが、
      入口を分けたほうが1タップ短く、名前だけで用途が分かる */
   return `<h1 class="page">依頼</h1>
     ${canSend?`<div class="btn-row" style="margin-bottom:16px">
       <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">${ic('calendar')}日程を決める</button>
+      <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を確認</button>
       <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('megaphone')}タスクを追加</button>
     </div>`:''}
     ${tabs}
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
+      :REQTAB==='free'?viewFreeslotList()
       :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
     ${canSend?`<button type="button" class="rq-fab" onclick="toggleSentRequests()"
       title="${REQTAB==='sent'?'受けた依頼に戻る':'送った依頼を表示'}">
@@ -4532,6 +4541,185 @@ function requestList(list,kind){
         :`<span class="tile-arrow">${ic('chevron')}</span>`}</div>`;
   }).join('');
   return `<div class="card"><div class="rowlist">${rows}</div></div>`;
+}
+
+/* =========================================================
+   空き時間を確認（日程調整URL）
+   ---------------------------------------------------------
+   押すたびに公開URLが1本できて、担当は押した本人に固定される。
+   学生はアカウント無しで空いている時間だけを送る（free.html）。
+   ここでは、届いた回答のかぶりを表と上位リストで見せる。
+   面談の確定はしない。空いている時間を知るためだけの入口
+   ========================================================= */
+let FSLIST=[];
+let FSDETAIL=null;
+
+/* api() は Response を返すので、必ず json() を通して res.ok を見る
+   （apply.html / free.html の api() と作りが違う点に注意） */
+async function fsJSON(path,opts){
+  const res=await api(path,opts);
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok)throw new Error(data.error||'通信に失敗しました');
+  return data;
+}
+async function loadFreeslots(){
+  try{
+    const d=await fsJSON('/api/freeslots');
+    FSLIST=d.list||[];
+    renderQuiet();
+  }catch(e){toast(e.message);}
+}
+
+function viewFreeslotList(){
+  if(!FSLIST.length){
+    return `<div class="empty" style="padding:30px"><div class="ei">${ic('clock')}</div>
+      <p>まだ日程調整URLを作っていません。<br>
+      「空き時間を確認」から作ると、ここに並びます。</p></div>`;
+  }
+  return `<div class="card"><div class="rowlist">${FSLIST.map(f=>`
+    <div class="row fs-row" onclick="openFreeslotDetail('${esc(f.id)}')">
+      <div class="rowmain"><div class="rowtitle">${esc(f.title)}</div>
+        <div class="rowsub fs-meta">${esc(String(f.created_at).slice(0,10))}・${f.count}人が回答</div></div>
+      <span class="tile-arrow">${ic('chevron')}</span></div>`).join('')}</div></div>`;
+}
+
+function openFreeslotForm(){
+  openSheet(`<h3>空き時間を確認</h3>
+    <p class="fine">URLを作って学生に送ると、空いている時間を教えてもらえます。
+    担当は自分に決まるので、学生は選びません。何人でも回答できます。</p>
+    <label class="fl">件名<span class="req">*</span></label>
+    <input id="fsTitle" class="field-underline" autocomplete="off" placeholder="例）山田さんとの日程調整">
+    <div class="field-err" id="fsErr"></div>
+    <button class="btn pri block" style="margin-top:18px" id="fsBtn" onclick="submitFreeslot()">URLを作る</button>`);
+}
+
+async function submitFreeslot(){
+  const title=document.getElementById('fsTitle').value.trim();
+  const err=document.getElementById('fsErr');
+  const btn=document.getElementById('fsBtn');
+  err.classList.remove('show');
+  if(!title){err.textContent='件名を入力してください';err.classList.add('show');return;}
+  btn.disabled=true;
+  try{
+    const r=await fsJSON('/api/freeslots',{method:'POST',body:JSON.stringify({title})});
+    await loadFreeslots();
+    showFreeslotUrl(r);
+  }catch(e){
+    err.textContent=e.message;err.classList.add('show');btn.disabled=false;
+  }
+}
+
+/* 作った直後にURLを見せる。閉じても一覧から開き直せる */
+function showFreeslotUrl(f){
+  openSheet(`<h3>URLができました</h3>
+    <p class="fine">${esc(f.title)}</p>
+    <input class="fs-url" id="fsUrl" readonly value="${esc(f.url)}">
+    <button class="btn pri block" style="margin-top:16px" onclick="copyFreeslotUrl()">URLをコピー</button>
+    <p class="fine" style="margin-top:10px">このURLを学生に送ってください。
+    届いた分は依頼画面の「空き時間」から見られます。</p>`);
+}
+async function copyFreeslotUrl(){
+  const el=document.getElementById('fsUrl');
+  if(!el)return;
+  try{
+    await navigator.clipboard.writeText(el.value);
+    toast('URLをコピーしました');
+  }catch(e){
+    // 権限が下りない環境（古い端末など）では選択状態にして手でコピーしてもらう
+    el.focus();el.select();
+    toast('コピーできませんでした。選択された文字をコピーしてください');
+  }
+}
+
+/* 枠ごとに「その時間が空いている人」を集める。
+   戻りは {ISO文字列: [名前, ...]}。誰も選んでいない枠は持たない。
+   ※ tools/test-fmt.mjs が波括弧を数えて切り出すので、
+     この関数の中に波括弧を含む文字列や正規表現を書かないこと */
+function fsTally(responses){
+  const map={};
+  (responses||[]).forEach(function(r){
+    (r.choices||[]).forEach(function(iso){
+      if(!map[iso])map[iso]=[];
+      map[iso].push(r.name);
+    });
+  });
+  return map;
+}
+/* 人数の多い順に n 件。同じ人数なら早い時刻が先 */
+function fsTop(tally,n){
+  return Object.keys(tally||{}).map(function(iso){
+    return {iso:iso,names:tally[iso]};
+  }).sort(function(a,b){
+    if(b.names.length!==a.names.length)return b.names.length-a.names.length;
+    return new Date(a.iso)-new Date(b.iso);
+  }).slice(0,n||5);
+}
+
+/* 日ごとの一覧。人数が多い枠ほど濃く塗る（4段階）。
+   押すと、その時間に空いている人の名前が出る。
+   面談申請のような週の表にしないのは、誰も選んでいない枠まで並べると
+   ×ばかりの広い表になり、かぶっている所が埋もれてしまうため */
+function fsHeatHTML(tally){
+  const days={};
+  Object.keys(tally).forEach(iso=>{
+    const k=iso.slice(0,10);
+    if(!days[k])days[k]=[];
+    days[k].push(iso);
+  });
+  const keys=Object.keys(days).sort();
+  if(!keys.length)return '<p class="fine">まだ誰も答えていません。</p>';
+  return keys.map(k=>{
+    const cells=days[k].sort().map(iso=>{
+      const names=tally[iso];
+      const lv=Math.min(names.length,4);
+      return `<button type="button" class="fs-cell fs-n${lv}"
+        onclick="toast('${esc(names.join('・'))}')">${fsHM(iso)}<span class="fs-cn">${names.length}</span></button>`;
+    }).join('');
+    return `<div class="fs-day"><div class="fs-daylabel">${esc(fsDayLabel(k))}</div>
+      <div class="fs-cells">${cells}</div></div>`;
+  }).join('');
+}
+function fsHM(iso){
+  const d=new Date(iso);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+// 「8/25(月)」。曜日が無いと、どの日の話か読み取りにくい
+function fsDayLabel(ymdKey){
+  const p=String(ymdKey).split('-');
+  const d=new Date(Number(p[0]),Number(p[1])-1,Number(p[2]));
+  return `${d.getMonth()+1}/${d.getDate()}(${['日','月','火','水','木','金','土'][d.getDay()]})`;
+}
+
+async function openFreeslotDetail(id){
+  let d;
+  try{ d=await fsJSON('/api/freeslots/'+encodeURIComponent(id)); }
+  catch(e){ toast(e.message); return; }
+  FSDETAIL=d;
+  const tally=fsTally(d.responses);
+  const top=fsTop(tally,5);
+  const people=(d.responses||[]).length;
+  const url=(FSLIST.find(x=>x.id===id)||{}).url||'';
+
+  const topHTML=top.length?top.map(t=>`<div class="fs-toprow">
+      <span class="fs-topwhen">${esc(fsDayLabel(t.iso.slice(0,10)))} ${fsHM(t.iso)}</span>
+      <span class="fs-topn">${t.names.length}人</span>
+      <span class="fs-topwho">${esc(t.names.join('・'))}</span>
+    </div>`).join(''):'<p class="fine">まだ誰も答えていません。</p>';
+
+  // その他（任意）に書かれたことは、書いた人が分かる形でまとめて出す
+  const notes=(d.responses||[]).filter(r=>r.note);
+  const notesHTML=notes.length?`<h4 class="fs-h4">その他</h4>`
+    +notes.map(r=>`<p class="fs-note"><b>${esc(r.name)}</b>：${esc(r.note)}</p>`).join(''):'';
+
+  openSheet(`<h3>${esc(d.title)}</h3>
+    <p class="fine">${people}人が回答</p>
+    ${url?`<input class="fs-url" id="fsUrl" readonly value="${esc(url)}">
+    <button class="btn block" style="margin-top:10px" onclick="copyFreeslotUrl()">URLをコピー</button>`:''}
+    <h4 class="fs-h4">最もかぶる時間</h4>
+    ${topHTML}
+    <h4 class="fs-h4">みんなの空いている時間</h4>
+    <div class="fs-heat">${fsHeatHTML(tally)}</div>
+    ${notesHTML}`);
 }
 
 /* =========================================================

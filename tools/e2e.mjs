@@ -1867,9 +1867,16 @@ async function run() {
           appHtml.includes('${m+1}月のイベント') || appHtml.includes('${listBlock}'), false);
         check('日付を押すとその日の予定のシートが開く',
           appHtml.includes(`onclick="openDaySheet('\${key}')"`), true);
-        /* 依頼のタブ切り替えは、画面を読み込み直したように見えない描き方にする */
-        check('依頼のタブ切り替えは登場アニメをやり直さない',
-          appHtml.includes('function setReqTab(t){REQTAB=t;renderQuiet();}'), true);
+        /* 依頼のタブ切り替えは、画面を読み込み直したように見えない描き方にする。
+           「空き時間」タブを足したので1行では書けなくなった。
+           render() ではなく renderQuiet() を通していることを見る */
+        {
+          const setReqTabSrc = appHtml.slice(appHtml.indexOf('function setReqTab(t){'));
+          const bodyEnd = setReqTabSrc.indexOf('\n}');
+          const body = setReqTabSrc.slice(0, bodyEnd);
+          check('依頼のタブ切り替えは登場アニメをやり直さない',
+            body.includes('renderQuiet()') && !body.includes('render();'), true);
+        }
       }
 
       /* 面談一覧。申請からの経過時間や支部名ではなく、面談日時を優先して読む。 */
@@ -2235,6 +2242,18 @@ async function run() {
         freeHtml.includes('下のカレンダーから、<b>空いている時間帯</b>を選択してください。'), true);
       check('その他（任意）の欄がある', freeHtml.includes('その他（任意）'), true);
       check('公開APIを叩いている', freeHtml.includes('/api/free/'), true);
+    }
+
+    // スタッフ側。依頼画面から発行して、届いた分を見る入口があること
+    {
+      const appHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+      check('依頼画面に「空き時間を確認」のボタンがある', appHtml.includes('空き時間を確認'), true);
+      check('依頼画面に「空き時間」のタブがある', appHtml.includes("setReqTab('free')"), true);
+      check('発行のAPIを叩いている', appHtml.includes("'/api/freeslots'"), true);
+      /* クラス名には接頭辞を付ける。短い名前は既存と衝突し、
+         テストが通ったまま画面だけ崩れる */
+      check('CSSのクラスに fs- を付けている',
+        fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8').includes('.fs-'), true);
     }
   }
 

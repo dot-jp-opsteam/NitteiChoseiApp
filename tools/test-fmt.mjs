@@ -313,5 +313,31 @@ console.log('\n[ 日程調整画面 free.html の fmtRanges ]');
     F.fmtRanges([iso(17, 0), iso(19, 0)]), '17:00〜17:30＆19:00〜19:30');
 }
 
+/* 空き時間のかぶり。複数の学生が同じ枠を選ぶほど人数が積み上がる */
+console.log('\n[ 空き時間のかぶり集計 index.html ]');
+{
+  const T = load('index.html', ['fsTally', 'fsTop']);
+  const a = '2026-08-25T05:00:00.000Z';
+  const b = '2026-08-25T05:30:00.000Z';
+  const c = '2026-08-26T05:00:00.000Z';
+  const responses = [
+    { name: '山田', choices: [a, b] },
+    { name: '佐藤', choices: [a, c] },
+    { name: '鈴木', choices: [a] },
+  ];
+  const tally = T.fsTally(responses);
+  check('同じ枠に3人が集まる', tally[a], ['山田', '佐藤', '鈴木']);
+  check('1人だけの枠も数える', tally[b], ['山田']);
+  check('誰も選んでいない枠は持たない', 'x' in tally, false);
+
+  const top = T.fsTop(tally, 2);
+  check('人数の多い順に並ぶ', top.map((x) => x.names.length), [3, 1]);
+  check('先頭は最も集まった枠', top[0].iso, a);
+  check('同数なら早いほうが先',
+    T.fsTop({ [c]: ['佐藤'], [b]: ['山田'] }, 2).map((x) => x.iso), [b, c]);
+  check('件数を絞れる', T.fsTop(tally, 1).length, 1);
+  check('誰も答えていなければ空', T.fsTop({}, 5), []);
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

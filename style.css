@@ -1876,3 +1876,28 @@
       container-type:inline-size}
     .hex .hxt{font-size:min(13.5px, 11.5cqw)}
   }
+
+  /* ---------- 空き時間（日程調整URL） ----------
+     色は --brand 系だけで組む。ライトとダークで色を書き分けると
+     どちらかが必ず沈むため、濃さは不透明度だけで4段階に分ける */
+  .fs-row .rowsub.fs-meta{font-size:12px;color:var(--sub)}
+  .fs-url{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;
+    background:var(--panel2);color:var(--ink);font-size:13px}
+  .fs-h4{margin:18px 0 8px;font-size:14px;color:var(--ink)}
+  .fs-day{margin-bottom:12px}
+  .fs-daylabel{font-size:12px;color:var(--sub);margin-bottom:5px}
+  .fs-cells{display:flex;flex-wrap:wrap;gap:5px}
+  .fs-cell{appearance:none;padding:6px 9px;border-radius:8px;font-family:inherit;font-size:12px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--ink);cursor:pointer}
+  .fs-cell:hover{border-color:var(--line-h)}
+  .fs-n1{background:color-mix(in srgb, var(--brand) 14%, var(--panel2))}
+  .fs-n2{background:color-mix(in srgb, var(--brand) 30%, var(--panel2))}
+  .fs-n3{background:color-mix(in srgb, var(--brand) 46%, var(--panel2))}
+  .fs-n4{background:color-mix(in srgb, var(--brand) 62%, var(--panel2))}
+  .fs-cn{margin-left:6px;font-weight:800;color:var(--brand-d)}
+  .fs-toprow{display:flex;align-items:baseline;gap:9px;padding:9px 0;
+    border-bottom:1px solid var(--line2);font-size:13px;color:var(--ink)}
+  .fs-topwhen{font-weight:700}
+  .fs-topn{font-weight:800;color:var(--brand-d)}
+  .fs-topwho{color:var(--sub);font-size:12px}
+  .fs-note{margin:6px 0 0;font-size:13px;color:var(--ink);white-space:pre-wrap}
