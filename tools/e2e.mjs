@@ -2138,6 +2138,89 @@ async function run() {
 
     const noAuth = await api(null, 'POST', '/api/freeslots', { title: 'ログイン無し' });
     check('ログインしないと発行できない', noAuth.status, 401);
+
+    /* ここから学生側（ログイン不要）。合言葉だけで開いて、空いている時間を送る */
+    const token = made.json.token;
+
+    const bad = await api(null, 'GET', '/api/free/deadbeef');
+    check('でたらめな合言葉では開けない', bad.status, 404);
+
+    const page = await api(null, 'GET', `/api/free/${token}`);
+    check('合言葉だけで日程調整ページを開ける', page.status, 200);
+    check('ページに件名が返る', page.json.title, '山田さんとの日程調整');
+    check('担当スタッフの名前が返る', page.json.staff?.nickname, 'E2E-staff');
+    check('支部名が返る', page.json.branch?.name, '東京');
+    check('メールアドレスは渡さない', 'email' in (page.json.staff || {}), false);
+    // 担当は発行した本人に固定されているので、選ばせるための一覧は渡さない
+    check('スタッフの一覧は渡さない', 'staffList' in page.json, false);
+
+    const grid = await api(null, 'GET', `/api/free/${token}/slots`);
+    check('空き枠を取れる', grid.status, 200);
+    check('7日ぶんの表になる', (grid.json.days || []).length, 7);
+    check('先の週は上限で止まる',
+      (await api(null, 'GET', `/api/free/${token}/slots?week=99`)).json.week, 2);
+
+    /* 送れる枠を表から1つ拾う。セルは常に {state, iso} なので、
+       中身を見ずに真偽で判断すると受付時間外の枠を掴む */
+    const pickIso = (g) => {
+      for (const col of (g.grid || [])) {
+        for (const cell of col) if (cell && cell.state === 'ok') return cell.iso;
+      }
+      return null;
+    };
+    const iso1 = pickIso(grid.json);
+    check('選べる枠が1つ以上ある', typeof iso1 === 'string', true);
+
+    const noName = await api(null, 'POST', `/api/free/${token}`, { choices: [iso1] });
+    check('名前が無いと送れない', noName.status, 400);
+    const noSlot = await api(null, 'POST', `/api/free/${token}`, { name: '山田 太郎', choices: [] });
+    check('枠を選ばないと送れない', noSlot.status, 400);
+    const past = await api(null, 'POST', `/api/free/${token}`,
+      { name: '山田 太郎', choices: ['2020-01-01T01:00:00.000Z'] });
+    check('過ぎた枠は断る', past.status, 409);
+
+    const sent = await api(null, 'POST', `/api/free/${token}`,
+      { name: '山田 太郎', choices: [iso1], note: 'オンライン希望' });
+    check('学生が空き時間を送れる', sent.status, 200);
+    const countOf = async (id) => ((await api(TOKENS.staff, 'GET', '/api/freeslots')).json.list || [])
+      .find((x) => x.id === id)?.count;
+    check('回答人数が1になる', await countOf(made.json.id), 1);
+
+    const resent = await api(null, 'POST', `/api/free/${token}`,
+      { name: '山田 太郎', choices: [iso1], note: '対面希望' });
+    check('同じ名前で送り直せる', resent.status, 200);
+    check('同じ名前なら上書きで1人のまま', await countOf(made.json.id), 1);
+
+    const sent2 = await api(null, 'POST', `/api/free/${token}`, { name: '佐藤 花子', choices: [iso1] });
+    check('別の名前なら足される', sent2.status, 200);
+    check('回答人数が2になる', await countOf(made.json.id), 2);
+
+    // 発行した本人だけが中身を読める
+    const detail = await api(TOKENS.staff, 'GET', `/api/freeslots/${made.json.id}`);
+    check('発行した本人は中身を見られる', detail.status, 200);
+    check('詳細に件名が返る', detail.json.title, '山田さんとの日程調整');
+    check('2人分の回答が返る', (detail.json.responses || []).length, 2);
+    check('名前が返る',
+      (detail.json.responses || []).map((r) => r.name).sort().join(','), '佐藤 花子,山田 太郎');
+    check('選んだ枠が配列で返る', Array.isArray((detail.json.responses || [])[0]?.choices), true);
+    check('上書きした本文が残っている',
+      (detail.json.responses || []).find((r) => r.name === '山田 太郎')?.note, '対面希望');
+    check('メールアドレスは持たない', 'email' in ((detail.json.responses || [])[0] || {}), false);
+
+    const peek = await api(TOKENS.staff3, 'GET', `/api/freeslots/${made.json.id}`);
+    check('発行していない人は見られない', peek.status, 404);
+    const anon = await api(null, 'GET', `/api/freeslots/${made.json.id}`);
+    check('ログインしないと見られない', anon.status, 401);
+
+    /* ログイン不要の口には回数制限が要る（合言葉は配布先が広く、漏れる前提）。
+       e2e では制限を切ってあるので、付いていることをソースで確かめる */
+    {
+      const src = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
+      check('公開の読み取りに回数制限が付いている',
+        src.includes("app.get('/api/free/:token', limitPublicRead"), true);
+      check('公開の書き込みに回数制限が付いている',
+        src.includes("app.post('/api/free/:token', limitPublicWrite"), true);
+    }
   }
 
   /* ---------- リアルタイム通知（SSE） ----------

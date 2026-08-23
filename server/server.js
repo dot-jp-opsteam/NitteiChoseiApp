@@ -3161,6 +3161,123 @@ app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
   }
 });
 
+/* ---------- 日程調整URL（学生側・ログイン不要） ----------
+   合言葉から「その1件」と担当スタッフを引く。面談申請と違い、
+   担当は発行したスタッフに固定されているので、学生は選ばない */
+async function freeslotContext(token) {
+  const NG = { error: 'このリンクは使えません。送ってくれた人に確認してください', code: 404 };
+  if (!token || typeof token !== 'string') return NG;
+  const rs = await client.execute({
+    sql: 'SELECT * FROM freeslot_requests WHERE token = ?',
+    args: [token],
+  });
+  const row = rs.rows[0];
+  if (!row) return NG;
+  const us = await client.execute({
+    sql: `SELECT id, nickname, branch_id FROM users
+          WHERE id = ? AND status = 'active' AND role IN ('staff','branch_admin','admin')`,
+    args: [row.staff_id],
+  });
+  const staff = us.rows[0];
+  // 発行した人が抜けていたら、このリンクはもう使えない
+  if (!staff) return NG;
+  const obj = await readDB();
+  const branch = (obj?.branches || []).find((b) => b.id === row.branch_id);
+  const availability = (obj?.availability || {})[staff.id] || {};
+  const ivs = await client.execute({
+    sql: `SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'`,
+    args: [staff.id],
+  });
+  const takenMs = ivs.rows.map(rowToInterview)
+    .map((iv) => new Date(iv.confirmed_datetime).getTime());
+  return { row, staff, branch, availability, takenMs };
+}
+
+/* 日程調整ページの最初の読み込み。出すのは件名と担当スタッフの名前だけ */
+app.get('/api/free/:token', limitPublicRead, async (req, res) => {
+  try {
+    const ctx = await freeslotContext(req.params.token);
+    if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
+    res.json({
+      title: ctx.row.title,
+      staff: { nickname: ctx.staff.nickname },
+      branch: { name: ctx.branch ? ctx.branch.name : '' },
+    });
+  } catch (e) {
+    console.error('日程調整ページの読み込みに失敗しました', e);
+    res.status(500).json({ error: '読み込めませんでした' });
+  }
+});
+
+/* 担当スタッフの空き枠。表の作り方は面談申請とまったく同じ */
+app.get('/api/free/:token/slots', limitPublicRead, async (req, res) => {
+  try {
+    const ctx = await freeslotContext(req.params.token);
+    if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
+    res.json(slots.generateWeekGrid(ctx.availability, ctx.takenMs, req.query.week));
+  } catch (e) {
+    console.error('空き枠の取得に失敗しました', e);
+    res.status(500).json({ error: '取得できませんでした' });
+  }
+});
+
+/* 学生が空いている時間を送る。同じ名前で送り直したら上書きする */
+app.post('/api/free/:token', limitPublicWrite, async (req, res) => {
+  const { name, choices, note, all_day } = req.body || {};
+  const studentName = String(name || '').trim();
+  if (!studentName) return res.status(400).json({ error: 'お名前を入力してください' });
+  if (studentName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
+
+  // 数え方は面談申請と同じ。まとまりではなく枠の数で上限を見る
+  const list = [...new Set((Array.isArray(choices) ? choices : []).filter(Boolean).map(String))];
+  if (!list.length) return res.status(400).json({ error: '空いている時間を選んでください' });
+  if (list.length > 600) return res.status(400).json({ error: '選んだ時間が多すぎます。絞ってください' });
+  const allDay = [...new Set((Array.isArray(all_day) ? all_day : [])
+    .filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)))].slice(0, 40);
+
+  try {
+    const ctx = await freeslotContext(req.params.token);
+    if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
+
+    // 画面を細工されても、受付時間外や埋まった枠は掴ませない
+    const ok = slots.selectableTimes(ctx.availability, ctx.takenMs);
+    for (const iso of list) {
+      const t = new Date(iso).getTime();
+      if (!Number.isFinite(t) || !ok.has(t)) {
+        return res.status(409).json({ error: '選んだ時間が受け付けられなくなりました。選び直してください' });
+      }
+    }
+
+    await client.execute({
+      sql: `INSERT INTO freeslot_responses (id, request_id, name, choices, all_day, note, created_at)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(request_id, name) DO UPDATE SET
+              choices = excluded.choices, all_day = excluded.all_day,
+              note = excluded.note, created_at = excluded.created_at`,
+      args: ['fr_' + crypto.randomBytes(6).toString('hex'), ctx.row.id, studentName,
+        JSON.stringify(list), JSON.stringify(allDay),
+        String(note || '').trim().slice(0, 500), new Date().toISOString()],
+    });
+
+    await insertNotification({
+      type: '空き時間', branch_id: ctx.row.branch_id,
+      msg: `${studentName}さんが空いている時間を送りました（${ctx.row.title}）`,
+    });
+    /* 端末の通知欄にも出す。届くのは発行したスタッフだけ。
+       保存はもう済んでいるので、送れなくても送信は成立させる */
+    push.sendToUsers(client, [ctx.staff.id], 'freeslot', {
+      title: '空いている時間が届きました',
+      body: `${studentName}さんから届きました（${ctx.row.title}）`,
+      url: '/', tag: 'freeslot',
+    }).catch((e) => console.warn('空き時間の通知に失敗しました', e));
+
+    res.json({ ok: true, staff_nickname: ctx.staff.nickname });
+  } catch (e) {
+    console.error('空き時間の送信に失敗しました', e);
+    res.status(500).json({ error: '送信できませんでした' });
+  }
+});
+
 /* 旧・ログインした状態からの面談申請。
    インターン生のログインを廃止したため、この入口は誰も通れなくなった。
    古い画面が残っている端末に、行き先を案内できるように残してある */
@@ -3737,6 +3854,8 @@ const PUBLIC_FILES = {
   '/staff': 'index.html',
   // アカウント無しの面談申請ページ。ログイン処理を一切通らないよう別ファイルにしてある
   '/apply.html': 'apply.html',
+  // 日程調整ページ（空き時間を集める）。apply.html と同じくログイン処理を通さない
+  '/free.html': 'free.html',
   '/attendance.html': 'attendance.html',
   // Google Search Console のサイト所有権確認用。確認状態を保つため削除しないこと
   '/googlee6411894890471cb.html': 'googlee6411894890471cb.html',
@@ -3753,6 +3872,10 @@ app.get('*', (req, res) => {
   }
   if (/^\/a\/[A-Za-z0-9_-]+\/?$/.test(p)) {
     return res.sendFile(path.join(PUBLIC_ROOT, 'attendance.html'));
+  }
+  // 日程調整URL。合言葉の正しさは /i/ と同じくAPI側で確かめる
+  if (/^\/f\/[A-Za-z0-9_-]+\/?$/.test(p)) {
+    return res.sendFile(path.join(PUBLIC_ROOT, 'free.html'));
   }
   const file = PUBLIC_FILES[p];
   if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');
