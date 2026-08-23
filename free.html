@@ -1,1 +1,824 @@
-<!doctype html><meta charset="utf-8"><title>日程調整</title>
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日程調整 | OPS日調アプリ</title>
+<!-- 1件ごとの合言葉が入ったURLなので、検索結果に出さない -->
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#dbe9e7">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<!-- テーマはライト固定。アプリ本体と違い、切り替えの設定を持たない画面なので
+     localStorage は読まず、data-theme を最初から light にしてある -->
+<!-- OS側がダーク設定の端末だと、style.cssが届くまでの一瞬だけ
+     背景が黒く塗られてから切り替わって見える。それを防ぐ -->
+<meta name="color-scheme" content="light">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Noto+Sans+JP:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* この画面だけの調整。左メニューが無いぶん、中身を中央に寄せる */
+  main{max-width:920px;margin:0 auto}
+  .applyhead{display:flex;align-items:baseline;gap:10px;margin:8px 0 2px}
+  .applyhead .brand{font-weight:900;letter-spacing:.04em;font-size:13px;color:var(--sub)}
+
+  /* 日付の下の「終日OK」。その日の空いている枠をまとめて選ぶ。
+     枠線で囲むと表のマスに紛れて見出しに見えてしまうので、枠は付けず、
+     代わりにチェックの四角を置いて「押して入り切りするもの」だと分かるようにする */
+  .booktable thead .bt-all{padding:3px 2px 5px;background:var(--panel2)}
+  .allday{display:block;width:100%;font-family:inherit;font-size:10px;font-weight:800;
+    line-height:1.2;padding:4px 2px;border:0;border-radius:6px;background:transparent;
+    color:var(--sub);cursor:pointer;white-space:nowrap}
+  .allday:hover{background:var(--ok-soft);color:var(--brand-d)}
+  .allday.on{color:var(--brand-d)}
+  .allday.off{opacity:.35;cursor:default}
+  /* チェックの四角。文字（☑）だと端末によって出ないので、CSSで描いている */
+  .allday .box{display:inline-block;width:11px;height:11px;margin-right:3px;
+    border:1.5px solid currentColor;border-radius:3px;vertical-align:-2px;position:relative}
+  .allday.on .box{background:var(--brand);border-color:var(--brand)}
+  .allday.on .box::after{content:"";position:absolute;left:3px;top:0;width:3px;height:6px;
+    border:solid var(--on-fill);border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
+
+  /* 一覧は「日付」と「時間」を横に並べる（並びは style.css 側で決めている）。
+     終日OKの日は時間が2つ以上に割れるので、入りきらないときだけ折り返す */
+  .selsummary .sr .st .stag{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;
+    padding:1px 6px;border-radius:5px;background:var(--brand-soft);color:var(--brand-d)}
+  /* 選んだ時間は補足ではなく本体なので、日付と同じ濃い本文色にする */
+  .selsummary .sr .st .stime{font-size:13px;color:var(--ink)}
+</style>
+</head>
+<body>
+
+<!-- 背景のオーロラ。アプリ本体と同じ装飾なので、中身は空のspan3枚でよい -->
+<div id="aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span></div>
+
+<main id="main"></main>
+<div id="toast"></div>
+
+<!-- 祝日。アプリ本体と同じ共通ファイルを読む。ここで holidayName() が定義される -->
+<script src="/holidays.js"></script>
+
+<script>
+/* アカウントを作らずに「空いている時間」を伝えるためのページ。
+   URLに入っている合言葉だけが入場条件で、ログインは一切通らない。
+
+   apply.html（面談の申請ページ）から派生させた画面。違いは3つだけ:
+     ・担当は発行したスタッフに固定されているので、選ぶ欄が無い
+     ・希望順という考え方が無いので、並べ替えの一覧を出さない
+     ・面談にはならない。空いている時間が相手に届くだけ
+   そのほかの操作（週表示の表・なぞって複数選択・終日OK）は apply.html と同じ。 */
+
+// URLは /f/<合言葉> の形。末尾スラッシュが付いていても拾えるようにする
+var TOKEN = (location.pathname.split('/').filter(Boolean)[1] || '');
+
+var APPLY = {
+  name: '',          // 入力された本名
+  title: '',         // 発行したスタッフが付けた件名
+  staffName: '',     // 届け先のスタッフ名（発行した本人に固定）
+  weekOffset: 0,
+  grid: null,        // サーバーから受け取った週の表
+  loading: false,
+  loadError: '',
+  sel: [],           // 選んだ枠
+  allDay: {},        // 「終日OK」になっている日 {'2026-08-06':true}
+  note: '',
+  sending: false,
+  /* 画面の段階。'form'（書く）→'confirm'（確かめる）→'done'（控えを見る）。
+     送ってしまうと取り消せないので、あいだに必ず確認を挟む */
+  step: 'form',
+  receipt: null,     // 送った内容の控え。送信が成功した時点で作る
+};
+
+/* ---------- アプリ本体から持ってきた道具 ---------- */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function pad(n){return String(n).padStart(2,'0');}
+var WD_JP=['日','月','火','水','木','金','土'];
+/* 祝日は holidays.js の holidayName(y,m,d) を使う。m=0-11。
+   アプリ本体と同じファイルを読んでいるので、両方の画面で祝日がずれることはない */
+function hm(iso){var d=new Date(iso);return pad(d.getHours())+':'+pad(d.getMinutes());}
+function fmtDT(iso){if(!iso)return '—';var d=new Date(iso);
+  return (d.getMonth()+1)+'/'+d.getDate()+'('+WD_JP[d.getDay()]+') '+pad(d.getHours())+':'+pad(d.getMinutes());}
+// 'YYYY-MM-DD' を、その端末の暦の日付に直す。ISOのまま new Date すると UTC 扱いでずれる
+function parseYmd(s){var p=String(s).split('-');
+  return new Date(Number(p[0]),Number(p[1])-1,Number(p[2]));}
+
+/* 選んだ枠の意味を取り違えられないための一文。
+   「10:00〜10:30」を面談の長さと読まれることがあったので、
+   ここで選ぶのはあくまで空いている時間帯だと明記する */
+var AVAIL_NOTE_SELF='ここで選ぶのは、あなたが空いている時間帯です。予定の長さではありません。';
+// 送り終わったあとの控えに出す言い方
+var AVAIL_NOTE_SENT='上に出ているのは、あなたが空いている時間帯です。予定の長さではありません。';
+
+var SLOT_MS=30*60*1000;
+// その枠が何日のものか。ISOのままだと日付がUTC基準になるので、必ずここを通す
+function dayKey(iso){
+  var d=new Date(iso);
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+}
+
+/* 希望のまとまりを作る。
+   ふつうは続いている30分枠がひとつの希望になる。
+   12:00・12:30・13:00 を選んだら「12:00〜13:30」で1件という数え方。
+
+   「終日OK」になっている日だけは別扱いで、途中に埋まっている時間があっても
+   その日ぜんぶで1件にまとめる。「この日はいつでもいい」という申し出を
+   3つにも4つにも割ってスタッフに見せると、かえって分かりにくいため。
+
+   並び順は「そのまとまりの枠に最初に触れた位置」で決まる。
+   日をまたぐ枠は続いていても分ける */
+function applyGroups(){
+  var first=new Map();
+  (APPLY.sel||[]).forEach(function(iso,i){if(iso&&!first.has(iso))first.set(iso,i);});
+  var sorted=Array.from(first.keys()).sort(function(a,b){return new Date(a)-new Date(b);});
+  var runs=[];
+  sorted.forEach(function(iso){
+    var key=dayKey(iso);
+    if(APPLY.allDay[key]){
+      // 同じ日のまとまりが既にあれば、離れていてもそこへ足す
+      var found=null;
+      runs.forEach(function(r){if(r.allDay&&r.key===key)found=r;});
+      if(found){found.slots.push(iso);return;}
+      runs.push({allDay:true,key:key,slots:[iso]});
+      return;
+    }
+    var last=runs[runs.length-1];
+    var prev=last&&!last.allDay&&last.slots[last.slots.length-1];
+    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS&&key===dayKey(prev)){
+      last.slots.push(iso);return;
+    }
+    runs.push({allDay:false,key:key,slots:[iso]});
+  });
+  var at=function(r){return Math.min.apply(null,r.slots.map(function(x){return first.get(x);}));};
+  return runs.sort(function(a,b){return at(a)-at(b);});
+}
+
+/* 区間の終わりに出す時刻。
+   枠が2つ以上あるときは最後の枠の開始時刻、1つだけのときは開始＋30分。
+
+   表の1行は「その時刻から30分の枠」だが、申請する人は行の見出しを読んで
+   「17:00から18:00まで空けた」と受け取る。その読み方に合わせている。
+   ここに出るのは空いている時間の終わりであって、面談が終わる時刻ではない
+   （設計書 _specs/2026-08-06-面談まわりの改善-design.md の 1.4）*/
+function runEnd(run){
+  var last=run[run.length-1];
+  if(run.length>1)return new Date(last);
+  return new Date(new Date(last).getTime()+SLOT_MS);
+}
+/* 続いた枠を「9:00〜11:00」にまとめ、離れていれば ＆ でつなぐ */
+function fmtRanges(list){
+  var sorted=list.slice().sort(function(a,b){return new Date(a)-new Date(b);});
+  var runs=[];
+  sorted.forEach(function(iso){
+    var run=runs[runs.length-1];
+    var prev=run&&run[run.length-1];
+    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS)run.push(iso);
+    else runs.push([iso]);
+  });
+  return runs.map(function(r){
+    return hm(r[0])+'〜'+hm(runEnd(r));
+  }).join('＆');
+}
+// 「8/5(火)」
+function fmtDay(iso){
+  var d=new Date(iso);
+  return (d.getMonth()+1)+'/'+d.getDate()+'('+WD_JP[d.getDay()]+')';
+}
+function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show');},2200);}
+
+/* アイコン。この画面で使うものだけをアプリ本体から写している */
+var ICON={
+  home:'<path pathLength="1" d="M3 10.4 12 3.2l9 7.2V19.8A1.2 1.2 0 0 1 19.8 21h-4.3v-6.4H8.5V21H4.2A1.2 1.2 0 0 1 3 19.8z"/>',
+  staff:'<path pathLength="1" d="M15 20.2v-1.8a3.8 3.8 0 0 0-3.8-3.8H6.3a3.8 3.8 0 0 0-3.8 3.8v1.8"/>'
+       +'<circle pathLength="1" cx="8.8" cy="7.4" r="3.8"/>'
+       +'<path pathLength="1" d="m15.9 11.6 2.2 2.2 3.4-4"/>',
+  briefcase:'<rect pathLength="1" x="2.5" y="7.2" width="19" height="13.3" rx="2.2"/>'
+           +'<path pathLength="1" d="M15.5 20.5V5.4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v15.1"/>',
+  'slot-empty':'<rect x="3.2" y="4.2" width="17.6" height="15.6" rx="2.4" stroke-dasharray="3 3.4"/>'
+              +'<path pathLength="1" d="M9 12h6"/>',
+  chevron:'<path pathLength="1" d="m9.5 5 7 7-7 7"/>',
+  'chevron-l':'<path pathLength="1" d="m14.5 5-7 7 7 7"/>',
+  check:'<path pathLength="1" d="m4.5 12.5 5 5 10-11"/>',
+  dot:'<circle pathLength="1" cx="12" cy="12" r="2.2"/>',
+};
+function ic(name,cls){
+  return '<svg class="ic'+(cls?' '+cls:'')+'" viewBox="0 0 24 24" aria-hidden="true">'
+    +(ICON[name]||ICON.dot)+'</svg>';
+}
+
+/* ---------- サーバーとのやりとり ---------- */
+function api(path,opts){
+  return fetch(path,opts).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(body){
+      if(!r.ok)throw new Error(body.error||'通信に失敗しました');
+      return body;
+    });
+  });
+}
+function slotsUrl(){
+  return '/api/free/'+encodeURIComponent(TOKEN)+'/slots'
+    +'?week='+encodeURIComponent(APPLY.weekOffset);
+}
+/* 週の表を取り直す。取得中に別の週へ移られたら、
+   古い結果で画面を上書きしないよう捨てる */
+function loadGrid(){
+  var want=''+APPLY.weekOffset;
+  APPLY.loading=true;APPLY.loadError='';render();
+  api(slotsUrl()).then(function(data){
+    if((''+APPLY.weekOffset)!==want)return;
+    APPLY.grid=data;APPLY.loading=false;render();
+  }).catch(function(e){
+    if((''+APPLY.weekOffset)!==want)return;
+    APPLY.loading=false;APPLY.loadError=e.message;render();
+  });
+}
+
+/* ---------- 画面 ---------- */
+function fatal(message){
+  document.getElementById('main').innerHTML=
+    '<h1 class="page">日程調整</h1>'
+    +'<div class="empty"><div class="ei">'+ic('briefcase')+'</div><p>'+esc(message)+'</p></div>';
+}
+
+function render(){
+  var html;
+  if(APPLY.step==='done')html=viewDone();
+  else if(APPLY.step==='confirm')html=viewConfirm();
+  else html=viewApply();
+  document.getElementById('main').innerHTML=html;
+}
+
+function viewApply(){
+  // まとまりの数え直し。同じ固まりの枠にはすべて同じ番号が付く
+  syncAllDay();
+  var groups=applyGroups();
+
+  return '<div class="applyhead"><h1 class="page">日程調整</h1>'
+      +'<span class="brand">'+esc(BRANCH_NAME)+'</span></div>'
+    +(APPLY.title?'<p class="page-sub">'+esc(APPLY.title)+'</p>':'')
+    +'<div class="card"><div class="cb">'
+      /* 必須の赤い＊は、まだ入っていないあいだだけ出す。
+         入れ終わった欄からは消えるので、残りどこを埋めればよいかがひと目で分かる */
+      +'<label class="fl">お名前<span class="req" id="reqname"'+(reqHidden(APPLY.name))+'>*</span></label>'
+      +'<input type="text" id="applyname" autocomplete="name" maxlength="50" placeholder="例：山田 太郎"'
+        +' value="'+esc(APPLY.name)+'" oninput="APPLY.name=this.value;syncReq()">'
+      +'<p class="fine" style="margin-top:6px">受け取った人が本人を確かめるために使います。本名でご記入ください。</p>'
+      /* 選び方の案内。表が出てから読むのでは遅いので、表より前に置く。
+         色を付けた囲み（.hint）ではなく本文と同じ黒字にしてある。
+         囲みにすると「補足」に見えて読み飛ばされるため */
+      +'<div class="guide">下のカレンダーから、<b>空いている時間帯</b>を選択してください。<br>'
+        +'選べる時間が多いほど日程が決まりやすくなります。</div>'
+      +weekBlock(groups)
+      +'<div class="divider"></div>'
+      +'<label class="fl">その他（任意）</label>'
+      +'<textarea placeholder="伝えたいことがあれば記入してください（例：オンラインを希望します）"'
+        +' style="min-height:90px" oninput="APPLY.note=this.value">'+esc(APPLY.note)+'</textarea>'
+      +'<button class="btn pri block" style="margin-top:20px" id="applybtn"'
+        +(groups.length?'':' disabled')+' onclick="goConfirm()">'
+        +(groups.length?'この'+groups.length+'件の内容を確認する':'枠を選んでください')
+      +'</button>'
+      +'<p class="fine" style="margin-top:8px;text-align:center">この時点ではまだ送信されません。次の画面で内容を確かめてから送ります。</p>'
+    +'</div></div>';
+}
+
+/* ---------- 送る内容のまとめ ----------
+   確認画面と、送ったあとの控えで同じものを使う。
+   画面を出し直しても中身が変わらないよう、値をここで文字列に固めておく */
+function applySummary(){
+  return {
+    branch:BRANCH_NAME,
+    title:APPLY.title,
+    name:(APPLY.name||'').trim(),
+    staffName:APPLY.staffName,
+    note:(APPLY.note||'').trim(),
+    groups:applyGroups().map(function(g){
+      return {day:fmtDay(g.slots[0]),time:fmtRanges(g.slots),allDay:!!g.allDay};
+    }),
+  };
+}
+/* 選んだ時間の一覧。順位は付かないので、番号ではなく通し番号だけを添える */
+function summaryRowsHTML(sum){
+  return sum.groups.map(function(g,i){
+    return '<div class="sr">'
+      +'<span class="cn r4">'+(i+1)+'</span>'
+      +'<span class="st">'
+        +'<span class="sday">'+esc(g.day)+(g.allDay?'<span class="stag">終日OK</span>':'')+'</span>'
+        +'<span class="stime">'+esc(g.time)+'</span>'
+      +'</span>'
+    +'</div>';
+  }).join('');
+}
+/* 確認画面と控えに共通の中身。
+   注記だけは、これから送るのか送り終わったのかで言い方を変える */
+function summaryCardHTML(sum,note){
+  return '<dl class="kv" style="margin-bottom:14px">'
+      +'<dt>件名</dt><dd>'+esc(sum.title||'—')+'</dd>'
+      +'<dt>お名前</dt><dd>'+esc(sum.name)+'</dd>'
+      +'<dt>送り先</dt><dd>'+esc(sum.staffName||'—')+'</dd>'
+    +'</dl>'
+    +'<div class="divider"></div>'
+    +'<label class="fl">空いている時間（'+sum.groups.length+'件）</label>'
+    +'<div class="selsummary">'+summaryRowsHTML(sum)+'</div>'
+    +'<p class="fine" style="margin-top:8px">'+esc(note)+'</p>'
+    +(sum.note?'<div class="divider"></div>'
+      +'<label class="fl">その他</label>'
+      +'<p style="margin:4px 0 0;white-space:pre-wrap">'+esc(sum.note)+'</p>':'');
+}
+
+/* ---------- 確認画面 ---------- */
+function goConfirm(){
+  var name=(APPLY.name||'').trim();
+  if(!name){
+    toast('お名前を入力してください');
+    var f=document.getElementById('applyname');
+    if(f)f.focus();
+    return;
+  }
+  if(!APPLY.sel.length){toast('空いている時間を選んでください');return;}
+  APPLY.step='confirm';
+  render();
+  window.scrollTo(0,0);
+}
+function backToForm(){
+  APPLY.step='form';
+  render();
+  window.scrollTo(0,0);
+}
+function viewConfirm(){
+  var sum=applySummary();
+  return '<div class="applyhead"><h1 class="page">内容の確認</h1>'
+      +'<span class="brand">'+esc(sum.branch)+'</span></div>'
+    +'<p class="page-sub">まだ送信していません。下の内容でよければ「この内容で送る」を押してください。</p>'
+    +'<div class="card"><div class="cb">'
+      +summaryCardHTML(sum,AVAIL_NOTE_SELF)
+      +'<button class="btn pri block" style="margin-top:22px" id="applybtn"'
+        +(APPLY.sending?' disabled':'')+' onclick="submitApply()">'
+        +(APPLY.sending?'送信しています…':'この内容で送る')+'</button>'
+      +'<button class="btn ghost block" style="margin-top:8px"'
+        +(APPLY.sending?' disabled':'')+' onclick="backToForm()">書き直す</button>'
+    +'</div></div>';
+}
+
+/* ---------- 送ったあとの控え ---------- */
+function viewDone(){
+  var r=APPLY.receipt||{groups:[]};
+  return '<div class="applyhead"><h1 class="page">送信しました</h1>'
+      +'<span class="brand">'+esc(r.branch||'')+'</span></div>'
+    +'<div class="card"><div class="cb">'
+      +'<div class="hint" style="margin-bottom:16px">'+ic('check')+'<span><b>'
+        +esc(r.staffName)+'</b>さんに届きました。日程が決まりましたら、あらためてご連絡します。</span></div>'
+      +'<label class="fl">送った内容（控え）</label>'
+      +'<p class="fine" style="margin:2px 0 12px">送信日時：'+esc(r.sentAt)+'</p>'
+      +summaryCardHTML(r,AVAIL_NOTE_SENT)
+      +'<button class="btn block" style="margin-top:20px" onclick="copyReceipt()">この内容をコピーする</button>'
+      +'<p class="fine" style="margin-top:8px">コピーしてLINEなどに貼っておくと、あとから確かめられます。'
+        +'この画面は閉じていただいて構いません。</p>'
+    +'</div></div>';
+}
+/* 控えを文にして書き出す。LINEにそのまま貼れる形にしてある */
+function receiptText(){
+  var r=APPLY.receipt;
+  if(!r)return '';
+  var lines=['【日程調整で送った内容】','送信日時：'+r.sentAt];
+  if(r.title)lines.push('件名：'+r.title);
+  if(r.branch)lines.push('支部：'+r.branch);
+  lines.push('お名前：'+r.name);
+  lines.push('送り先：'+r.staffName);
+  lines.push('');
+  lines.push('空いている時間（予定の長さではありません）');
+  r.groups.forEach(function(g,i){
+    lines.push('　'+(i+1)+'：'+g.day+' '+g.time+(g.allDay?'（終日OK）':''));
+  });
+  if(r.note){lines.push('');lines.push('その他：'+r.note);}
+  return lines.join('\n');
+}
+function copyReceipt(){
+  var text=receiptText();
+  if(!text)return;
+  var done=function(){toast('コピーしました');};
+  /* navigator.clipboard は https でないと使えない端末があるので、
+     使えなかったときは隠した入力欄を経由して従来のやり方で写す */
+  var fallback=function(){
+    var ta=document.createElement('textarea');
+    ta.value=text;
+    ta.style.position='fixed';ta.style.left='-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try{document.execCommand('copy');done();}
+    catch(e){toast('コピーできませんでした。画面を長押しして選択してください');}
+    document.body.removeChild(ta);
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  }else fallback();
+}
+
+/* 読み込み中・取れなかったときで出し分ける。
+   表そのものは gridTable() が組み立てる */
+function weekBlock(groups){
+  var pager='<div class="weekpager">'
+    +'<button class="pg" onclick="setApplyWeek(-1)"'+(APPLY.weekOffset<=0?' disabled':'')+'>'
+      +ic('chevron-l')+'前の1週間</button>'
+    +'<span class="wm">'+esc(monthLabel())+'</span>'
+    +'<button class="pg" onclick="setApplyWeek(1)"'
+      +(APPLY.grid&&!APPLY.grid.hasNext?' disabled':'')+'>次の1週間'+ic('chevron')+'</button>'
+    +'</div>';
+
+  var body;
+  if(APPLY.loadError){
+    body='<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
+      +'<p>'+esc(APPLY.loadError)+'</p></div>';
+  }else if(APPLY.loading||!APPLY.grid){
+    body='<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
+      +'<p>空いている枠を調べています…</p></div>';
+  }else{
+    body=gridTable();
+  }
+
+  return '<div class="divider"></div>'+pager
+    +'<label class="fl"><span id="slotlabel">空いている時間を選ぶ（'+groups.length+'件選択中）</span>'
+      +'<span class="fl-sub">タップで1つ、押したまま上下になぞるとまとめて選べます</span></label>'
+    +body
+    +'<p class="fine" style="margin-top:8px">'+esc(AVAIL_NOTE_SELF)+'</p>';
+}
+
+/* 表に出ている7日ぶんが何月なのか。今日始まりなので月をまたぐことが多い。
+   またぐときは「2026年8月〜9月」と両方出す。先頭の月だけだと、右半分の日付が
+   どの月のものか分からなくなる */
+function monthLabel(){
+  var days=APPLY.grid&&APPLY.grid.days;
+  if(!days||!days.length)return '';
+  var a=parseYmd(days[0]),b=parseYmd(days[days.length-1]);
+  var head=a.getFullYear()+'年'+(a.getMonth()+1)+'月';
+  if(a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth())return head;
+  return head+'〜'+(a.getFullYear()===b.getFullYear()?'':b.getFullYear()+'年')+(b.getMonth()+1)+'月';
+}
+
+function gridTable(){
+  var g=APPLY.grid;
+  if(!g.times.length){
+    return '<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
+      +'<p>この週は面談可能な空き枠がありません。</p></div>';
+  }
+  var todayKey=(function(){var t=new Date();
+    return t.getFullYear()+'-'+pad(t.getMonth()+1)+'-'+pad(t.getDate());})();
+
+  var headCells=g.days.map(function(key){
+    var d=parseYmd(key);var w=d.getDay();
+    var hol=holidayName(d.getFullYear(),d.getMonth(),d.getDate());
+    var cls=['bt-h',(w===0||hol)?'sun':'',w===6?'sat':'',key===todayKey?'today':''].join(' ');
+    return '<th class="'+cls+'">'+d.getDate()+'<small>'+WD_JP[w]+'</small></th>';
+  }).join('');
+
+  /* 日付の下に「終日OK」。その日の空いている枠をまとめて選べる。
+     空きが1つも無い日は押せないようにしておく */
+  var allDayCells=g.days.map(function(key,di){
+    var open=g.grid[di].filter(function(c){return c.state==='ok';}).length;
+    if(!open)return '<th class="bt-all"><span class="allday off">—</span></th>';
+    return '<th class="bt-all"><button type="button" class="allday'
+      +(APPLY.allDay[key]?' on':'')+'" data-day="'+esc(key)+'"'
+      +' aria-pressed="'+(APPLY.allDay[key]?'true':'false')+'"'
+      +' onclick="toggleAllDay('+di+')"><span class="box"></span>終日OK</button></th>';
+  }).join('');
+
+  var picked=new Set();
+  applyGroups().forEach(function(grp){grp.slots.forEach(function(iso){picked.add(iso);});});
+
+  var bodyRows=g.times.map(function(label,ti){
+    var cells=g.grid.map(function(dayCol){
+      var c=dayCol[ti];
+      if(c.state==='off')return '<td class="bt-c off">×</td>';
+      var on=picked.has(c.iso);
+      return '<td class="bt-c ok '+(on?'sel':'')+'" data-iso="'+esc(c.iso)+'"'
+        +' onpointerdown="applyPointerDown(event,\''+esc(c.iso)+'\')"'
+        +' title="タップ、または長押ししてから同じ日の中で上下になぞって選択">'
+        +(on?'<span class="bt-num">✓</span>':'○')+'</td>';
+    }).join('');
+    return '<tr><th class="bt-t">'+esc(label)+'</th>'+cells+'</tr>';
+  }).join('');
+
+  return '<div class="booktable-wrap"><table class="booktable apbook">'
+    +'<thead><tr><th class="bt-corner"></th>'+headCells+'</tr>'
+    +'<tr><th class="bt-corner"></th>'+allDayCells+'</tr></thead>'
+    +'<tbody>'+bodyRows+'</tbody></table></div>';
+}
+
+/* 「終日OK」。その日の空いている枠をまとめて選ぶ／まとめて外す。
+   途中に埋まった時間があっても、希望としては1件にまとめて見せる */
+function toggleAllDay(di){
+  var g=APPLY.grid;
+  if(!g||!g.grid[di])return;
+  var isos=g.grid[di].filter(function(c){return c.state==='ok';})
+    .map(function(c){return c.iso;});
+  if(!isos.length)return;
+  var has={};
+  APPLY.sel.forEach(function(iso){has[iso]=true;});
+  var already=isos.every(function(iso){return has[iso];});
+  if(already){
+    var drop={};
+    isos.forEach(function(iso){drop[iso]=true;});
+    APPLY.sel=APPLY.sel.filter(function(iso){return !drop[iso];});
+  }else{
+    APPLY.sel=APPLY.sel.concat(isos.filter(function(iso){return !has[iso];}));
+  }
+  refreshApplyLive();
+}
+
+/* 「終日OK」の印を、いま選ばれている枠から付け直す。
+   その日の空いている枠がすべて選ばれていれば終日OK、1つでも外れていれば解除。
+   印を別に持って食い違うより、選択そのものから毎回導くほうが確実。
+   確かめられるのは表に出ている週だけなので、他の週の印はそのまま残す */
+function syncAllDay(){
+  var g=APPLY.grid;
+  if(!g)return;
+  var has={};
+  APPLY.sel.forEach(function(iso){has[iso]=true;});
+  g.days.forEach(function(key,di){
+    var isos=g.grid[di].filter(function(c){return c.state==='ok';})
+      .map(function(c){return c.iso;});
+    var all=isos.length>0&&isos.every(function(iso){return has[iso];});
+    if(all)APPLY.allDay[key]=true; else delete APPLY.allDay[key];
+  });
+}
+
+/* 必須の赤い＊。入っていれば hidden を付けて消す */
+function reqHidden(v){return (v&&String(v).trim())?' hidden':'';}
+/* 名前を打っている最中に＊を出し入れする。
+   ここで render() を呼ぶと入力中のカーソルが飛ぶので、＊だけを直接いじる */
+function syncReq(){
+  var n=document.getElementById('reqname');
+  if(n)n.hidden=!!(APPLY.name&&APPLY.name.trim());
+}
+function setApplyWeek(delta){
+  APPLY.weekOffset=Math.max(0,(APPLY.weekOffset||0)+delta);
+  loadGrid();
+}
+/* ---- カレンダーをなぞって複数の枠を選ぶ ----
+   押し始めた枠から今いる枠までの**範囲ぜんぶ**を選ぶ。
+
+   以前は「指が実際に通ったマス」だけを選んでいたが、指を速く動かすと
+   途中のマスが飛ばされ、選んだ時間に穴が空いて希望が分かれてしまっていた。
+   範囲で選べば、指の動きの速さに関係なく必ず続いた時間になる。
+
+   押し始めた枠が未選択なら追加、選択済みなら解除でモードを固定し、
+   往復してもモードが入れ替わらないようにしている。
+   なぞれるのは縦（押し始めた日の列）だけ。列は td の並び順で見分ける */
+var APDRAG=null;
+
+/* 指のときだけ「押さえてから」なぞれるようにする。
+   スマホでは画面を送ろうとしてカレンダーの上に指が乗ることがあり、
+   押した瞬間から掴んでいると、送るつもりが枠を選んでしまっていた。
+
+   ・押してすぐは何もしない。そのまま押さえていたら選択に入る
+   ・押さえきる前に指が動いたら、それは画面を送る操作。カレンダーは手を出さない
+   ・動かさずにポンと離したときは、押すつもりだったとみなして1マス選ぶ
+
+   マウスには効かせない。狙った場所を正確に押せるので待たせる理由がない */
+/* 押さえる長さ。長くするほど誤って選びにくくなるが、なぞり始めるまで待たされる。
+   0.2秒は待たされる感じが強いという声があり 0.05秒にしてある。
+   これでも誤って選んでしまうようなら、まずここを 100 くらいまで戻す */
+var HOLD_MS=50;       // ここまで押さえていれば「選ぶつもり」とみなす（ミリ秒）
+var HOLD_SLOP=10;     // これ以上ずれたら「画面を送るつもり」とみなす（px）
+var APHOLD=null;
+
+function applyPointerDown(e,iso){
+  if(e.button!==undefined&&e.button!==0)return;
+  if(e.pointerType==='touch'){
+    beginApplyHold(e,iso);
+    return;
+  }
+  e.preventDefault();
+  startApplyDrag(e.currentTarget,iso);
+  document.addEventListener('pointermove',applyDragMove);
+  document.addEventListener('pointerup',applyDragEnd);
+  document.addEventListener('pointercancel',applyDragEnd);
+}
+
+function beginApplyHold(e,iso){
+  clearApplyHold();
+  var cell=e.currentTarget;
+  APHOLD={cell:cell,iso:iso,x:e.clientX,y:e.clientY,armed:false,timer:0};
+  APHOLD.timer=setTimeout(function(){
+    if(!APHOLD)return;
+    APHOLD.armed=true;
+    // 掴めたことを指に返す。対応していない端末では何も起きない
+    if(navigator.vibrate)navigator.vibrate(8);
+    startApplyDrag(APHOLD.cell,APHOLD.iso);
+  },HOLD_MS);
+  /* touchmove を passive でない形で見る。pointermove では画面送りを止められない。
+     0.2秒のあいだ指が止まっていれば画面はまだ動き出していないので、
+     ここで初めて preventDefault すれば送りに取られずになぞれる */
+  document.addEventListener('touchmove',applyHoldMove,{passive:false});
+  document.addEventListener('touchend',applyHoldEnd);
+  document.addEventListener('touchcancel',applyHoldCancel);
+}
+
+function applyHoldMove(e){
+  if(!APHOLD)return;
+  var t=e.touches&&e.touches[0];
+  if(!t)return;
+  if(!APHOLD.armed){
+    if(Math.abs(t.clientX-APHOLD.x)>HOLD_SLOP||Math.abs(t.clientY-APHOLD.y)>HOLD_SLOP){
+      clearApplyHold();   // 画面を送ろうとしている。そのままブラウザに任せる
+    }
+    return;
+  }
+  e.preventDefault();     // ここから先は画面を動かさず、なぞって選ぶ
+  var i=dragRowIndexAt(t);
+  if(i>=0)applyDragTo(i);
+}
+
+function applyHoldEnd(e){
+  var h=APHOLD;
+  if(!h)return;
+  var armed=h.armed;
+  clearApplyHold();
+  if(armed){applyDragEnd();return;}
+  /* 0.2秒たつ前に離した。指が動いていなければ「押すつもり」だったので1マスだけ選ぶ。
+     動いていたときは applyHoldMove がすでに手を引いているのでここへは来ない */
+  startApplyDrag(h.cell,h.iso);
+  applyDragEnd();
+  if(e&&e.cancelable)e.preventDefault();   // 続けて出るクリックを止める
+}
+
+function applyHoldCancel(){
+  var armed=APHOLD&&APHOLD.armed;
+  clearApplyHold();
+  if(armed)applyDragEnd();
+}
+
+/* 押さえ待ちの後始末。選択そのものには触らない */
+function clearApplyHold(){
+  if(APHOLD&&APHOLD.timer)clearTimeout(APHOLD.timer);
+  APHOLD=null;
+  document.removeEventListener('touchmove',applyHoldMove,{passive:false});
+  document.removeEventListener('touchend',applyHoldEnd);
+  document.removeEventListener('touchcancel',applyHoldCancel);
+}
+
+/* なぞりの開始。押し始めた枠を選び、その列を上下の動きの物差しにする */
+function startApplyDrag(cell,iso){
+  var col=dragColOf(cell);
+  var cells=colCells(col);
+  APDRAG={
+    mode:APPLY.sel.indexOf(iso)>=0?'remove':'add',
+    col:col, cells:cells,
+    anchor:cells.indexOf(cell),
+    base:APPLY.sel.slice(),          // なぞる前の状態。範囲を作り直すたびにここから組み立てる
+  };
+  document.body.classList.add('noselect');
+  applyDragTo(APDRAG.anchor);
+}
+function dragColOf(cell){
+  return cell&&cell.cellIndex!==undefined
+    ? {table:cell.closest('table'),index:cell.cellIndex} : null;
+}
+/* その列のマスを、表に並んでいる順で返す。行番号として使う */
+function colCells(col){
+  if(!col||!col.table)return [];
+  return Array.prototype.filter.call(
+    col.table.querySelectorAll('tbody .bt-c'),
+    function(td){return td.cellIndex===col.index;});
+}
+/* 指の高さが何行目にあたるか。横の位置は見ない（列は押し始めた日に固定なので）。
+   表の外まで動かしたときは、いちばん近い端に寄せる */
+function dragRowIndexAt(e){
+  var cells=APDRAG&&APDRAG.cells;
+  if(!cells||!cells.length)return -1;
+  for(var i=0;i<cells.length;i++){
+    var r=cells[i].getBoundingClientRect();
+    if(e.clientY>=r.top&&e.clientY<=r.bottom)return i;
+  }
+  if(e.clientY<cells[0].getBoundingClientRect().top)return 0;
+  if(e.clientY>cells[cells.length-1].getBoundingClientRect().bottom)return cells.length-1;
+  return -1;
+}
+function applyDragMove(e){
+  if(!APDRAG)return;
+  var i=dragRowIndexAt(e);
+  if(i>=0)applyDragTo(i);
+}
+/* 押し始めた行から i 行目までを、まとめて追加または解除する。
+   毎回「なぞる前の状態」から組み立て直すので、指を戻せば選択も戻る */
+function applyDragTo(i){
+  var d=APDRAG;
+  if(!d||i<0||d.anchor<0)return;
+  var from=Math.min(d.anchor,i),to=Math.max(d.anchor,i);
+  var range=d.cells.slice(from,to+1)
+    .filter(function(td){return td.classList.contains('ok');})   // 埋まった枠はまたぐだけ
+    .map(function(td){return td.dataset.iso;});
+  if(d.mode==='add'){
+    var had={};
+    d.base.forEach(function(iso){had[iso]=true;});
+    APPLY.sel=d.base.concat(range.filter(function(iso){return !had[iso];}));
+  }else{
+    var drop={};
+    range.forEach(function(iso){drop[iso]=true;});
+    APPLY.sel=d.base.filter(function(iso){return !drop[iso];});
+  }
+  refreshApplyLive();
+}
+/* なぞっている間の表示更新。枠がつながると番号が繰り上がるので、
+   画面全体を描き直さずに済む範囲（番号・一覧・見出し）だけを書き換える */
+function refreshApplyLive(){
+  syncAllDay();
+  var groups=applyGroups();
+  var picked=new Set();
+  groups.forEach(function(g){g.slots.forEach(function(iso){picked.add(iso);});});
+  document.querySelectorAll('.booktable .bt-c.ok').forEach(function(td){
+    if(picked.has(td.dataset.iso)){
+      td.classList.add('sel');
+      td.innerHTML='<span class="bt-num">✓</span>';
+    }else if(td.classList.contains('sel')){
+      td.classList.remove('sel');td.textContent='○';
+    }
+  });
+  // 「終日OK」の押された状態も合わせる
+  document.querySelectorAll('.booktable .allday[data-day]').forEach(function(b){
+    var on=!!APPLY.allDay[b.dataset.day];
+    b.classList.toggle('on',on);
+    b.setAttribute('aria-pressed',on?'true':'false');
+  });
+  var slab=document.getElementById('slotlabel');
+  if(slab)slab.textContent='空いている時間を選ぶ（'+groups.length+'件選択中）';
+  var btn=document.getElementById('applybtn');
+  if(btn){btn.disabled=!groups.length;
+    btn.textContent=groups.length?'この'+groups.length+'件の内容を確認する':'枠を選んでください';}
+}
+function applyDragEnd(){
+  document.removeEventListener('pointermove',applyDragMove);
+  document.removeEventListener('pointerup',applyDragEnd);
+  document.removeEventListener('pointercancel',applyDragEnd);
+  document.body.classList.remove('noselect');
+  if(!APDRAG)return;
+  APDRAG=null;
+  refreshApplyLive();
+}
+
+/* ---------- 申請 ---------- */
+/* 確認画面の「この内容で申請する」から呼ぶ。ここではじめてサーバーへ送る */
+function submitApply(){
+  if(APPLY.sending)return;
+  var sum=applySummary();
+  if(!sum.name||!APPLY.sel.length){
+    // 確認画面へ進む時点で確かめてあるので、ふつうはここへ来ない
+    toast('入力に不足があります。書き直してください');
+    backToForm();
+    return;
+  }
+
+  /* まとめ直したものを送ることで、重複や並びの乱れが残らないようにする。
+     終日OKの日は、受け取る側でも1件として見せたいので別に伝える */
+  var groups=applyGroups();
+  var choices=groups.reduce(function(a,g){return a.concat(g.slots);},[]);
+  var allDay=groups.filter(function(g){return g.allDay;}).map(function(g){return g.key;});
+  APPLY.sending=true;render();
+
+  api('/api/free/'+encodeURIComponent(TOKEN),{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:sum.name,choices:choices,all_day:allDay,note:sum.note}),
+  }).then(function(data){
+    APPLY.sending=false;
+    /* 控えは送った時点の内容で固める。あとから画面を触っても変わらないようにするため。
+       送り先の名前はサーバーが返したものを優先する */
+    sum.staffName=data.staff_nickname||sum.staffName;
+    sum.sentAt=fmtStamp(new Date());
+    APPLY.receipt=sum;
+    APPLY.step='done';
+    render();
+    window.scrollTo(0,0);
+  }).catch(function(e){
+    APPLY.sending=false;
+    /* 枠が埋まった場合は、古い枠を出したままにすると同じ失敗を繰り返す。
+       入力画面へ戻して取り直してから、何が起きたかを伝える */
+    APPLY.sel=[];
+    APPLY.step='form';
+    toast(e.message);
+    loadGrid();
+  });
+}
+// 控えに出す「2026/8/10(月) 14:23」
+function fmtStamp(d){
+  return d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()
+    +'('+WD_JP[d.getDay()]+') '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+
+/* ---------- 読み込み ---------- */
+var BRANCH_NAME='';
+api('/api/free/'+encodeURIComponent(TOKEN)).then(function(data){
+  BRANCH_NAME=(data.branch&&data.branch.name)||'';
+  APPLY.title=data.title||'';
+  APPLY.staffName=(data.staff&&data.staff.nickname)||'';
+  if(APPLY.title)document.title=APPLY.title+' | 日程調整';
+  // 件名と送り先が分かってから、そのスタッフの空き枠を取りに行く
+  loadGrid();
+}).catch(function(e){fatal(e.message);});
+</script>
+</body>
+</html>

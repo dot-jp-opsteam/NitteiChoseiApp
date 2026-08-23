@@ -300,5 +300,18 @@ console.log('\n[ スタッフ画面 index.html の日程候補の時刻欄 ]');
   check('時間を設定しない間は候補行の時刻欄を隠す', html.includes('class=\"opttime\"'), false);
 }
 
+/* 日程調整画面（free.html）。apply.html の写しなので、
+   時刻のまとめ方が同じままであることを確かめる */
+console.log('\n[ 日程調整画面 free.html の fmtRanges ]');
+{
+  const F = load('free.html', ['pad', 'hm', 'runEnd', 'fmtRanges'],
+    'var SLOT_MS=30*60*1000;');
+  check('枠1つ → 開始＋30分', F.fmtRanges([iso(17, 0)]), '17:00〜17:30');
+  check('続いた3枠 → 17:00〜18:00',
+    F.fmtRanges([iso(17, 0), iso(17, 30), iso(18, 0)]), '17:00〜18:00');
+  check('離れた枠は ＆ でつなぐ',
+    F.fmtRanges([iso(17, 0), iso(19, 0)]), '17:00〜17:30＆19:00〜19:30');
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

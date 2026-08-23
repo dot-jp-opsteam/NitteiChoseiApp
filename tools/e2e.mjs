@@ -2221,6 +2221,21 @@ async function run() {
       check('公開の書き込みに回数制限が付いている',
         src.includes("app.post('/api/free/:token', limitPublicWrite"), true);
     }
+
+    /* 学生側の画面。面談申請の写しなので、削り忘れが起きやすい所を見る */
+    {
+      const freeHtml = fs.readFileSync(path.join(ROOT, 'free.html'), 'utf8');
+      check('見出しは「日程調整」', freeHtml.includes('日程調整'), true);
+      check('「面談を申請」とは名乗らない', freeHtml.includes('面談を申請'), false);
+      // 担当は発行したスタッフに固定。学生に選ばせる欄があってはいけない
+      check('担当スタッフの選択欄は無い', freeHtml.includes('担当スタッフ'), false);
+      // 空いている時間を知るだけなので、希望順を並べ替える枠は出さない
+      check('「選んだ希望日時」の並べ替えは無い', freeHtml.includes('選んだ希望日時'), false);
+      check('カレンダーで選ぶ旨の説明がある',
+        freeHtml.includes('下のカレンダーから、<b>空いている時間帯</b>を選択してください。'), true);
+      check('その他（任意）の欄がある', freeHtml.includes('その他（任意）'), true);
+      check('公開APIを叩いている', freeHtml.includes('/api/free/'), true);
+    }
   }
 
   /* ---------- リアルタイム通知（SSE） ----------
