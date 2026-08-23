@@ -4645,38 +4645,111 @@ function fsTally(responses){
   });
   return map;
 }
-/* 人数の多い順に n 件。同じ人数なら早い時刻が先 */
-function fsTop(tally,n){
-  return Object.keys(tally||{}).map(function(iso){
-    return {iso:iso,names:tally[iso]};
-  }).sort(function(a,b){
-    if(b.names.length!==a.names.length)return b.names.length-a.names.length;
-    return new Date(a.iso)-new Date(b.iso);
-  }).slice(0,n||5);
+const FS_SLOT_MS=30*60*1000;
+
+/* 続いていて、かつ顔ぶれが同じ枠を1本の帯にまとめる。
+   戻りは [{start, end, names}]（end は最後の枠の終わり時刻）。
+   30分の枡目のまま並べると、「終日OK」と答えた日が1人の枠で埋まり、
+   かぶっている所が見えなくなるため、こうしてまとめている。
+   顔ぶれが変わる所で切れるので、人数の増える時間帯が自然に分かれる。
+   ※ tools/test-fmt.mjs が波括弧を数えて切り出すので、
+     この関数の中に波括弧を含む文字列や正規表現を書かないこと */
+function fsRanges(tally){
+  const isos=Object.keys(tally||{}).sort(function(a,b){return new Date(a)-new Date(b);});
+  const out=[];
+  isos.forEach(function(iso){
+    const names=tally[iso].slice().sort();
+    const key=names.join('\n');
+    const last=out[out.length-1];
+    if(last&&last.key===key&&new Date(iso)-new Date(last.end)===0){
+      last.end=new Date(new Date(iso).getTime()+FS_SLOT_MS).toISOString();
+      return;
+    }
+    out.push({start:iso,end:new Date(new Date(iso).getTime()+FS_SLOT_MS).toISOString(),
+      names:names,key:key});
+  });
+  return out;
+}
+/* いちばん人数の多い帯だけを、早い順で返す。
+   全員そろっていればそれが出るし、そうでなければ最多人数のものが出る */
+function fsBest(ranges){
+  const list=ranges||[];
+  let max=0;
+  list.forEach(function(r){if(r.names.length>max)max=r.names.length;});
+  if(!max)return [];
+  return list.filter(function(r){return r.names.length===max;});
+}
+/* 1人分の空き時間を帯にまとめる。顔ぶれの比較はしない。
+   「終日OK」の日も、ほかの日と同じく時間の帯で出す */
+function fsOwnRanges(choices){
+  const isos=(choices||[]).slice().sort(function(a,b){return new Date(a)-new Date(b);});
+  const out=[];
+  isos.forEach(function(iso){
+    const end=new Date(new Date(iso).getTime()+FS_SLOT_MS).toISOString();
+    const last=out[out.length-1];
+    if(last&&new Date(iso)-new Date(last.end)===0){last.end=end;return;}
+    out.push({start:iso,end:end});
+  });
+  return out;
 }
 
-/* 日ごとの一覧。人数が多い枠ほど濃く塗る（4段階）。
-   押すと、その時間に空いている人の名前が出る。
-   面談申請のような週の表にしないのは、誰も選んでいない枠まで並べると
-   ×ばかりの広い表になり、かぶっている所が埋もれてしまうため */
-function fsHeatHTML(tally){
+/* いちばん上。全員そろっていればそう言い、そうでなければ最多人数を出す。
+   ここだけ見れば「いつ声を掛ければよいか」が分かるようにしている */
+function fsBestHTML(ranges,people){
+  if(!people)return '<p class="fine">まだ誰も答えていません。</p>';
+  const best=fsBest(ranges);
+  if(!best.length)return '<p class="fine">まだ誰も答えていません。</p>';
+  /* 1人しか答えていないうちは、その人の空き時間が丸ごと並ぶだけで
+     下の「日ごと」と同じものになる。2人目が来てから出す */
+  if(people<2)return '';
+  const n=best[0].names.length;
+  const head=(n===people)?`全員そろう時間（${n}人）`
+    :`いちばん重なる時間（${n}人／${people}人中）`;
+  return `<h4 class="fs-h4">${head}</h4>
+    <div class="fs-best">${best.map(b=>`<div class="fs-bestrow">
+      <span class="fs-bestday">${esc(fsDayLabel(b.start.slice(0,10)))}</span>
+      <span class="fs-besttime">${fsHM(b.start)}〜${fsHM(b.end)}</span>
+    </div>`).join('')}</div>`;
+}
+/* 日ごとの帯。人数が多いほど左の棒を濃く塗る（4段階）。
+   名前は常に出す（押さないと誰か分からない、をやめた） */
+function fsBandsHTML(ranges){
   const days={};
-  Object.keys(tally).forEach(iso=>{
-    const k=iso.slice(0,10);
+  (ranges||[]).forEach(r=>{
+    const k=r.start.slice(0,10);
     if(!days[k])days[k]=[];
-    days[k].push(iso);
+    days[k].push(r);
   });
   const keys=Object.keys(days).sort();
-  if(!keys.length)return '<p class="fine">まだ誰も答えていません。</p>';
-  return keys.map(k=>{
-    const cells=days[k].sort().map(iso=>{
-      const names=tally[iso];
-      const lv=Math.min(names.length,4);
-      return `<button type="button" class="fs-cell fs-n${lv}"
-        onclick="toast('${esc(names.join('・'))}')">${fsHM(iso)}<span class="fs-cn">${names.length}</span></button>`;
+  if(!keys.length)return '';
+  return `<h4 class="fs-h4">日ごとの空き時間</h4>`+keys.map(k=>{
+    const bands=days[k].map(r=>{
+      const lv=Math.min(r.names.length,4);
+      return `<div class="fs-band"><span class="fs-bandbar fs-n${lv}"></span>
+        <span class="fs-bandtime">${fsHM(r.start)}〜${fsHM(r.end)}</span>
+        <span class="fs-bandn">${r.names.length}人</span>
+        <span class="fs-bandwho">${esc(r.names.join('・'))}</span></div>`;
     }).join('');
-    return `<div class="fs-day"><div class="fs-daylabel">${esc(fsDayLabel(k))}</div>
-      <div class="fs-cells">${cells}</div></div>`;
+    return `<div class="fs-day"><div class="fs-daylabel">${esc(fsDayLabel(k))}</div>${bands}</div>`;
+  }).join('');
+}
+/* 人ごと。「誰が空いているのか」を名前から引けるようにする */
+function fsPeopleHTML(responses){
+  const list=responses||[];
+  if(!list.length)return '';
+  return `<h4 class="fs-h4">人ごと</h4>`+list.map(r=>{
+    const days={};
+    fsOwnRanges(r.choices).forEach(x=>{
+      const k=x.start.slice(0,10);
+      if(!days[k])days[k]=[];
+      days[k].push(`${fsHM(x.start)}〜${fsHM(x.end)}`);
+    });
+    const keys=Object.keys(days).sort();
+    const rows=keys.length?keys.map(k=>`<div class="fs-pday">
+      <span class="fs-pdayname">${esc(fsDayLabel(k))}</span>
+      <span class="fs-pdaytime">${esc(days[k].join('＆'))}</span></div>`).join('')
+      :'<div class="fs-pday"><span class="fs-pdaytime">時間の指定なし</span></div>';
+    return `<div class="fs-person"><div class="fs-pname">${esc(r.name)}</div>${rows}</div>`;
   }).join('');
 }
 function fsHM(iso){
@@ -4695,16 +4768,9 @@ async function openFreeslotDetail(id){
   try{ d=await fsJSON('/api/freeslots/'+encodeURIComponent(id)); }
   catch(e){ toast(e.message); return; }
   FSDETAIL=d;
-  const tally=fsTally(d.responses);
-  const top=fsTop(tally,5);
+  const ranges=fsRanges(fsTally(d.responses));
   const people=(d.responses||[]).length;
   const url=(FSLIST.find(x=>x.id===id)||{}).url||'';
-
-  const topHTML=top.length?top.map(t=>`<div class="fs-toprow">
-      <span class="fs-topwhen">${esc(fsDayLabel(t.iso.slice(0,10)))} ${fsHM(t.iso)}</span>
-      <span class="fs-topn">${t.names.length}人</span>
-      <span class="fs-topwho">${esc(t.names.join('・'))}</span>
-    </div>`).join(''):'<p class="fine">まだ誰も答えていません。</p>';
 
   // その他（任意）に書かれたことは、書いた人が分かる形でまとめて出す
   const notes=(d.responses||[]).filter(r=>r.note);
@@ -4715,10 +4781,9 @@ async function openFreeslotDetail(id){
     <p class="fine">${people}人が回答</p>
     ${url?`<input class="fs-url" id="fsUrl" readonly value="${esc(url)}">
     <button class="btn block" style="margin-top:10px" onclick="copyFreeslotUrl()">URLをコピー</button>`:''}
-    <h4 class="fs-h4">最もかぶる時間</h4>
-    ${topHTML}
-    <h4 class="fs-h4">みんなの空いている時間</h4>
-    <div class="fs-heat">${fsHeatHTML(tally)}</div>
+    ${fsBestHTML(ranges,people)}
+    ${fsBandsHTML(ranges)}
+    ${fsPeopleHTML(d.responses)}
     ${notesHTML}`);
 }
 

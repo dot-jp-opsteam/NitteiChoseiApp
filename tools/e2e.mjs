@@ -2250,6 +2250,13 @@ async function run() {
       check('依頼画面に「空き時間を確認」のボタンがある', appHtml.includes('空き時間を確認'), true);
       check('依頼画面に「空き時間」のタブがある', appHtml.includes("setReqTab('free')"), true);
       check('発行のAPIを叩いている', appHtml.includes("'/api/freeslots'"), true);
+      /* 明細シートは30分の枡目をやめ、続いた時間を帯にまとめて出す。
+         枡目のままだと「終日OK」の日が1人の枠で埋まり、かぶりが読めなくなる */
+      check('明細に「全員そろう時間」を出す', appHtml.includes('全員そろう時間'), true);
+      check('全員そろわなければ最多人数を出す', appHtml.includes('いちばん重なる時間'), true);
+      check('日ごとの帯を出す', appHtml.includes('日ごとの空き時間'), true);
+      check('人ごとの一覧を出す', appHtml.includes('人ごと'), true);
+      check('30分の枡目は並べない', appHtml.includes('fs-cell'), false);
       /* クラス名には接頭辞を付ける。短い名前は既存と衝突し、
          テストが通ったまま画面だけ崩れる */
       check('CSSのクラスに fs- を付けている',

@@ -1884,20 +1884,31 @@
   .fs-url{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;
     background:var(--panel2);color:var(--ink);font-size:13px}
   .fs-h4{margin:18px 0 8px;font-size:14px;color:var(--ink)}
-  .fs-day{margin-bottom:12px}
+  .fs-day{margin-bottom:14px}
   .fs-daylabel{font-size:12px;color:var(--sub);margin-bottom:5px}
-  .fs-cells{display:flex;flex-wrap:wrap;gap:5px}
-  .fs-cell{appearance:none;padding:6px 9px;border-radius:8px;font-family:inherit;font-size:12px;
-    border:1px solid var(--line);background:var(--panel2);color:var(--ink);cursor:pointer}
-  .fs-cell:hover{border-color:var(--line-h)}
-  .fs-n1{background:color-mix(in srgb, var(--brand) 14%, var(--panel2))}
-  .fs-n2{background:color-mix(in srgb, var(--brand) 30%, var(--panel2))}
-  .fs-n3{background:color-mix(in srgb, var(--brand) 46%, var(--panel2))}
-  .fs-n4{background:color-mix(in srgb, var(--brand) 62%, var(--panel2))}
-  .fs-cn{margin-left:6px;font-weight:800;color:var(--brand-d)}
-  .fs-toprow{display:flex;align-items:baseline;gap:9px;padding:9px 0;
+  /* 濃さの4段階。棒の色に使う */
+  .fs-n1{background:color-mix(in srgb, var(--brand) 22%, var(--panel2))}
+  .fs-n2{background:color-mix(in srgb, var(--brand) 46%, var(--panel2))}
+  .fs-n3{background:color-mix(in srgb, var(--brand) 70%, var(--panel2))}
+  .fs-n4{background:var(--brand)}
+  /* いちばん上の「全員そろう時間」。ここだけ枠で囲って目立たせる */
+  .fs-best{border:1px solid var(--brand);border-radius:12px;padding:4px 12px;
+    background:color-mix(in srgb, var(--brand) 10%, var(--panel2))}
+  .fs-bestrow{display:flex;align-items:baseline;gap:10px;padding:8px 0}
+  .fs-bestrow+.fs-bestrow{border-top:1px solid var(--line2)}
+  .fs-bestday{font-size:12px;color:var(--sub);min-width:64px}
+  .fs-besttime{font-size:16px;font-weight:800;color:var(--ink)}
+  /* 日ごとの帯。1本＝続いていて顔ぶれの同じ時間 */
+  .fs-band{display:flex;align-items:baseline;gap:8px;padding:6px 0;
     border-bottom:1px solid var(--line2);font-size:13px;color:var(--ink)}
-  .fs-topwhen{font-weight:700}
-  .fs-topn{font-weight:800;color:var(--brand-d)}
-  .fs-topwho{color:var(--sub);font-size:12px}
+  .fs-bandbar{align-self:stretch;flex:0 0 4px;border-radius:2px}
+  .fs-bandtime{font-weight:700;min-width:104px}
+  .fs-bandn{font-weight:800;color:var(--brand-d);min-width:30px}
+  .fs-bandwho{color:var(--sub);font-size:12px;flex:1 1 auto;word-break:break-word}
+  /* 人ごと。誰が空いているかを名前から引く */
+  .fs-person{padding:9px 0;border-bottom:1px solid var(--line2)}
+  .fs-pname{font-weight:700;font-size:13px;color:var(--ink);margin-bottom:3px}
+  .fs-pday{display:flex;gap:9px;font-size:12px;line-height:1.7}
+  .fs-pdayname{color:var(--sub);min-width:64px;flex:0 0 auto}
+  .fs-pdaytime{color:var(--ink);word-break:break-word}
   .fs-note{margin:6px 0 0;font-size:13px;color:var(--ink);white-space:pre-wrap}

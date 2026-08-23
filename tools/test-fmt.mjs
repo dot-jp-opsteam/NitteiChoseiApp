@@ -316,7 +316,7 @@ console.log('\n[ 日程調整画面 free.html の fmtRanges ]');
 /* 空き時間のかぶり。複数の学生が同じ枠を選ぶほど人数が積み上がる */
 console.log('\n[ 空き時間のかぶり集計 index.html ]');
 {
-  const T = load('index.html', ['fsTally', 'fsTop']);
+  const T = load('index.html', ['fsTally']);
   const a = '2026-08-25T05:00:00.000Z';
   const b = '2026-08-25T05:30:00.000Z';
   const c = '2026-08-26T05:00:00.000Z';
@@ -330,13 +330,49 @@ console.log('\n[ 空き時間のかぶり集計 index.html ]');
   check('1人だけの枠も数える', tally[b], ['山田']);
   check('誰も選んでいない枠は持たない', 'x' in tally, false);
 
-  const top = T.fsTop(tally, 2);
-  check('人数の多い順に並ぶ', top.map((x) => x.names.length), [3, 1]);
-  check('先頭は最も集まった枠', top[0].iso, a);
-  check('同数なら早いほうが先',
-    T.fsTop({ [c]: ['佐藤'], [b]: ['山田'] }, 2).map((x) => x.iso), [b, c]);
-  check('件数を絞れる', T.fsTop(tally, 1).length, 1);
-  check('誰も答えていなければ空', T.fsTop({}, 5), []);
+}
+
+/* 30分の枡目のままだと「終日OK」の日が1人の枠で埋まって読めないので、
+   続いた枠を1本の帯にまとめて見せる。顔ぶれが変わる所で切る */
+console.log('\n[ 空き時間の帯まとめ index.html ]');
+{
+  const T = load('index.html',
+    ['fsTally', 'fsRanges', 'fsBest', 'fsOwnRanges'], 'var FS_SLOT_MS=30*60*1000;');
+  const at = (h, m, day = 7) => iso(h, m, day);
+
+  // 山田は 9:00〜11:00 通し、佐藤は 10:00〜11:00 だけ
+  const tally = T.fsTally([
+    { name: '山田', choices: [at(9, 0), at(9, 30), at(10, 0), at(10, 30)] },
+    { name: '佐藤', choices: [at(10, 0), at(10, 30)] },
+  ]);
+  const r = T.fsRanges(tally);
+  check('顔ぶれが変わる所で割れる', r.length, 2);
+  check('前半は山田だけ', [r[0].start, r[0].end, r[0].names], [at(9, 0), at(10, 0), ['山田']]);
+  check('後半は2人', [r[1].start, r[1].end, r[1].names], [at(10, 0), at(11, 0), ['佐藤', '山田']]);
+
+  // 途中で人が増えて、また減る → 3本
+  const r3 = T.fsRanges(T.fsTally([
+    { name: '山田', choices: [at(9, 0), at(9, 30), at(10, 0)] },
+    { name: '佐藤', choices: [at(9, 30)] },
+  ]));
+  check('増えて減ると3本になる', r3.map((x) => x.names.length), [1, 2, 1]);
+
+  // 離れた枠・日をまたぐ枠はつながらない
+  check('離れた枠はつながらない',
+    T.fsRanges(T.fsTally([{ name: '山田', choices: [at(9, 0), at(12, 0)] }])).length, 2);
+  check('日をまたぐとつながらない',
+    T.fsRanges(T.fsTally([{ name: '山田', choices: [at(9, 0, 7), at(9, 0, 8)] }])).length, 2);
+
+  check('いちばん多い帯だけを返す', T.fsBest(r).map((x) => x.names.length), [2]);
+  check('同数なら早い順', T.fsBest(r3.filter((x) => x.names.length === 1))
+    .map((x) => x.start), [at(9, 0), at(10, 0)]);
+  check('誰も答えていなければ空', T.fsBest([]), []);
+
+  // 1人分。「終日OK」の日も、ほかと同じく時間の帯で出す
+  check('1人分もまとめる',
+    T.fsOwnRanges([at(10, 30), at(9, 0), at(9, 30)]),
+    [{ start: at(9, 0), end: at(10, 0) }, { start: at(10, 30), end: at(11, 0) }]);
+  check('選んでいなければ空', T.fsOwnRanges([]), []);
 }
 
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
