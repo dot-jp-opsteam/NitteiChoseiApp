@@ -2112,6 +2112,34 @@ async function run() {
     check('store から面談が取り除かれている', 'interviews' in raw, false);
   }
 
+  /* ---------- 空き時間を確認（日程調整URL） ----------
+     面談申請と違い、URLは押すたびに1本できて、担当は押した本人に固定される。
+     学生は担当を選べず、希望順も付けない。空いている時間を知るためだけの口 */
+  console.log('\n─────── 空き時間を確認（日程調整URL） ───────');
+  {
+    const made = await api(TOKENS.staff, 'POST', '/api/freeslots', { title: '山田さんとの日程調整' });
+    check('スタッフが日程調整URLを発行できる', made.status, 200);
+    check('URLに /f/ が入っている', /\/f\/[0-9a-f]{32,}$/.test(String(made.json.url || '')), true);
+    check('件名が返る', made.json.title, '山田さんとの日程調整');
+
+    const noTitle = await api(TOKENS.staff, 'POST', '/api/freeslots', { title: '  ' });
+    check('件名が空なら断る', noTitle.status, 400);
+
+    const again = await api(TOKENS.staff, 'POST', '/api/freeslots', { title: '2本目' });
+    check('押すたびに別のURLになる', again.json.token !== made.json.token, true);
+
+    const mine = await api(TOKENS.staff, 'GET', '/api/freeslots');
+    check('自分が発行した分が一覧に出る', (mine.json.list || []).length, 2);
+    check('新しいものが先頭', (mine.json.list || [])[0]?.title, '2本目');
+    check('まだ誰も答えていない', (mine.json.list || [])[0]?.count, 0);
+
+    const others = await api(TOKENS.staff3, 'GET', '/api/freeslots');
+    check('他人が発行したものは見えない', (others.json.list || []).length, 0);
+
+    const noAuth = await api(null, 'POST', '/api/freeslots', { title: 'ログイン無し' });
+    check('ログインしないと発行できない', noAuth.status, 401);
+  }
+
   /* ---------- リアルタイム通知（SSE） ----------
      面談申請が、再読み込みなしでスタッフの画面へ届くこと。
      配信の宛先は listNotificationsFor と同じ規則（admin は全部／他は自分の支部）*/

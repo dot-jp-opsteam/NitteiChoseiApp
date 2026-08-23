@@ -293,6 +293,33 @@ async function initDB() {
       created_by TEXT
     )
   `);
+  /* 日程調整URL（空き時間を確認）。発行するたびに1行できる。
+     token は URL に載る合言葉。支部の合言葉と違い作り直しはしない
+     （不要になったら配るのをやめるだけ。締め切り・削除の機能は持たない） */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS freeslot_requests (
+      id TEXT PRIMARY KEY,
+      token TEXT NOT NULL UNIQUE,
+      staff_id TEXT NOT NULL,
+      branch_id TEXT,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  /* 学生の回答。アカウントが無いので本名で見分ける。
+     同じURLに同じ名前で送り直したら上書きする（書き直しができる） */
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS freeslot_responses (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      choices TEXT NOT NULL,
+      all_day TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(request_id, name)
+    )
+  `);
   /* iPhone / Googleカレンダーから読む個人用の購読キー。
      URLを設定画面で繰り返し表示する必要があるため、セッションとは分けて保持する。 */
   await client.execute(`
@@ -2025,6 +2052,99 @@ app.post('/api/staff/intern-invite-url/regenerate', requireAuth, requireBranchAd
   } catch (e) {
     console.error('支部の申請URLの作り直しに失敗しました', e);
     res.status(500).json({ error: '作り直しに失敗しました' });
+  }
+});
+
+/* ---------- 空き時間を確認（日程調整URL） ----------
+   面談申請と違い、URLは押すたびに1本できて、担当は押した本人に固定される。
+   学生は担当を選べず、希望順も付けない。空いている時間を知るためだけの口 */
+app.post('/api/freeslots', requireAuth, async (req, res) => {
+  const me = req.authUser;
+  if (!['staff', 'branch_admin', 'admin'].includes(me.role)) {
+    return res.status(403).json({ error: '日程調整URLを作れるのはスタッフだけです' });
+  }
+  const title = String(req.body?.title || '').trim();
+  if (!title) return res.status(400).json({ error: '件名を入力してください' });
+  if (title.length > 100) return res.status(400).json({ error: '件名が長すぎます' });
+  try {
+    const row = {
+      id: 'fs_' + crypto.randomBytes(6).toString('hex'),
+      token: crypto.randomBytes(24).toString('hex'),
+      staff_id: me.id,
+      branch_id: me.branch_id || null,
+      title,
+      created_at: new Date().toISOString(),
+    };
+    await client.execute({
+      sql: `INSERT INTO freeslot_requests (id, token, staff_id, branch_id, title, created_at)
+            VALUES (?,?,?,?,?,?)`,
+      args: [row.id, row.token, row.staff_id, row.branch_id, row.title, row.created_at],
+    });
+    const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    res.json({
+      id: row.id, token: row.token, title: row.title,
+      created_at: row.created_at, url: `${base}/f/${row.token}`,
+    });
+  } catch (e) {
+    console.error('日程調整URLの発行に失敗しました', e);
+    res.status(500).json({ error: '発行できませんでした' });
+  }
+});
+
+/* 自分が発行したものだけを、新しい順に返す。件名と回答人数だけの軽い一覧 */
+app.get('/api/freeslots', requireAuth, async (req, res) => {
+  const me = req.authUser;
+  try {
+    const rs = await client.execute({
+      sql: `SELECT r.id, r.token, r.title, r.created_at,
+                   (SELECT COUNT(*) FROM freeslot_responses p WHERE p.request_id = r.id) AS count
+            FROM freeslot_requests r
+            WHERE r.staff_id = ?
+            ORDER BY r.created_at DESC`,
+      args: [me.id],
+    });
+    const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    res.json({
+      list: rs.rows.map((r) => ({
+        id: r.id, title: r.title, created_at: r.created_at,
+        count: Number(r.count) || 0, url: `${base}/f/${r.token}`,
+      })),
+    });
+  } catch (e) {
+    console.error('日程調整URLの一覧に失敗しました', e);
+    res.status(500).json({ error: '読み込めませんでした' });
+  }
+});
+
+/* 1件ぶんの回答をすべて返す。見られるのは発行した本人だけ。
+   他人には「無い」と答える（他人のURLの存在そのものを教えない） */
+app.get('/api/freeslots/:id', requireAuth, async (req, res) => {
+  const me = req.authUser;
+  try {
+    const rs = await client.execute({
+      sql: 'SELECT * FROM freeslot_requests WHERE id = ? AND staff_id = ?',
+      args: [String(req.params.id || ''), me.id],
+    });
+    const row = rs.rows[0];
+    if (!row) return res.status(404).json({ error: '見つかりませんでした' });
+    const ps = await client.execute({
+      sql: `SELECT name, choices, all_day, note, created_at FROM freeslot_responses
+            WHERE request_id = ? ORDER BY created_at`,
+      args: [row.id],
+    });
+    const parse = (s) => {
+      try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+    };
+    res.json({
+      id: row.id, title: row.title, created_at: row.created_at,
+      responses: ps.rows.map((r) => ({
+        name: r.name, choices: parse(r.choices), all_day: parse(r.all_day),
+        note: r.note || '', created_at: r.created_at,
+      })),
+    });
+  } catch (e) {
+    console.error('空き時間の読み込みに失敗しました', e);
+    res.status(500).json({ error: '読み込めませんでした' });
   }
 });
 
