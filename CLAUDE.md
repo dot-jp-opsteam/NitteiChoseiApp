@@ -17,6 +17,7 @@
 | `index.html` | フロント全部（画面・ロジック・テンプレート）。5,200行 |
 | `style.css` | 全画面のCSS。`apply.html` と `attendance.html` も読む |
 | `apply.html` | インターン生の面談申請（**ログイン不要**・別実装・ES5風） |
+| `free.html` | 日程調整（**ログイン不要**・空き時間だけを集める。`apply.html` から派生） |
 | `attendance.html` | 公開の出欠回答ページ（**ログイン不要**・`/style.css` を読む） |
 | `server/server.js` | Express API 本体。3,400行 |
 | `server/` の他 | `slots.js` 空き枠 / `google.js` カレンダー / `stream.js` SSE / `mail.js` / `ical.js` / `auth.js` / `dblock.js` |
