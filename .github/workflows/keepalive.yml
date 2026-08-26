@@ -1,0 +1,38 @@
+# Render の無料プランは 15分アクセスが無いとサーバーを寝かせる。
+# 起こし直すのに 20〜60秒かかり、朝いちばんのログインがそのぶん待たされる。
+# ここで 5分おきに /api/health を叩いて、寝かせないようにしている。
+#
+# /api/health は DB を触らない軽い口（server/server.js:1669）なので、
+# Turso の無料枠の読み書き回数には響かない。
+# Render 無料枠は月750時間。24時間動かしても約730時間で収まる。
+#
+# ※ GitHub の定期実行は、リポジトリに60日間なにも動きが無いと止められる。
+#   止まっていたら Actions タブから手で動かし直すこと（下の workflow_dispatch）。
+# ※ GitHub 側が混んでいると数分ずれる。15分の締切に対して余裕をみて5分おきにしてある。
+name: keepalive
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+# 同時に走らせない（ずれて溜まったぶんは捨てる）
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 本番を起こしておく
+        run: |
+          # 寝ているときは起きるまで最大90秒かかるので、そのぶん待つ。
+          # 落ちていても Actions を赤くしない（メールが鳴り続けるのを避ける）。
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 \
+            https://ops-nittyou-app.onrender.com/api/health || echo "000")
+          echo "status=$code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::起こせなかった（HTTP $code）。続くようなら Render 側を見ること"
+          fi
