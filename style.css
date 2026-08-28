@@ -856,7 +856,10 @@
      形に沿って光らせるため drop-shadow を使う */
   .login-hero .mark{width:70px;font-size:21px;letter-spacing:.03em;
     margin:0 auto 20px;filter:drop-shadow(0 0 26px rgba(67,231,223,.42))}
-  .hero-title{margin:0;font-size:clamp(44px,11vw,76px);font-weight:900;line-height:1.02;
+  /* 見出しは「OPS日調アプリ」の8文字。Googleの審査が
+     「同意画面のアプリ名とホームページの表記が一致すること」を求めるため、
+     短くせずこの表記のまま出す。そのぶん狭い画面で溢れないよう字を小さめにしてある */
+  .hero-title{margin:0;font-size:clamp(34px,8.8vw,64px);font-weight:900;line-height:1.02;
     letter-spacing:-.045em;color:var(--ink)}
   .hero-sub{margin:14px 0 0;color:var(--sub);font-size:15px}
   /* 半透明パネル＋ぼかし。黒地に浮くガラス板の見え方にする */
