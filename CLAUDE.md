@@ -93,6 +93,12 @@ node tools/record-demos.mjs    # demo/ の動画を撮り直す（要 Playwright
 
 ## 落とし穴（何度も踏んでいるもの）
 
+- **リポジトリ直下のファイルだけを変えた push は、Render がビルドしない**（`rootDir: server`）。
+  `index.html` `style.css` `demo/` などだけの変更は、main に入っても本番に出ない
+  （2026-10-05 に動画だけ差し替えた push が出なかった）。出したいときは
+  `server/package.json` の `version` を上げるなど、`server/` の中も一緒に変えること。
+  Renderダッシュボードの Included Paths に `demo/**` が入っていなければ足す（ユーザー作業）
+
 - **`apply.html` / `free.html` / `attendance.html` の見た目や流れを変えたら、
   `node tools/record-demos.mjs` で `demo/` の動画も撮り直す。** 動画が古いと、
   ホバーで見せる「相手の画面」が実物と食い違う（ホバー表示は `index.html` の `DEMOS`）

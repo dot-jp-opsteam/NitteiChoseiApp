@@ -29,6 +29,8 @@ services:
         - server/**
         - index.html
         - style.css
+        # ホバーで流す回答画面のデモ動画
+        - demo/**
         - privacy.html
         - terms.html
         # アカウント無しの面談申請ページ
