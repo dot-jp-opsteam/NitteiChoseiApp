@@ -114,7 +114,8 @@ async function makeUrls() {
 }
 
 /* ---------- 録画の道具 ---------- */
-// 録画にはマウスの矢印が写らないので、赤い丸でカーソルを描く
+// 録画にはマウスの矢印が写らないので、ふつうのカーソルと同じ白い矢印（黒ふち）を描く。
+// 先端がマウスの位置。小さく縮めて見るので、実物より少し大きめにしてある
 const CURSOR_JS = () => {
   // 出欠画面の共有URLは画面側で location から作るので、localhost が写らないよう本番の名前に見せ替える
   setInterval(() => {
@@ -123,21 +124,22 @@ const CURSOR_JS = () => {
       e.value = e.value.replace(location.origin, 'https://ops-nittyou-app.onrender.com');
     }
   }, 50);
+  const ARROW = '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="34" viewBox="0 0 12 19">'
+    + '<path d="M1 1V15.2L4.5 12.1L7 17.8L9.2 16.8L6.8 11.2H11.2Z" fill="#fff" stroke="#000" stroke-width="1" stroke-linejoin="round"/></svg>';
   const mk = () => {
     const d = document.createElement('div');
-    d.style.cssText = 'position:fixed;z-index:2147483647;width:24px;height:24px;border-radius:50%;'
-      + 'background:rgba(255,70,50,.55);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.4);'
-      + 'pointer-events:none;left:-60px;top:-60px;transform:translate(-50%,-50%);transition:transform .12s';
+    d.style.cssText = 'position:fixed;z-index:2147483647;width:22px;height:34px;pointer-events:none;'
+      + 'left:-60px;top:-60px;background:url("data:image/svg+xml,' + encodeURIComponent(ARROW) + '") no-repeat;'
+      + 'filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))';
     document.documentElement.appendChild(d);
     document.addEventListener('mousemove', (e) => { d.style.left = e.clientX + 'px'; d.style.top = e.clientY + 'px'; }, true);
-    document.addEventListener('mousedown', () => { d.style.transform = 'translate(-50%,-50%) scale(.6)'; }, true);
-    document.addEventListener('mouseup', () => { d.style.transform = 'translate(-50%,-50%) scale(1)'; }, true);
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mk); else mk();
 };
 // 見せ場が間延びしないよう、待ち時間は少し詰める
 const PACE = 0.7;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms * PACE));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms)); // 詰めない待ち時間
 
 async function scrollTo(page, locator) {
   await locator.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'smooth' }));
@@ -154,14 +156,21 @@ async function click(page, locator) {
   await page.mouse.down(); await sleep(80); await page.mouse.up();
   await sleep(500);
 }
-async function type(page, locator, text) {
-  await click(page, locator);
-  await page.keyboard.type(text, { delay: 100 });
-  await sleep(500);
+/* 空いている枠（○）を選ぶ。まず縦になぞって、続いた時間をまとめて選ぶところを
+   ゆっくり見せる。そのあと別の日をひとつ押す。
+   マウスを動かすたびに少し待つのは、録画のコマ（1秒20枚）に、なぞった軌跡と
+   色が付いていく様子が写るようにするため */
+async function dragSlots(page, from, to) {
+  await glide(page, from);
+  await page.mouse.down(); await wait(500);          // 押したまま、少し間を置く
+  const N = 36;
+  for (let i = 1; i <= N; i++) {
+    await page.mouse.move(from.x + (to.x - from.x) * i / N, from.y + (to.y - from.y) * i / N);
+    await wait(45);
+  }
+  await wait(600);                                    // 離す前に、選ばれた範囲を見せる
+  await page.mouse.up(); await wait(1400);            // 離したあとも、結果を見せる
 }
-
-/* 空いている枠（○）を、同じ日の縦に3つ以上並んだ列から探す。
-   なぞって選ぶ操作と、別の日を1つ押す操作を見せるため */
 async function pickSlots(page) {
   const cells = page.locator('td.bt-c.ok');
   await cells.first().waitFor({ timeout: 10000 });
@@ -174,19 +183,26 @@ async function pickSlots(page) {
   const cols = {};
   boxes.forEach((b) => { (cols[b.x] = cols[b.x] || []).push(b); });
   const xs = Object.keys(cols).map(Number).sort((a, b) => a - b);
-  const colA = xs.find((x) => cols[x].length >= 3);
+  const colA = xs.find((x) => cols[x].length >= 4) ?? xs.find((x) => cols[x].length >= 3);
   const colB = xs.find((x) => x !== colA && cols[x].length >= 1);
-  await scrollTo(page, cells.nth(cols[colA][0].i));
-  // 縦になぞって、続いた時間をまとめて選ぶ
-  const a = await centerOf(cells.nth(cols[colA][0].i));
-  const z = await centerOf(cells.nth(cols[colA][2].i));
-  await glide(page, a);
-  await page.mouse.down(); await sleep(150);
-  await page.mouse.move(z.x, z.y, { steps: 18 }); await sleep(200);
-  await page.mouse.up(); await sleep(900);
+  const cellsA = cols[colA];
+  const last = Math.min(cellsA.length - 1, 5);          // 最大6マス（3時間ぶん）なぞる
+  await scrollTo(page, cells.nth(cellsA[0].i));
+  const from = await centerOf(cells.nth(cellsA[0].i));
+  const to = await centerOf(cells.nth(cellsA[last].i));
+  await dragSlots(page, from, to);
   // ほかの日をひとつ押す
   if (colB !== undefined) await click(page, cells.nth(cols[colB][0].i));
   await sleep(500);
+}
+
+/* 動画の頭出し。ページを開いて名前を入れ終えるまでは動画に入れない。
+   録画はページを作った瞬間から始まっているので、そこからの経過時間で切る */
+const T0 = new WeakMap();
+async function start(page) {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await sleep(600);
+  T0.set(page, (Date.now() - T0.get(page.context())) / 1000);
 }
 
 /* ---------- 3つの場面 ---------- */
@@ -194,7 +210,8 @@ const SCENES = {
   // 面談申請リンク：学生が名前・担当・希望日時を送る
   async apply(page, url) {
     await page.goto(url); await sleep(1500);
-    await type(page, page.locator('#applyname'), '山田 太郎');
+    await page.locator('#applyname').fill('山田 太郎'); // 入力の様子は見せない
+    await start(page);
     const staffSelect = page.locator('select').first();
     await scrollTo(page, staffSelect);
     await glide(page, await centerOf(staffSelect));
@@ -208,7 +225,8 @@ const SCENES = {
   // 空き時間を聞く：相手が空いている時間をカレンダーで選ぶ
   async free(page, url) {
     await page.goto(url); await sleep(1500);
-    await type(page, page.locator('#applyname'), '鈴木 花子');
+    await page.locator('#applyname').fill('鈴木 花子'); // 入力の様子は見せない
+    await start(page);
     await pickSlots(page);
     await click(page, page.locator('#applybtn'));
     await sleep(1500);
@@ -218,7 +236,8 @@ const SCENES = {
   // 候補日を送る：候補ごとに ○ △ × で答える
   async attend(page, url) {
     await page.goto(url); await sleep(1500);
-    await type(page, page.locator('#respondentName'), '佐藤 次郎');
+    await page.locator('#respondentName').fill('佐藤 次郎'); // 入力の様子は見せない
+    await start(page);
     for (const [i, v] of [['0', 'ok'], ['1', 'may'], ['2', 'no']]) {
       await click(page, page.locator(`#attans .attb[data-v="${v}"]`).nth(Number(i)));
     }
@@ -228,9 +247,9 @@ const SCENES = {
   },
 };
 
-function encode(src, destBase) {
-  // 最初の0.6秒は読み込み中の白い画面なので切る。音は無い
-  const head = ['-y', '-loglevel', 'error', '-ss', '0.6', '-i', src, '-an', '-vf', `fps=20,scale=${W}:-2`];
+function encode(src, destBase, from) {
+  // 頭出し（start）より前は、読み込み中や名前の入力なので切る。音は無い
+  const head = ['-y', '-loglevel', 'error', '-ss', String(Math.max(0, from)), '-i', src, '-an', '-vf', `fps=20,scale=${W}:-2`];
   execFileSync('ffmpeg', [...head, '-c:v', 'libx264', '-preset', 'slow', '-crf', '30',
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart', destBase + '.mp4']);
   execFileSync('ffmpeg', [...head, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '38',
@@ -260,13 +279,14 @@ try {
       recordVideo: { dir: tmpVideos, size: { width: W, height: H } },
     });
     await ctx.addInitScript(CURSOR_JS);
+    T0.set(ctx, Date.now());
     const page = await ctx.newPage();
     page.on('pageerror', (e) => console.warn(`  ${name}: ページのエラー ${e.message}`));
     await scene(page, urls[name]);
     const video = page.video();
     await ctx.close();
     const base = path.join(OUT_DIR, name);
-    encode(await video.path(), base);
+    encode(await video.path(), base, T0.get(page) ?? 0.6);
     const kb = (ext) => (fs.statSync(`${base}.${ext}`).size / 1024).toFixed(0);
     console.log(`作成しました: demo/${name}.mp4（${kb('mp4')}KB）・demo/${name}.webm（${kb('webm')}KB）`);
   }
