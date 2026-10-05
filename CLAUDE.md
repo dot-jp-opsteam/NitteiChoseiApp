@@ -3,6 +3,9 @@
 ドットジェイピー OPS業務用（面談の日程調整・イベント出欠・スタッフ間の日程調整）。
 タスク（ふつうの依頼）を出す機能は別のアプリへ移したので、2026-10-05 に撤去した。**戻さないこと。**
 
+**このアプリはスタッフ専用。** インターン生用のページ・画面は今後作らない（2026-10-05 の方針）。
+インターン生向けの機能を足したり広げたりしないこと。
+
 **絶対制約：料金が発生する方法は禁止。** 無料枠で完結する構成のみ。
 
 ## この地図の使い方
@@ -76,7 +79,7 @@ node tools/e2e.mjs --quiet     # 失敗したものだけ出す（ふだんは�
 node tools/e2e.mjs --only 出欠  # 見出しに その語 を含む区画だけ出す
 node tools/test-stream.mjs     # SSE（27件）
 node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
-node tools/make-test-page.mjs  # test/デザイン確認用.html を作り直す（ログイン不要の見た目確認）
+# 確認用ページ（tools/make-test-page.mjs）は今後作らない・走らせない（2026-10-05 の指示）
 ```
 
 **e2eでは公開ページの回数制限を切ってある**（`PUBLIC_WRITE_PER_MIN=0`）。
@@ -111,7 +114,8 @@ node tools/make-test-page.mjs  # test/デザイン確認用.html を作り直す
 `origin`（`dot-jp-opsteam/NitteiChoseiApp`）の main に push → Render が自動デプロイ →
 https://ops-nittyou-app.onrender.com （入口は https://dot-jp-opsteam.github.io/NitteiChoseiApp/ ）
 
-main への push は本番公開になるので、push の前に必ずユーザーの確認を取る。
+main への push は本番公開になるが、**ユーザーの許可なしで本番反映までしてよい**
+（2026-10-05 に常時許可を受けた）。ただし push の前に、上のテストを全部通すこと。
 
 無料プランは15分で寝るので、最初のアクセスに20〜60秒かかる。
 
