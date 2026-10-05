@@ -35,6 +35,7 @@ const OUT_DIR = path.join(ROOT, 'demo');
 const { createClient } = createRequire(path.join(ROOT, 'server', 'package.json'))('@libsql/client');
 const PORT = 8124;
 const BASE = `http://localhost:${PORT}`;
+const S = 2; // 画質：画面の点を縦横 S 倍に細かくして撮る（見た目の大きさは変わらない）
 const W = 640, H = 400; // 録画の大きさ。横長（16:10）。表示側（style.css の .demotip video）の比と合わせる
 
 function loadPlaywright() {
@@ -228,7 +229,7 @@ async function start(page) {
     frames.push({ t: ev.metadata.timestamp * 1000, buf: Buffer.from(ev.data, 'base64') });
     cdp.send('Page.screencastFrameAck', { sessionId: ev.sessionId }).catch(() => {});
   });
-  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 85, maxWidth: W, maxHeight: H, everyNthFrame: 1 });
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 95, maxWidth: W * S, maxHeight: H * S, everyNthFrame: 1 });
   CAPTURE.set(page, {
     frames,
     async stop() {
@@ -292,10 +293,10 @@ function encode(frames, endT, destBase) {
   list.push(`file '${String(frames.length - 1).padStart(5, '0')}.jpg'`); // concat の決まり：最後は重ねて書く
   fs.writeFileSync(path.join(dir, 'list.txt'), list.join('\n') + '\n');
   const head = ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'list.txt'),
-    '-an', '-vf', `fps=20,scale=${W}:-2`];
-  execFileSync('ffmpeg', [...head, '-c:v', 'libx264', '-preset', 'slow', '-crf', '28',
+    '-an', '-vf', `fps=20,scale=${W * S}:-2`];
+  execFileSync('ffmpeg', [...head, '-c:v', 'libx264', '-preset', 'slow', '-crf', '21',
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart', destBase + '.mp4']);
-  execFileSync('ffmpeg', [...head, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '36',
+  execFileSync('ffmpeg', [...head, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '30',
     '-row-mt', '1', destBase + '.webm']);
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -318,7 +319,7 @@ try {
   catch { browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' }); }
   for (const [name, scene] of Object.entries(SCENES)) {
     const ctx = await browser.newContext({
-      viewport: { width: W, height: H }, locale: 'ja-JP', timezoneId: 'Asia/Tokyo',
+      viewport: { width: W, height: H }, deviceScaleFactor: S, locale: 'ja-JP', timezoneId: 'Asia/Tokyo',
     });
     await ctx.addInitScript(CURSOR_JS);
     const page = await ctx.newPage();
