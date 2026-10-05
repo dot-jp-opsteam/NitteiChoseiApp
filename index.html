@@ -1591,13 +1591,15 @@ const NAV={
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'requests',label:'日程調整',ic:'calendar-check'},
+    {id:'requests',label:'日程を決める',ic:'calendar-check'},
+    {id:'freeslots',label:'空き時間を確認',ic:'clock'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'requests',label:'日程調整',ic:'calendar-check'},
+    {id:'requests',label:'日程を決める',ic:'calendar-check'},
+    {id:'freeslots',label:'空き時間を確認',ic:'clock'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
@@ -1650,8 +1652,8 @@ function buildNav(){
      テーマだけはここにも出す。プロフィール →「ほかの設定」の中は深すぎて、
      「見づらい」と思った人がたどり着けなかったため */
   document.getElementById('sbAct').innerHTML=`
-    ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す申請リンクを作る">
-      <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
+    ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す、面談の申請リンク">
+      <span class="si">${ic('link')}</span><span class="sl">面談申請リンク</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
     <button class="sb-item" onclick="openTrashList()" title="削除した日程調整を見る">
@@ -1692,7 +1694,7 @@ function openMyStaffForm(){
    支部ごとに1本の共通URLで、何人にでも、何度でも使える。
    「登録」リンクではない（会員登録は廃止した）ので、担当が決まることもない */
 async function openInternInviteLink(){
-  openSheet(`<h3>インターン生に渡すリンク</h3>
+  openSheet(`<h3>面談申請リンク</h3>
     <p class="page-sub" style="margin-top:0">読み込んでいます…</p>`);
   let url='';
   try{
@@ -1701,11 +1703,11 @@ async function openInternInviteLink(){
     if(!res.ok)throw new Error(data.error||'取得に失敗しました');
     url=data.url;
   }catch(e){
-    openSheet(`<h3>インターン生に渡すリンク</h3>
+    openSheet(`<h3>面談申請リンク</h3>
       <div class="hint mock">${ic('alert')}<span>リンクを取り出せませんでした。時間をおいてもう一度お試しください。</span></div>`);
     return;
   }
-  openSheet(`<h3>インターン生に渡すリンク</h3>
+  openSheet(`<h3>面談申請リンク</h3>
     <p class="page-sub" style="margin-top:0"><b>${esc(branchName(ME.branch_id))}</b>の共通リンクです。
       同じ支部のスタッフは全員このリンクを配ります。</p>
     <div class="invite-url" id="inviteUrl">${esc(url)}</div>
@@ -1750,6 +1752,7 @@ function go(tab,saveHistory=true){
   // ほかの画面へ移るときは全画面を解除する。解除し忘れるとサイドバーが隠れたままになる
   if(tab!=='home'&&calFull){calFull=false;document.documentElement.setAttribute('data-calfull','0');}
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
+  if(tab==='freeslots')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く
   document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   if(saveHistory)history.pushState({tab},'',location.href);
   window.scrollTo(0,0);
@@ -1762,7 +1765,7 @@ window.addEventListener('popstate',e=>{
 });
 /* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
    そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
-const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',
+const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',freeslots:'a4',
   avset:'a2',branches:'a4',users:'a3'};
 /* ホーム以外の画面の右上に置く「ホームへ戻る」。
    スマホでは左メニューが隠れていて、行った先から戻れなくなるため */
@@ -1778,6 +1781,7 @@ function viewFor(t){
   if(t==='my')return viewMyInterviews();
   if(t==='interviews')return viewStaffInterviews();
   if(t==='requests')return viewRequests();
+  if(t==='freeslots')return viewFreeslots();
   if(t==='avset')return viewAvailSet();
   if(t==='branches')return viewBranches();
   if(t==='users')return viewUsers();
@@ -1903,21 +1907,19 @@ function viewHome(){
     /* 所属部署はプロフィールの「ほかの設定」へ移した。
        「受けられる時間」の入口は「この日は受けられない時間」を初期表示にしている。
        曜日ごとの受付時間（面談を受けられる時間）は、その画面の中から開く。
-       カレンダー連携はホームへ戻した。連携しないと自分の予定が「面談不可」に
-       反映されず、空いていない時間に面談を入れられてしまうので、
-       左メニューの奥ではなく気づける場所に置く */
-    /* 2列で並ぶので、いちばん使う「日程調整」を左上、「面談一覧・確定」を右上に置く */
+       カレンダー連携は左メニューだけに置く（ホームにもプロフィールにも出さない） */
+    /* 2列で並ぶので、日程を決める・空き時間を確認を上の段にまとめる */
     items.push(
-      hex("go('requests')",'calendar-check','日程調整','支部内の日程調整',unread,sentUnconfirmed>0),
+      hex("go('requests')",'calendar-check','日程を決める','候補を送って都合を聞く',unread,sentUnconfirmed>0),
+      hex("go('freeslots')",'clock','空き時間を確認','URLで学生の空きを集める'),
       hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
       hex("go('avset')",'alarm','受けられる時間','曜日ごとの受付時間'),
-      hex('openGoogleCalendarSettings()','calendar','カレンダー連携','Googleカレンダーとつなぐ'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
        毎日使うものではないので、六角形の上に控えめな帯として置く */
     const linkBtn=`<button class="flatbtn" onclick="openInternInviteLink()">
       <span class="fb-ic">${ic('link')}</span>
-      <span class="fb-tx"><b>インターン生に渡すリンクを作る</b><small>支部で共通のリンクです。開くと面談を申請できます</small></span>
+      <span class="fb-tx"><b>面談申請リンク</b><small>インターン生に渡すと面談を申請できます（支部で共通）</small></span>
       <span class="fb-go">${ic('chevron')}</span></button>`;
     /* 「明日の面談」がいちばん時間に追われる知らせなので、締切より上に置く */
     return hi+interviewHomeReminder()+dueNotice+
@@ -1935,7 +1937,7 @@ function viewHome(){
 function openSystemSettings(){
   openSheet(`<h3>システム設定</h3>
     <dl class="kv" style="margin-top:14px">
-      <dt>Googleカレンダー</dt><dd>スタッフごとに個別設定（スタッフのホーム画面から連携）</dd>
+      <dt>Googleカレンダー</dt><dd>スタッフごとに個別設定（左メニューの「カレンダー連携」から連携）</dd>
       <dt>全体予定表</dt><dd>${SHARED_CAL.configured?esc(SHARED_CAL.name||'設定済み')+'（スタッフ全員に表示）':'未設定（ホームの「全体予定表」から設定）'}</dd>
       <dt>メール送信</dt><dd>${MAIL_SEND_AVAILABLE
         ?'面談の確定・不成立は実際に送信されます（その他は履歴のみ）'
@@ -2211,7 +2213,7 @@ function viewMyInterviews(){
       <div class="meta"><span>担当：<b>${staff?esc(staff.nickname):'未定'}</b></span></div>
       ${iv.status==='fixed'
         ? `<div class="hint" style="margin-top:8px">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b><br>面談のリンクはメールで届きます。</span></div>
-           <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（ホーム画面から連携できます）'}</span></div>`
+           <div class="hint${iv.googleEventIdIntern?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventIdIntern?'あなたのGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（左メニューの「カレンダー連携」から連携できます）'}</span></div>`
         : iv.status==='failed'
         ? `<div class="hint mock" style="margin-top:8px;background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>今回の候補日では調整がつきませんでした。お手数ですが再申請をお願いします。</span></div>`
         : `<dl class="kv" style="margin-top:8px">
@@ -3313,7 +3315,7 @@ function openAvailabilitySettings(){
     <p class="page-sub">曜日ごとの受付時間です。インターン生は、ここで決めた時間帯の中から30分刻みで申請できます。</p>
     <div style="margin-top:8px">${rows}</div>
     <button class="btn pri block" style="margin-top:18px" onclick="saveAvailability()">保存する</button>
-    <div class="hint" style="margin-top:12px">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に「受けられない時間」として反映されます（ホーム画面の「Googleカレンダー連携」から設定できます）。</span></div>
+    <div class="hint" style="margin-top:12px">${ic('calendar-check')}<span>Googleカレンダーと連携している場合、予定は自動的に「受けられない時間」として反映されます（左メニューの「カレンダー連携」から設定できます）。</span></div>
     ${openCalendarButton()}`);
 }
 function toggleWk(d){
@@ -4146,7 +4148,6 @@ function profileLinks(){
   const themeVal=`<span id="profThemeVal" style="color:var(--mut);font-size:13px;font-weight:700">${currentTheme()==='light'?'ライト':'ダーク'}</span>`;
   return [
     canSendRequest()?['sitemap','所属部署','openMyDepartments()']:null,
-    ['calendar','カレンダー連携','openGoogleCalendarSettings()'],
     PUSH_AVAILABLE?['bell','通知','openPushSettings()',
       '<span id="profPushVal" style="color:var(--mut);font-size:13px;font-weight:700">—</span>']:null,
     // テーマだけは押しても画面が変わらないので、右端に「いまどちらか」を出す
@@ -4435,8 +4436,6 @@ let REQBACKTAB='inbox';
    （縦の位置も先頭へ戻ってしまう）。renderQuiet は演出を通さず位置も保つ */
 function setReqTab(t){
   REQTAB=t;
-  // 空き時間の一覧は開いたときに取りに行く。ほかのタブを見ている間は要らない
-  if(t==='free')loadFreeslots();
   renderQuiet();
 }
 function toggleSentRequests(){
@@ -4480,19 +4479,15 @@ function viewRequests(){
       <span class="segb">未回答${pending?`（${pending}）`:''}</span></label>
     <label><input type="radio" name="reqTab" ${REQTAB==='done'?'checked':''} onchange="setReqTab('done')">
       <span class="segb">回答済み</span></label>
-    <label><input type="radio" name="reqTab" ${REQTAB==='free'?'checked':''} onchange="setReqTab('free')">
-      <span class="segb">空き時間${FSLIST.length?`（${FSLIST.length}）`:''}</span></label>
   </div>`;
   /* 以前は「新しく送る」1つに入ってから中でもう一度種類を選ばせていたが、
      入口を分けたほうが1タップ短く、名前だけで用途が分かる */
-  return `<h1 class="page">日程調整</h1>
+  return `<h1 class="page">${ME.role==='intern'?'日程調整':'日程を決める'}</h1>
     ${canSend?`<div class="btn-row" style="margin-bottom:16px">
       <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('calendar')}日程を決める</button>
-      <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を確認</button>
     </div>`:''}
     ${tabs}
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
-      :REQTAB==='free'?viewFreeslotList()
       :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
     ${canSend?`<button type="button" class="rq-fab" onclick="toggleSentRequests()"
       title="${REQTAB==='sent'?'未回答に戻る':'送った日程調整を表示'}">
@@ -4560,11 +4555,19 @@ async function loadFreeslots(){
   }catch(e){toast(e.message);}
 }
 
+/* 「空き時間を確認」の画面。以前は日程調整の中の1タブだった */
+function viewFreeslots(){
+  return `<h1 class="page">空き時間を確認</h1>
+    <div class="btn-row" style="margin-bottom:16px">
+      <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を確認</button>
+    </div>
+    ${viewFreeslotList()}`;
+}
 function viewFreeslotList(){
   if(!FSLIST.length){
     return `<div class="empty" style="padding:30px"><div class="ei">${ic('clock')}</div>
-      <p>まだ日程調整URLを作っていません。<br>
-      「空き時間を確認」から作ると、ここに並びます。</p></div>`;
+      <p>まだURLを作っていません。<br>
+      上のボタンから作ると、ここに並びます。</p></div>`;
   }
   return `<div class="card"><div class="rowlist">${FSLIST.map(f=>`
     <div class="row fs-row" onclick="openFreeslotDetail('${esc(f.id)}')">
@@ -4606,7 +4609,7 @@ function showFreeslotUrl(f){
     <input class="fs-url" id="fsUrl" readonly value="${esc(f.url)}">
     <button class="btn pri block" style="margin-top:16px" onclick="copyFreeslotUrl()">URLをコピー</button>
     <p class="fine" style="margin-top:10px">このURLを学生に送ってください。
-    届いた分は日程調整の画面の「空き時間」から見られます。</p>`);
+    届いた分は「空き時間を確認」の画面から見られます。</p>`);
 }
 async function copyFreeslotUrl(){
   const el=document.getElementById('fsUrl');

@@ -646,10 +646,23 @@ async function testAttendance() {
     appHtml.includes('<span class="segb">未回答${pending')
       && appHtml.includes('<span class="segb">回答済み</span>')
       && !appHtml.includes('<span class="segb">完了済みの依頼</span>'), true);
-  check('画面の名前は「日程調整」',
-    appHtml.includes('<h1 class="page">日程調整</h1>')
+  /* スタッフの「日程調整」タブは「日程を決める」「空き時間を確認」の2つに分けた。
+     インターン生は受け取るだけなので「日程調整」のまま */
+  check('スタッフのタブは「日程を決める」と「空き時間を確認」に分かれている',
+    appHtml.includes("{id:'requests',label:'日程を決める',ic:'calendar-check'},\n    {id:'freeslots',label:'空き時間を確認',ic:'clock'}")
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
+      && appHtml.includes("ME.role==='intern'?'日程調整':'日程を決める'")
+      && appHtml.includes('<h1 class="page">空き時間を確認</h1>')
       && !appHtml.includes("label:'依頼'") && !appHtml.includes("label:'受けた依頼'"), true);
+  /* カレンダー連携の入口は左メニューだけ。ホームの入口タイルにもプロフィールにも置かない */
+  check('カレンダー連携の入口は左メニューだけにある',
+    (appHtml.match(/openGoogleCalendarSettings\(\)"/g) || []).length === 1
+      && !appHtml.includes("hex('openGoogleCalendarSettings()'")
+      && !appHtml.includes("['calendar','カレンダー連携'"), true);
+  check('インターン生に渡すリンクの入口は「面談申請リンク」という名前',
+    appHtml.includes('<span class="sl">面談申請リンク</span>')
+      && appHtml.includes('<h3>面談申請リンク</h3>')
+      && !appHtml.includes('リンク作成') && !appHtml.includes('インターン生に渡すリンクを作る'), true);
   /* アイコンだけだと何のボタンか伝わらなかったので、文字ラベル付きの
      固定ボタンにしてある。「送った日程調整」の文言そのものを検査する */
   check('送った日程調整は文字ラベル付きの固定ボタンで切り替える',
@@ -692,7 +705,7 @@ async function testAttendance() {
       && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
   /* 入口は「日程を決める」「空き時間を確認」の2つ。
      「タスクを追加」は別のアプリへ移ったので外した（2026-10-05） */
-  check('日程調整の入口は日程・空き時間の2つのボタン',
+  check('「日程を決める」「空き時間を確認」はそれぞれの画面に作るボタンがある',
     appHtml.includes('onclick="openRequestForm()">${ic(\'calendar\')}日程を決める</button>')
       && appHtml.includes('onclick="openFreeslotForm()">${ic(\'clock\')}空き時間を確認</button>')
       && !appHtml.includes('タスクを追加'), true);
@@ -2251,8 +2264,11 @@ async function run() {
     // スタッフ側。依頼画面から発行して、届いた分を見る入口があること
     {
       const appHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-      check('依頼画面に「空き時間を確認」のボタンがある', appHtml.includes('空き時間を確認'), true);
-      check('依頼画面に「空き時間」のタブがある', appHtml.includes("setReqTab('free')"), true);
+      check('「空き時間を確認」は独立した画面で、開くと一覧を取りに行く',
+        appHtml.includes("if(t==='freeslots')return viewFreeslots();")
+          && appHtml.includes("if(tab==='freeslots')loadFreeslots();"), true);
+      check('日程調整の中に「空き時間」のタブは残っていない',
+        appHtml.includes("setReqTab('free')"), false);
       check('発行のAPIを叩いている', appHtml.includes("'/api/freeslots'"), true);
       /* 明細シートは30分の枡目をやめ、続いた時間を帯にまとめて出す。
          枡目のままだと「終日OK」の日が1人の枠で埋まり、かぶりが読めなくなる */
