@@ -1,6 +1,7 @@
 # OPS日調アプリ — 作業の手引き
 
-ドットジェイピー OPS業務用（面談の日程調整・イベント出欠・スタッフ間の依頼）。
+ドットジェイピー OPS業務用（面談の日程調整・イベント出欠・スタッフ間の日程調整）。
+タスク（ふつうの依頼）を出す機能は別のアプリへ移したので、2026-10-05 に撤去した。**戻さないこと。**
 
 **絶対制約：料金が発生する方法は禁止。** 無料枠で完結する構成のみ。
 
@@ -14,12 +15,12 @@
 
 | ファイル | 中身 |
 |---|---|
-| `index.html` | フロント全部（画面・ロジック・テンプレート）。5,200行 |
+| `index.html` | フロント全部（画面・ロジック・テンプレート） |
 | `style.css` | 全画面のCSS。`apply.html` と `attendance.html` も読む |
 | `apply.html` | インターン生の面談申請（**ログイン不要**・別実装・ES5風） |
 | `free.html` | 日程調整（**ログイン不要**・空き時間だけを集める。`apply.html` から派生） |
 | `attendance.html` | 公開の出欠回答ページ（**ログイン不要**・`/style.css` を読む） |
-| `server/server.js` | Express API 本体。3,400行 |
+| `server/server.js` | Express API 本体 |
 | `server/` の他 | `slots.js` 空き枠 / `google.js` カレンダー / `stream.js` SSE / `mail.js` / `ical.js` / `auth.js` / `dblock.js` |
 | `tools/` | テストと道具（下記） |
 | `_specs/` | 設計書。**新機能の前にここを見る** |
@@ -40,8 +41,10 @@
 | 3164 | 面談可能時間帯 | 曜日ごとの受付時間 |
 | 3439 | 支部管理 / 3552 ユーザー管理 | 管理者向け |
 | 3930 | プロフィール | |
-| 4157 | 依頼 | 依頼の一覧・作成・詳細 |
-| **4284** | **出欠確認** | 集計・回答・確定・共有URL・依頼フォーム・ミニカレンダー |
+| 4325 | 日程調整（旧「依頼」） | 一覧（未回答・回答済み・送った）。データ名は `requests` のまま |
+| 4537 | 空き時間を確認 | 日程調整URL（`free.html`）の一覧・詳細 |
+| **4781** | **出欠確認** | 集計・回答・確定・共有URL・ミニカレンダー |
+| 5173 | 日程調整を出す | 「日程を決める」フォーム（`openRequestForm` / `submitRequest`） |
 | 5086 | BOOT | 起動処理・自動ログイン |
 
 出欠まわりでよく触る関数：
@@ -54,7 +57,7 @@
 | 行の目安 | セクション |
 |---|---|
 | 1134 | データの見える範囲・変えてよい範囲（ロール別）。`mergeScoped` / `validateDiff` |
-| 2225 | 一斉に使われる操作の専用API（依頼・出欠・通知・面談） |
+| 2511 | 一斉に使われる操作の専用API（日程調整・出欠・通知・面談）。`POST /api/requests` は `kind:'attend'` だけ受け付ける |
 | 2980 | 全体予定表 |
 | 3164 | iCalendar購読 |
 | 末尾 | `PUBLIC_FILES`（**静的配信は許可制**。ファイルを増やしたらここに足す） |
@@ -67,12 +70,12 @@
 ## テスト（触ったら必ず走らせる）
 
 ```bash
-node tools/test-fmt.mjs        # 70件・約1秒。HTMLから関数を切り出して動かす
-node tools/e2e.mjs             # 506件・約3秒。実サーバーを8123番で起動して実APIを叩く
+node tools/test-fmt.mjs        # 102件・約1秒。HTMLから関数を切り出して動かす
+node tools/e2e.mjs             # 553件・約3秒。実サーバーを8123番で起動して実APIを叩く
 node tools/e2e.mjs --quiet     # 失敗したものだけ出す（ふだんはこちら）
 node tools/e2e.mjs --only 出欠  # 見出しに その語 を含む区画だけ出す
 node tools/test-stream.mjs     # SSE（27件）
-node tools/test-ratelimit.mjs  # 公開ページの回数制限（20件）
+node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
 node tools/make-test-page.mjs  # test/デザイン確認用.html を作り直す（ログイン不要の見た目確認）
 ```
 
@@ -107,6 +110,8 @@ node tools/make-test-page.mjs  # test/デザイン確認用.html を作り直す
 
 `origin`（`dot-jp-opsteam/NitteiChoseiApp`）の main に push → Render が自動デプロイ →
 https://ops-nittyou-app.onrender.com （入口は https://dot-jp-opsteam.github.io/NitteiChoseiApp/ ）
+
+main への push は本番公開になるので、push の前に必ずユーザーの確認を取る。
 
 無料プランは15分で寝るので、最初のアクセスに20〜60秒かかる。
 
