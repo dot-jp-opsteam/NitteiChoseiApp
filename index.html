@@ -1319,7 +1319,6 @@ function openDeepLink(){
   history.replaceState({tab:currentTab},'',location.pathname);
   const r=allRequests().find(x=>x.id===id);
   if(!r){toast('この参加確認は見つかりませんでした');return;}
-  if(!isAttend(r))return openRequestDetail(id);
   go('requests');
   openAttendDetail(id);
 }
@@ -1349,7 +1348,7 @@ function renderChip(){
 
    知らせるのは2種類。どちらも誰かが操作した瞬間に飛ぶ。
      interview … 面談の申請が届いた（担当スタッフへ）
-     request   … 依頼・参加確認が届いた（あて先へ）
+     request   … 参加確認が届いた（あて先へ）
    オンオフは端末ごと。スマホには出すがPCには出さない、が自然にできる。
 
    iPhoneでは、Safariで開いているだけでは PushManager が存在しない。
@@ -1455,7 +1454,7 @@ function renderPushSettings(st){
     ${blocked?`<div class="hint mock">${ic('alert')}<span>この端末では通知が<b>ブロック</b>されています。ブラウザのアドレスバーの鍵アイコン（iPhoneは設定アプリ）から、このサイトの通知を「許可」に変えてください。</span></div>`:''}
     <div class="pushlist">
       ${row('interview','面談の申請が届いたとき','あなたが担当に選ばれた申請だけお知らせします。')}
-      ${row('request','依頼・参加確認が届いたとき','あなたがあて先に入っているものだけお知らせします。')}
+      ${row('request','参加確認が届いたとき','あなたがあて先に入っているものだけお知らせします。')}
     </div>
     <div class="field-err" id="pushErr"></div>
     <button class="btn pri block" style="margin-top:18px" id="pushBtn" ${blocked?'disabled':''}
@@ -1587,19 +1586,18 @@ const NAV={
   intern:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'my',label:'面談状況',ic:'list'},
-    // インターン生は受け取るだけなので、スタッフ側の「依頼」と呼び分ける
-    {id:'requests',label:'受けた依頼',ic:'megaphone'},
+    {id:'requests',label:'日程調整',ic:'calendar-check'},
   ],
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'requests',label:'依頼',ic:'megaphone'},
+    {id:'requests',label:'日程調整',ic:'calendar-check'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'requests',label:'依頼',ic:'megaphone'},
+    {id:'requests',label:'日程調整',ic:'calendar-check'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
@@ -1656,7 +1654,7 @@ function buildNav(){
       <span class="si">${ic('link')}</span><span class="sl">リンク作成</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
-    <button class="sb-item" onclick="openTrashList()" title="削除した依頼を見る">
+    <button class="sb-item" onclick="openTrashList()" title="削除した日程調整を見る">
       <span class="si">${ic('trash')}</span><span class="sl">削除リスト</span></button>
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="${themeSwitchLabel()}">
       <span class="si">${ic(currentTheme()==='light'?'moon':'sun')}</span>
@@ -1849,7 +1847,7 @@ function flushPendingRefresh(){
 function hex(act,icon,t,d,badge,dot){
   return `<button class="hex" onclick="${act}">
     ${badge?`<span class="hxb">${badge}</span>`:''}
-    ${dot?`<span class="hxdot" title="日程が未確定の依頼があります"></span>`:''}
+    ${dot?`<span class="hxdot" title="日程が未確定のものがあります"></span>`:''}
     <span class="hxi">${ic(icon)}</span>
     <span class="hxt">${t}</span></button>`;
 }
@@ -1892,7 +1890,7 @@ function viewHome(){
        カレンダー連携は左メニューへ移した */
     return hi+dueNotice+hexgrid([
       hex("go('my')",'list','面談状況','申請中・確定済みを確認'),
-      hex("go('requests')",'megaphone','受けた依頼','スタッフからの連絡',unread),
+      hex("go('requests')",'calendar-check','日程調整','スタッフからの日程調整',unread),
     ])+eventsSection();
   }
   // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
@@ -1908,9 +1906,9 @@ function viewHome(){
        カレンダー連携はホームへ戻した。連携しないと自分の予定が「面談不可」に
        反映されず、空いていない時間に面談を入れられてしまうので、
        左メニューの奥ではなく気づける場所に置く */
-    /* 2列で並ぶので、いちばん使う「依頼」を左上、「面談一覧・確定」を右上に置く */
+    /* 2列で並ぶので、いちばん使う「日程調整」を左上、「面談一覧・確定」を右上に置く */
     items.push(
-      hex("go('requests')",'megaphone','依頼','支部内への連絡・依頼',unread,sentUnconfirmed>0),
+      hex("go('requests')",'calendar-check','日程調整','支部内の日程調整',unread,sentUnconfirmed>0),
       hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
       hex("go('avset')",'alarm','受けられる時間','曜日ごとの受付時間'),
       hex('openGoogleCalendarSettings()','calendar','カレンダー連携','Googleカレンダーとつなぐ'),
@@ -4066,8 +4064,7 @@ const NOTI_IC={
   '面談確定':{e:'check',bg:'var(--ok-soft)',fg:'var(--ok-ink)'},
   '面談不成立':{e:'alert',bg:'var(--bad-soft)',fg:'var(--bad)'},
   'イベント作成':{e:'calendar',bg:'var(--iv-soft)',fg:'var(--iv-ink)'},
-  'イベント更新':{e:'refresh',bg:'var(--info-soft)',fg:'var(--info-ink)'},
-  '依頼':{e:'megaphone',bg:'var(--brand-soft)',fg:'var(--brand-d)'}};
+  'イベント更新':{e:'refresh',bg:'var(--info-soft)',fg:'var(--info-ink)'}};
 function updateBell(){
   const b=document.getElementById('bellBadge');if(!b||!ME)return;
   const n=unreadCount();
@@ -4199,12 +4196,12 @@ function openMyProfileEdit(){
     <div class="chklist">${DEPARTMENTS.map(d=>`<label class="chk">
       <input type="checkbox" name="profDept" value="${esc(d)}" ${getDepts(ME.id).includes(d)?'checked':''}>
       <span>${esc(d)}</span></label>`).join('')}</div>
-    <p class="fine" style="margin-top:6px">いくつでも選べます。依頼を「部署あて」に出すときの絞り込みに使われます。</p>`:'';
+    <p class="fine" style="margin-top:6px">いくつでも選べます。日程調整を「部署で選ぶ」で送るときの絞り込みに使われます。</p>`:'';
 
   const branchBlock=canChangeMyBranch()?`
     <label class="fl">所属支部<span class="req">*</span></label>
     <select id="profBranch">${DB.branches.map(b=>`<option value="${b.id}" ${b.id===ME.branch_id?'selected':''}>${esc(b.name)}</option>`).join('')}</select>
-    <p class="fine" style="margin-top:6px">支部を変えると、見える面談・予定・依頼もその支部のものに切り替わります。</p>`
+    <p class="fine" style="margin-top:6px">支部を変えると、見える面談・予定・日程調整もその支部のものに切り替わります。</p>`
   :`
     <label class="fl">所属支部</label>
     <input value="${esc(branchName(ME.branch_id))}" disabled>
@@ -4312,7 +4309,7 @@ function openMyDepartments(){
     <input type="checkbox" name="deptChk" value="${esc(d)}" ${mine.includes(d)?'checked':''}>
     <span>${esc(d)}</span></label>`).join('');
   openSheet(`<h3>所属部署</h3>
-    <p class="page-sub" style="margin-top:0">いくつでも選べます。依頼を「部署あて」に出すときの絞り込みに使われます。</p>
+    <p class="page-sub" style="margin-top:0">いくつでも選べます。日程調整を「部署で選ぶ」で送るときの絞り込みに使われます。</p>
     <div class="chklist">${rows}</div>
     <button class="btn pri block" style="margin-top:18px" onclick="saveMyDepartments()">保存する</button>`);
 }
@@ -4325,9 +4322,10 @@ async function saveMyDepartments(){
 }
 
 /* =========================================================
-   依頼（支部内への連絡）
+   日程調整（旧「依頼」。中のデータ名は requests のまま）
    ---------------------------------------------------------
    出せるのはスタッフ・支部管理者のみ。インターン生は受け取り専用。
+   ふつうの依頼（タスク）は 2026-10-05 に撤去し、いまは出欠確認（日程を決める）だけ。
 
    宛先は「デジマ宛」のような条件のまま保存せず、送信した時点の
    ユーザーID一覧に展開して固定する。条件のまま持つと、あとで誰かの
@@ -4336,7 +4334,9 @@ async function saveMyDepartments(){
    元の指定は target_label に文字列で残し、画面に併記する。
    ========================================================= */
 function canSendRequest(u){u=u||ME;return !!u&&(u.role==='staff'||u.role==='branch_admin');}
-function allRequests(){return DB.requests||[];}
+/* 出欠確認だけを返す。タスクはサーバー側で消してあるが、
+   撤去前に読み込んだ端末の控え（sessionStorage）に残っていても出さないよう、ここでも絞る */
+function allRequests(){return (DB.requests||[]).filter(isAttend);}
 /* 自分が受け取った依頼（新しい順）。削除リストへ移したものは常に除く */
 function myRequests(){
   return allRequests().filter(r=>(r.recipient_ids||[]).includes(ME.id)&&!r.trashed_at)
@@ -4352,9 +4352,8 @@ function trashedRequests(){
   return allRequests().filter(r=>r.trashed_at)
     .sort((a,b)=>new Date(b.trashed_at)-new Date(a.trashed_at));
 }
-function hasConfirmed(r,userId){return (r.read_by||[]).some(x=>x.user_id===userId);}
 /* 自分が送った「日程調整」のうち、まだ日程を確定していないもの。
-   送った側は完了扱いにならず放置されがちなので、依頼一覧とホームの入口で気づけるようにする */
+   送った側は完了扱いにならず放置されがちなので、日程調整の一覧とホームの入口で気づけるようにする */
 function sentUnconfirmedAttendCount(){
   return sentRequests().filter(r=>isAttend(r)&&!r.confirmed).length;
 }
@@ -4368,11 +4367,11 @@ function attendStillAnswerable(r){
   const ev=(DB.events||[]).find(e=>e.id===r.event_id);
   /* votable が付く前に作られた昔の予定は、すべて「日程を決める」で確定したもの。
      印が無いものまで答えられる扱いにすると、昔の確定済みが一斉に
-     受けた依頼へ戻ってきてしまうので、はっきり true のときだけにする */
+     未回答へ戻ってきてしまうので、はっきり true のときだけにする */
   return !!ev&&ev.votable===true;
 }
 function requestNeedsAction(r){
-  if(!isAttend(r))return !hasConfirmed(r,ME.id);
+  if(!isAttend(r))return false;
   // もう答えられないものは、自分が未回答でも完了済みへ移す
   if(!attendStillAnswerable(r))return false;
   return !attendResponses(r).some(a=>a.user_id===ME.id);
@@ -4403,7 +4402,7 @@ function dueHomeNotice(){
     const days=dueDaysRemaining(r.due_date,today);
     return `<button type="button" class="due-home-link" onclick="openRequestDetail('${r.id}')">${esc(dueNoticeText(r.subject,days))}${ic('chevron')}</button>`;
   }).join('');
-  return `<div class="hint due-home">${ic('bell')}<div class="due-home-list"><b>回答期限が近い依頼があります</b>${rows}</div></div>`;
+  return `<div class="hint due-home">${ic('bell')}<div class="due-home-list"><b>回答期限が近い日程調整があります</b>${rows}</div></div>`;
 }
 /* ホームに出す「明日の面談」。
    確定した日時はスタッフのカレンダーには載るが、アプリを開いたときに
@@ -4430,7 +4429,7 @@ function interviewHomeReminder(){
 
 let REQTAB='inbox'; // 'inbox' | 'done' | 'sent'
 let REQBACKTAB='inbox';
-/* 依頼の中でのタブ切り替えは renderQuiet で描き直す。
+/* 日程調整の中でのタブ切り替えは renderQuiet で描き直す。
    render() だと画面ぜんぶが登場アニメをやり直すので、
    同じ画面の中で一覧を差し替えただけなのに、読み込み直したように見えていた
    （縦の位置も先頭へ戻ってしまう）。renderQuiet は演出を通さず位置も保つ */
@@ -4446,7 +4445,7 @@ function toggleSentRequests(){
   renderQuiet();
 }
 
-/* 受けた依頼の並び。まだ答えていないものは締切が早い順（締切なしは末尾）、
+/* 未回答の並び。まだ答えていないものは締切が早い順（締切なしは末尾）、
    答え終えたものは新着順のまま。requestNeedsAction が両方の境目になる */
 function sortInboxByDue(list){
   return list.slice().sort((a,b)=>{
@@ -4457,7 +4456,7 @@ function sortInboxByDue(list){
     return new Date(b.created_at)-new Date(a.created_at);
   });
 }
-/* 送った依頼の並び。日程未確定の出欠確認（＝自分がまだ確定操作をしていないもの）を
+/* 送った日程調整の並び。日程未確定の出欠確認（＝自分がまだ確定操作をしていないもの）を
    先頭にまとめる。放置されがちなので、下に埋もれさせないため。
    同じ区分の中は新しい順のまま */
 function sortSentByConfirm(list){
@@ -4470,7 +4469,7 @@ function sortSentByConfirm(list){
 function viewRequests(){
   const canSend=canSendRequest();
   const received=myRequests();
-  // 答えた／確認した依頼は出欠も通常もまとめて完了済みへ移る
+  // 答えたものは回答済みへ移る
   const inbox=sortInboxByDue(received.filter(requestNeedsAction));
   const done=received.filter(r=>!requestNeedsAction(r));
   const pending=inbox.length;
@@ -4478,63 +4477,54 @@ function viewRequests(){
   const sentUnconfirmed=sentUnconfirmedAttendCount();
   const tabs=`<div class="seg" style="margin-bottom:14px">
     <label><input type="radio" name="reqTab" ${REQTAB==='inbox'?'checked':''} onchange="setReqTab('inbox')">
-      <span class="segb">受けた依頼${pending?`（${pending}）`:''}</span></label>
+      <span class="segb">未回答${pending?`（${pending}）`:''}</span></label>
     <label><input type="radio" name="reqTab" ${REQTAB==='done'?'checked':''} onchange="setReqTab('done')">
-      <span class="segb">完了済みの依頼</span></label>
+      <span class="segb">回答済み</span></label>
     <label><input type="radio" name="reqTab" ${REQTAB==='free'?'checked':''} onchange="setReqTab('free')">
       <span class="segb">空き時間${FSLIST.length?`（${FSLIST.length}）`:''}</span></label>
   </div>`;
   /* 以前は「新しく送る」1つに入ってから中でもう一度種類を選ばせていたが、
      入口を分けたほうが1タップ短く、名前だけで用途が分かる */
-  return `<h1 class="page">依頼</h1>
+  return `<h1 class="page">日程調整</h1>
     ${canSend?`<div class="btn-row" style="margin-bottom:16px">
-      <button class="btn pri" style="flex:1" onclick="openRequestForm('attend')">${ic('calendar')}日程を決める</button>
+      <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('calendar')}日程を決める</button>
       <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を確認</button>
-      <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('megaphone')}タスクを追加</button>
     </div>`:''}
     ${tabs}
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
       :REQTAB==='free'?viewFreeslotList()
       :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
     ${canSend?`<button type="button" class="rq-fab" onclick="toggleSentRequests()"
-      title="${REQTAB==='sent'?'受けた依頼に戻る':'送った依頼を表示'}">
-      ${REQTAB!=='sent'&&sentUnconfirmed>0?`<span class="hxdot" title="日程が未確定の依頼があります"></span>`:''}
-      ${ic(REQTAB==='sent'?'back':'megaphone')}<span>${REQTAB==='sent'?'受けた依頼へ戻る':'送信した依頼'}</span></button>`:''}`;
+      title="${REQTAB==='sent'?'未回答に戻る':'送った日程調整を表示'}">
+      ${REQTAB!=='sent'&&sentUnconfirmed>0?`<span class="hxdot" title="日程が未確定のものがあります"></span>`:''}
+      ${ic(REQTAB==='sent'?'back':'send')}<span>${REQTAB==='sent'?'一覧へ戻る':'送った日程調整'}</span></button>`:''}`;
 }
 
 function requestList(list,kind){
   if(!list.length){
-    return `<div class="empty" style="padding:30px"><div class="ei">${ic('megaphone')}</div>
-      <p>${kind==='inbox'?'届いている依頼はありません。':kind==='done'?'完了済みの依頼はありません。':'まだ依頼を出していません。'}</p></div>`;
+    return `<div class="empty" style="padding:30px"><div class="ei">${ic('calendar-check')}</div>
+      <p>${kind==='inbox'?'未回答の日程調整はありません。':kind==='done'?'回答済みの日程調整はありません。':'まだ日程調整を送っていません。'}</p></div>`;
   }
   const rows=list.map(r=>{
     const total=(r.recipient_ids||[]).length;
-    const done=(r.read_by||[]).length;
     const sender=findUser(r.sender_id);
-    const att=isAttend(r);
-    // 出欠確認は「確認したか」ではなく「答えたか」「決まったか」で状態を出す
-    const answered=att?attendResponses(r).some(a=>a.user_id===ME.id):false;
-    const numAns=att?attendAnswered(r).length:0;
-    // 「受けた依頼」は inbox/done どちらも送った人を名乗る。target_label は自分が送った側（sent）だけの情報
-    const sub=att
-      ? (kind==='sent'
-        ? `${esc(r.target_label||'')} ・ ${isPublicAttend(r)?`${numAns}人が回答`:`${numAns}/${total}人が回答`} ・ ${fmtRel(r.created_at)}`
-        : `${esc(sender?sender.nickname:'—')}さん ・ 候補${(r.options||[]).length}件 ・ ${fmtRel(r.created_at)}`)
-      : (kind==='sent'
-        ? `${esc(r.target_label||'')} ・ ${done}/${total}人が完了 ・ ${fmtRel(r.created_at)}`
-        : `${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.created_at)}`);
+    // 状態は「答えたか」「決まったか」で出す
+    const answered=attendResponses(r).some(a=>a.user_id===ME.id);
+    const numAns=attendAnswered(r).length;
+    // 受け取った側（inbox/done）は送った人を名乗る。target_label は自分が送った側（sent）だけの情報
+    const sub=kind==='sent'
+      ? `${esc(r.target_label||'')} ・ ${isPublicAttend(r)?`${numAns}人が回答`:`${numAns}/${total}人が回答`} ・ ${fmtRel(r.created_at)}`
+      : `${esc(sender?sender.nickname:'—')}さん ・ 候補${(r.options||[]).length}件 ・ ${fmtRel(r.created_at)}`;
     let badge='';
-    /* 受けた依頼に残っているのは自分がまだ答えていないものだけなので、
+    /* 未回答に残っているのは自分がまだ答えていないものだけなので、
        「確定」より先に「未回答」を出す。日にちが決まっている参加確認でも、
        ここでやることは「答える」ことだと分かるようにする */
-    if(att&&kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
-    else if(att&&r.confirmed)badge='<span class="tag ok">確定</span>';
-    else if(att&&kind==='sent')badge='<span class="tag" style="background:var(--bad-soft);color:var(--bad)">日程未確定</span>';
-    else if(att&&kind==='done')badge='<span class="tag ok">回答済み</span>';
-    else if(!att&&kind==='inbox'&&!hasConfirmed(r,ME.id))badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未確認</span>';
-    else if(!att&&kind==='done')badge='<span class="tag ok">完了</span>';
+    if(kind==='inbox'&&!answered)badge='<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">未回答</span>';
+    else if(r.confirmed)badge='<span class="tag ok">確定</span>';
+    else if(kind==='sent')badge='<span class="tag" style="background:var(--bad-soft);color:var(--bad)">日程未確定</span>';
+    else if(kind==='done')badge='<span class="tag ok">回答済み</span>';
     return `<div class="row" style="cursor:pointer" onclick="openRequestDetail('${r.id}')">
-      <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
+      <span class="av a2" style="border-radius:10px;font-size:18px">${ic('calendar-check')}</span>
       <span class="rmain"><span class="rt">${esc(r.subject)} ${badge}</span>
       <span class="rs">${sub}${dueRequestMeta(r)}</span></span>
       ${kind==='done'?`<button class="btn sm iconly" onclick="event.stopPropagation();trashRequestRow('${r.id}')" aria-label="削除" title="削除">${ic('trash')}</button>`
@@ -4616,7 +4606,7 @@ function showFreeslotUrl(f){
     <input class="fs-url" id="fsUrl" readonly value="${esc(f.url)}">
     <button class="btn pri block" style="margin-top:16px" onclick="copyFreeslotUrl()">URLをコピー</button>
     <p class="fine" style="margin-top:10px">このURLを学生に送ってください。
-    届いた分は依頼画面の「空き時間」から見られます。</p>`);
+    届いた分は日程調整の画面の「空き時間」から見られます。</p>`);
 }
 async function copyFreeslotUrl(){
   const el=document.getElementById('fsUrl');
@@ -5082,92 +5072,19 @@ async function confirmAttend(reqId,optId){
   toast('日程を確定しました');
 }
 
+/* 一覧・ホーム・通知から開く入口。タスク（ふつうの依頼）は 2026-10-05 に撤去したので、
+   開く先は出欠確認だけ */
 function openRequestDetail(id){
   const r=allRequests().find(x=>x.id===id);
-  if(!r)return;
-  if(isAttend(r))return openAttendDetail(id);
-  const sender=findUser(r.sender_id);
-  const mine=(r.recipient_ids||[]).includes(ME.id);
-  const done=hasConfirmed(r,ME.id);
-
-  // 送った本人には、誰が完了したかを名前で見せる
-  let status='';
-  if(r.sender_id===ME.id){
-    const names=(r.recipient_ids||[]).map(uid2=>{
-      const u=findUser(uid2);
-      const ok=hasConfirmed(r,uid2);
-      return `<span class="slot" style="${ok?'':'opacity:.5'}">${ok?'✓ ':''}${esc(u?u.nickname:'—')}</span>`;
-    }).join('');
-    status=`<div class="divider"></div>
-      <p class="fl" style="margin-top:14px">完了した人（${(r.read_by||[]).length}/${(r.recipient_ids||[]).length}）</p>
-      <div class="slots" style="margin-top:8px">${names}</div>`;
-  }
-
-  openSheet(`<h3>${esc(r.subject)}</h3>
-    <p class="rq-meta">差出人：${esc(sender?sender.nickname:'—')} ・ あて先：${esc(r.target_label||'—')}（${(r.recipient_ids||[]).length}名） ・ 送信日時：${fmtDT(r.created_at)}</p>
-    ${dueRequestDetail(r)}
-    <div class="rq-body">${esc(r.body)}</div>
-    ${mine?(done
-      ? `<button class="btn ghost block" style="margin-top:18px" onclick="undoRequestCompletion('${r.id}')">完了を取り消す</button>`
-      : `<button class="btn pri block" style="margin-top:18px" onclick="completeRequest('${r.id}')">完了</button>`):''}
-    ${status}`);
+  if(r&&isAttend(r))openAttendDetail(id);
 }
 
-/* 「完了」は専用APIで送る。ここは支部の全員に配った依頼を
-   全員が押す場所なので、DB全体を保存し直す方式では耐えられない。
-   サーバー側は1人1行を足すだけなので、何人が同時に押しても衝突しない */
-async function completeRequest(id){
-  try{
-    const res=await api(`/api/requests/${encodeURIComponent(id)}/read`,{method:'POST'});
-    if(!res.ok){
-      const d=await res.json().catch(()=>({}));
-      setSaveError(d.error||'完了を保存できませんでした。');
-      return;
-    }
-    const {read}=await res.json();
-    const r=(DB.requests||[]).find(x=>x.id===id);
-    if(r){
-      r.read_by=r.read_by||[];
-      if(!r.read_by.some(x=>x.user_id===ME.id))r.read_by.push(read);
-    }
-    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
-    setSaveError(null);
-  }catch(e){
-    console.warn('完了の保存に失敗しました',e);
-    setSaveError('完了を保存できていません。通信状況をご確認ください。');
-    return;
-  }
-  closeSheet();render();
-  toast('完了しました');
-}
-
-async function undoRequestCompletion(id){
-  try{
-    const res=await api(`/api/requests/${encodeURIComponent(id)}/read`,{method:'DELETE'});
-    if(!res.ok){
-      const d=await res.json().catch(()=>({}));
-      setSaveError(d.error||'完了を取り消せませんでした。');
-      return;
-    }
-    const r=(DB.requests||[]).find(x=>x.id===id);
-    if(r)r.read_by=(r.read_by||[]).filter(x=>x.user_id!==ME.id);
-    sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
-    setSaveError(null);
-  }catch(e){
-    console.warn('完了の取り消しに失敗しました',e);
-    setSaveError('完了を取り消せていません。通信状況をご確認ください。');
-    return;
-  }
-  closeSheet();render();
-  toast('完了を取り消しました');
-}
-
-/* 「完了済みの依頼」の削除。自分の一覧からだけ消え、削除リストへ移る。
-   通常依頼・出欠確認のどちらも対象。削除リストの中身は openTrashList() が出す */
+/* 「回答済み」の日程調整の削除。自分の一覧からだけ消え、削除リストへ移る。
+   削除リストの中身は openTrashList() が出す */
 async function trashRequestRow(id){
   const r=(DB.requests||[]).find(x=>x.id===id);
   if(!r)return;
-  if(!await confirmSheet('依頼を削除',
+  if(!await confirmSheet('日程調整を削除',
     '削除リストへ移動します。1週間たつと自動で完全に削除されます。','削除する'))return;
   try{
     const res=await api(`/api/requests/${encodeURIComponent(id)}/trash`,{method:'POST'});
@@ -5181,7 +5098,7 @@ async function trashRequestRow(id){
     sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
     setSaveError(null);
   }catch(e){
-    console.warn('依頼の削除に失敗しました',e);
+    console.warn('日程調整の削除に失敗しました',e);
     setSaveError('削除できていません。通信状況をご確認ください。');
     return;
   }
@@ -5194,10 +5111,9 @@ async function trashRequestRow(id){
 function openTrashList(){
   const list=trashedRequests();
   const rows=list.length?list.map(r=>{
-    const att=isAttend(r);
     const sender=findUser(r.sender_id);
     return `<div class="row">
-      <span class="av ${att?'a2':''}" style="border-radius:10px;${att?'':'background:var(--brand-soft);color:var(--brand-d);'}font-size:18px">${ic(att?'calendar-check':'megaphone')}</span>
+      <span class="av a2" style="border-radius:10px;font-size:18px">${ic('calendar-check')}</span>
       <span class="rmain"><span class="rt">${esc(r.subject)}</span>
       <span class="rs">${esc(sender?sender.nickname:'—')}さん ・ ${fmtRel(r.trashed_at)}に削除</span></span>
       <button class="btn sm" onclick="event.stopPropagation();restoreRequestRow('${r.id}')">元に戻す</button>
@@ -5205,11 +5121,11 @@ function openTrashList(){
   }).join('')
     :`<div class="empty" style="padding:26px"><div class="ei">${ic('trash')}</div><p>削除リストは空です。</p></div>`;
   openSheet(`<h3>削除リスト</h3>
-    <div class="hint">${ic('alert')}<span>削除した依頼は1週間たつと自動で完全に削除されます。それまでは「元に戻す」でいつでも復元できます。</span></div>
+    <div class="hint">${ic('alert')}<span>削除した日程調整は1週間たつと自動で完全に削除されます。それまでは「元に戻す」でいつでも復元できます。</span></div>
     <div class="card" style="margin-top:10px"><div class="rowlist">${rows}</div></div>
     ${list.length?`<button class="btn ghost block" style="margin-top:16px" onclick="emptyTrash()">${ic('trash')}削除リストを空にする</button>`:''}`);
 }
-/* 削除リストから元に戻す。完了済みの依頼として、もとの一覧にすぐ戻る */
+/* 削除リストから元に戻す。回答済みの日程調整として、もとの一覧にすぐ戻る */
 async function restoreRequestRow(id){
   const r=(DB.requests||[]).find(x=>x.id===id);
   if(!r)return;
@@ -5234,7 +5150,7 @@ async function restoreRequestRow(id){
 }
 async function emptyTrash(){
   if(!await confirmSheet('削除リストを空にする',
-    '削除リストの依頼をすべていますぐ完全に削除します。元に戻せません。','空にする'))return;
+    '削除リストの日程調整をすべていますぐ完全に削除します。元に戻せません。','空にする'))return;
   try{
     const res=await api('/api/requests/trash/empty',{method:'POST'});
     if(!res.ok){
@@ -5254,7 +5170,9 @@ async function emptyTrash(){
   toast('削除リストを空にしました');
 }
 
-/* ---------- 依頼を出す ---------- */
+/* ---------- 日程調整を出す ----------
+   以前はここで「タスク（ふつうの依頼）」も出せたが、別のアプリへ移ったので
+   2026-10-05 に機能ごと撤去した。いま出せるのは「日程を決める」だけ */
 let REQFORM=null; // {mode, picked:Set相当の配列}
 
 /* 宛先の選び方。mode ごとに「展開して選ぶもの」が変わる。
@@ -5262,19 +5180,19 @@ let REQFORM=null; // {mode, picked:Set相当の配列}
    インターン生はアカウントを持たなくなり、依頼を受け取る手段が無いため。
    受け取れない相手に送れてしまうほうが事故になる。
    by_place（インターン先で選ぶ）は 2026-08-05 に処理ごと取り除いた。
-   ※ 残る2つの mode を処理する側のコードは、過去の依頼を読むために残してある */
+   ※ 残る2つの mode を処理する側のコードは、過去の依頼を読むために残してある
+   「自分」あてはタスクのためだけの選び方だったので、タスクと一緒に外した */
 const REQ_MODES=[
   {id:'public',label:'誰でも回答OK'},
-  {id:'me',          label:'自分'},
   {id:'all_staff',   label:'支部の全スタッフ'},
   {id:'pick_staff',  label:'スタッフを選ぶ'},
   {id:'by_dept',     label:'部署で選ぶ'},
 ];
 
-function openRequestForm(kind){
+function openRequestForm(){
   /* 締切は月・日・時刻で持つ。年は送るときに dueResolveDate が決める。
      時刻の既定は 23:59＝その日いっぱい */
-  REQFORM={mode:kind==='attend'?'public':'all_staff',picked:[],kind:kind==='attend'?'attend':'normal',
+  REQFORM={mode:'public',picked:[],
     opts:[],addTime:'',dueMonth:'',dueDay:'',dueTime:'23:59'};
   renderRequestForm();
 }
@@ -5304,9 +5222,6 @@ function branchInterns(){
 function resolveRecipients(){
   const m=REQFORM.mode, picked=REQFORM.picked;
   if(m==='public')return {ids:[ME.id],label:'誰でも回答OK'};
-  /* 自分あて。やることを自分の一覧へ置いておくための口で、
-     他の選び方では自分を必ず外している（下の filter）ので、ここだけ別に用意する */
-  if(m==='me')return {ids:[ME.id],label:'自分'};
   if(m==='all_staff'){
     const list=branchStaff().filter(u=>u.id!==ME.id);  // 自分あては含めない
     return {ids:list.map(u=>u.id),label:'支部の全スタッフ'};
@@ -5348,7 +5263,7 @@ function reqPickerHTML(){
   /* 「支部の全スタッフ」「支部の全インターン生」は選ぶものが無い。
      以前は届く人数を書いた案内を出していたが、説明文はすべて外す方針にしたので
      何も出さない（2026-08-19） */
-  if(m==='all_staff'||m==='all_intern'||m==='me')return '';
+  if(m==='all_staff'||m==='all_intern')return '';
   if(m==='pick_staff'){
     const list=branchStaff().filter(u=>u.id!==ME.id);
     if(!list.length)return `<div class="empty" style="padding:20px"><p>ほかにスタッフがいません。</p></div>`;
@@ -5368,17 +5283,7 @@ function reqPickerHTML(){
   return '';
 }
 
-/* ふつうの依頼と出欠確認の切り替え。候補の日時は REQFORM.opts に貯める。
-   候補はカレンダーで選んでもらうので、ここでは作らない */
-/* 送るものは依頼画面の2つのボタンで選び終えているので、フォームの中からは呼ばれない。
-   関数ごと消さずに残してあるのは、日程調整の「あて先＝誰でも回答OK」という
-   組み合わせの決まりをここ1か所で持っているため。呼び出す口が要るときはここを使う */
-function setReqKind(kind){
-  REQFORM.kind=kind;
-  if(kind==='attend'&&REQFORM.mode!=='public')REQFORM.mode='public';
-  if(kind!=='attend'&&REQFORM.mode==='public')REQFORM.mode='all_staff';
-  renderRequestForm(true);
-}
+/* 候補の日時は REQFORM.opts に貯める。候補はカレンダーで選んでもらうので、ここでは作らない */
 /* カレンダーで日付を選んだ瞬間の時刻。ここで選んだ値が、そのとき足す候補に
    焼き付く（あとから候補ごとに直すこともできる。reqOptionsHTML参照） */
 function setReqAddTime(value){
@@ -5540,7 +5445,6 @@ function reqTimeOptionsHTML(selected){
   return out;
 }
 function reqOptionsHTML(){
-  if(REQFORM.kind!=='attend')return '';
   /* 選んだ日は1件ずつ縦に積む。上の「時間を設定」がオフの間は、
      保存済みの時刻を残したまま候補行の時刻欄だけ隠す */
   const showTime=!!REQFORM.addTime;
@@ -5628,18 +5532,9 @@ function renderRequestForm(keepText){
   // 描き直しの前に、打ちかけの件名・本文を控えておく
   const prevSubj=keepText?(document.getElementById('reqSubj')||{}).value||'':'';
   const prevBody=keepText?(document.getElementById('reqBody')||{}).value||'':'';
-  const {ids,label}=resolveRecipients();
-  const attend=REQFORM.kind==='attend';
-
-  /* 「誰でも回答OK」は日程を決めるときだけ。「自分」はタスクのときだけ
-     （日程を決めるほうは送った人が必ず回答者に入るので、自分あては意味がない） */
-  const modes=REQ_MODES.filter(o=>o.id==='public'?attend:(o.id==='me'?!attend:true));
-  const modeBtns=modes.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
+  const modeBtns=REQ_MODES.map(o=>`<button type="button" class="modechip ${REQFORM.mode===o.id?'on':''}"
     onclick="setReqMode('${o.id}')">${o.label}</button>`).join('');
 
-  /* 「送るもの」の切り替えはここには置かない。
-     何を送るかは依頼画面の「日程を決める」「タスクを追加」で選び終えている。
-     選び間違えたときは、シートを閉じてもう一度そのボタンから入る */
   /* 広い画面では左右2列（.sheet2）に分ける。1列に縦積みすると、
      PCでは左右に900px以上の余白があるのに「件名→本文→締切→候補日」と
      延々下へ伸びて、シートの中を延々スクロールすることになっていた。
@@ -5650,23 +5545,21 @@ function renderRequestForm(keepText){
     <div style="margin-top:12px">${reqPickerHTML()}</div>`;
   const colText=`
     <label class="fl" style="margin-top:0">件名<span class="req">*</span></label>
-    <input id="reqSubj" class="field-underline" autocomplete="off" placeholder="${attend?'例）第3四半期 チーム懇親会':'例）来週の定例、資料の準備をお願いします'}" value="${esc(prevSubj)}">
+    <input id="reqSubj" class="field-underline" autocomplete="off" placeholder="例）第3四半期 チーム懇親会" value="${esc(prevSubj)}">
     <label class="fl">本文</label>
-    <textarea id="reqBody" class="textarea-compact" rows="3" placeholder="${attend?'集まる場所や持ち物など、伝えたいことがあれば書いてください。':'お願いしたい内容を書いてください。'}">${esc(prevBody)}</textarea>`;
-  /* 候補日のカレンダーは背が高い。日程調整のときは
+    <textarea id="reqBody" class="textarea-compact" rows="3" placeholder="集まる場所や持ち物など、伝えたいことがあれば書いてください。">${esc(prevBody)}</textarea>`;
+  /* 候補日のカレンダーは背が高い。
      「あて先＋件名・本文」を左、「締切＋候補日」を右にすると、左右の高さが釣り合う */
-  const cols=attend
-    ? [colTarget+colText, reqDueFieldHTML()+reqOptionsHTML()]
-    : [colTarget, colText+reqDueFieldHTML()];
+  const cols=[colTarget+colText, reqDueFieldHTML()+reqOptionsHTML()];
 
-  const html=`<h3>${attend?'日程を決める':'タスクを追加'}</h3>
+  const html=`<h3>日程を決める</h3>
     <div class="sheet2">
       <section class="s2col">${cols[0]}</section>
       <section class="s2col">${cols[1]}</section>
     </div>
     <div class="field-err" id="reqErr"></div>
 
-    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">${attend?'候補を送って都合を聞く':'この内容で送る'}</button>`;
+    <button class="btn pri block" style="margin-top:18px" id="reqBtn" onclick="submitRequest()">候補を送って都合を聞く</button>`;
   /* keepText が付くのは、候補日や締切を触ってその場で描き直すとき。
      このときだけ表示位置を残す。初めて開くときは先頭から見せる */
   if(keepText)refreshSheet(()=>openSheet(html));
@@ -5687,11 +5580,11 @@ async function submitRequest(){
   /* あて先が0人のときの言い方を、選び方ごとに変える。
      「支部の全スタッフ」なのに0人＝支部に自分しか居ない、という意味なので、
      ひとくちに「あて先を選んでください」と言われても直しようがなかった。
-     自分あては上の resolveRecipients が必ず1人返すので、ここには来ない */
+     誰でも回答OKは上の resolveRecipients が必ず1人返すので、ここには来ない */
   if(!ids.length){
     const m=REQFORM.mode;
     err.textContent=
-      m==='all_staff'?'支部にほかのスタッフがいません。「自分」を選ぶか、管理者にご連絡ください'
+      m==='all_staff'?'支部にほかのスタッフがいません。「誰でも回答OK」を選ぶか、管理者にご連絡ください'
       :m==='all_intern'?'支部にインターン生がいません'
       :m==='by_dept'?'部署を選んでください（選んだ部署に人がいないときは別の部署をお試しください）'
       :'あて先の相手を選んでください';
@@ -5699,50 +5592,46 @@ async function submitRequest(){
   }
   if(!subject){err.textContent='件名を入力してください';err.classList.add('show');return;}
 
-  const attend=REQFORM.kind==='attend';
-  const publicMode=attend&&REQFORM.mode==='public';
-  let options=[];
-  if(attend){
-    syncReqOptions();
-    if(!REQFORM.opts.length){err.textContent='候補の日時を1件以上追加してください';err.classList.add('show');return;}
-    for(const o of REQFORM.opts){
-      if(!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
-      // 時刻はプルダウンでしか変えられないので崩れないはずだが、
-      // 送ってしまう前にもう一度だけ確かめる（サーバー側も同じ形で弾く）
-      if(o.t1&&!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(o.t1)){
-        err.textContent='時刻の形がおかしくなっています。選び直してください';err.classList.add('show');return;
-      }
+  const publicMode=REQFORM.mode==='public';
+  syncReqOptions();
+  if(!REQFORM.opts.length){err.textContent='候補の日時を1件以上追加してください';err.classList.add('show');return;}
+  for(const o of REQFORM.opts){
+    if(!o.date){err.textContent='候補の日付を入れてください';err.classList.add('show');return;}
+    // 時刻はプルダウンでしか変えられないので崩れないはずだが、
+    // 送ってしまう前にもう一度だけ確かめる（サーバー側も同じ形で弾く）
+    if(o.t1&&!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(o.t1)){
+      err.textContent='時刻の形がおかしくなっています。選び直してください';err.classList.add('show');return;
     }
-    // 同じ日時が2つあると集計の見分けがつかないので弾く
-    const seen=new Set();
-    for(const o of REQFORM.opts){
-      const key=[o.date,o.t1||''].join('|');
-      if(seen.has(key)){err.textContent='同じ日時の候補が重なっています';err.classList.add('show');return;}
-      seen.add(key);
-    }
-    options=REQFORM.opts.map(o=>({
-      date:o.date,
-      start_time:o.t1||undefined,
-      has_date:true,
-      has_time:!!o.t1,
-    }));
   }
+  // 同じ日時が2つあると集計の見分けがつかないので弾く
+  const seen=new Set();
+  for(const o of REQFORM.opts){
+    const key=[o.date,o.t1||''].join('|');
+    if(seen.has(key)){err.textContent='同じ日時の候補が重なっています';err.classList.add('show');return;}
+    seen.add(key);
+  }
+  const options=REQFORM.opts.map(o=>({
+    date:o.date,
+    start_time:o.t1||undefined,
+    has_date:true,
+    has_time:!!o.t1,
+  }));
 
   btn.disabled=true;btn.textContent='送信中…';
-  /* 依頼は専用APIで作る。あて先は送った時点で固定される（上のコメント参照）。
+  /* 日程調整は専用APIで作る。あて先は送った時点で固定される（上のコメント参照）。
      受け取った人への通知はサーバー側で一緒に積まれる */
   let request=null;
   try{
     const res=await api('/api/requests',{method:'POST',
       body:JSON.stringify({subject,body,target_label:label,recipient_ids:ids,
-        kind:attend?'attend':'normal',options,
+        kind:'attend',options,
         due_date:dueDate||undefined,
         due_time:dueTime||undefined,
-        public_access:attend&&REQFORM.mode==='public'})});
+        public_access:publicMode})});
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
       err.textContent=d.error||'送信できませんでした';err.classList.add('show');
-      btn.disabled=false;btn.textContent=attend?'候補を送って都合を聞く':'この内容で送る';
+      btn.disabled=false;btn.textContent='候補を送って都合を聞く';
       return;
     }
     const out=await res.json();request=out.request;
@@ -5754,13 +5643,13 @@ async function submitRequest(){
     setSaveError(null);
     /* 共有URLが無いまま集計を開くと、送った本人が配る先を失う。ここで止めて知らせる */
     if(publicMode&&!request.public_url){
-      err.textContent='共有URLを発行できませんでした。送った依頼の一覧からご確認ください。';err.classList.add('show');
+      err.textContent='共有URLを発行できませんでした。送った日程調整の一覧からご確認ください。';err.classList.add('show');
       return;
     }
   }catch(e){
-    console.warn('依頼の送信に失敗しました',e);
+    console.warn('日程調整の送信に失敗しました',e);
     err.textContent='送信できませんでした。通信状況をご確認ください';err.classList.add('show');
-    btn.disabled=false;btn.textContent='この内容で送る';
+    btn.disabled=false;btn.textContent='候補を送って都合を聞く';
     return;
   }
   REQFORM=null;REQTAB='sent';
@@ -5770,7 +5659,7 @@ async function submitRequest(){
      「誰でも回答OK」で送った人はそのまま配れる。
      以前は公開の回答ページへ location.assign で飛ばしていたが、
      アプリの外へ出てしまい、戻るには履歴を戻るしかなかった */
-  if(attend)openAttendDetail(request.id);
+  openAttendDetail(request.id);
 }
 
 /* メール履歴の画面はここにあったが、アプリから取り外した（2026-08-12）。

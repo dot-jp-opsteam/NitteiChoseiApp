@@ -140,13 +140,20 @@ async function setupDB(dbPath) {
     requests: [{
       id: 'rq_osaka', branch_id: 'b2', sender_id: 'u_e2e_staff2',
       subject: '【大阪支部の内部連絡】', body: '他支部に見えてはいけない内容',
-      target_label: '大阪支部全員', recipient_ids: ['u_e2e_staff2'],
-      read_by: [{ user_id: 'u_e2e_staff2', at: now }], created_at: now,
+      target_label: '大阪支部全員', recipient_ids: ['u_e2e_staff2'], created_at: now,
+      kind: 'attend', options: [{ id: 'op0', date: '2026-12-01', has_date: true, has_time: false }],
+    }, {
+      /* kind の無い昔の依頼＝タスク。タスク機能は撤去したので、
+         引っ越しのあと purgeTaskRequests() で消えていなければならない */
+      id: 'rq_task_old', branch_id: 'b1', sender_id: 'u_e2e_staff',
+      subject: '昔のタスク', body: 'x', target_label: '個別', recipient_ids: ['u_e2e_staff3'],
+      read_by: [{ user_id: 'u_e2e_staff3', at: now }], created_at: now,
     }],
     event_responses: [{ id: 'er_old', event_id: 'ev_old', user_id: 'u_e2e_staff2', response: 'yes' }],
     notifications: [
       { id: 'nt_old', type: 'info', msg: '引っ越し前の通知', branch_id: 'b2', at: now },
       { id: 'nt_ancient', type: 'info', msg: '1年前の通知', branch_id: 'b2', at: oneYearAgo },
+      { id: 'nt_task', type: '依頼', msg: '昔のタスクの通知', branch_id: 'b1', at: now },
     ],
   };
   await c.execute({
@@ -198,11 +205,11 @@ const H = (t) => (t
    実際には順番に処理されてしまい、同時アクセスの検証にならない。
    同時アクセスの試験だけは、接続数を上げた生のHTTPで投げる */
 const agent = new http.Agent({ keepAlive: true, maxSockets: 256 });
-function rawPost(token, pathname, payload) {
+function rawPost(token, pathname, payload, method = 'POST') {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
     const req = http.request({
-      host: 'localhost', port: PORT, path: pathname, method: 'POST', agent,
+      host: 'localhost', port: PORT, path: pathname, method, agent,
       headers: { ...H(token), 'Content-Length': Buffer.byteLength(data) },
     }, (res) => {
       res.resume();
@@ -607,20 +614,19 @@ async function testAttendance() {
   check('出欠の宛先先頭に「誰でも回答OK」がある',
     publicModePos >= 0
       && publicModePos < appHtml.indexOf("{id:'all_staff',   label:'支部の全スタッフ'}"), true);
-  /* タスクは自分あてにも送れる。他の選び方は自分を必ず外すので、
-     支部に自分しか居ない人はどこにも送れなかった（2026-08-19の指摘） */
-  check('タスクのあて先に「自分」がある',
-    appHtml.includes("{id:'me',          label:'自分'}")
-    && appHtml.includes("if(m==='me')return {ids:[ME.id],label:'自分'};"), true);
-  check('「自分」はタスクだけ、「誰でも回答OK」は日程だけに出す',
-    appHtml.includes("REQ_MODES.filter(o=>o.id==='public'?attend:(o.id==='me'?!attend:true))"), true);
+  /* 「自分」あてはタスクのための選び方だったので、タスクと一緒に外した（2026-10-05） */
+  check('あて先に「自分」は無い',
+    appHtml.includes("label:'自分'"), false);
+  check('宛先の選び方はすべて並べる（タスク用の絞り込みは無い）',
+    appHtml.includes('const modeBtns=REQ_MODES.map(') && !appHtml.includes('REQ_MODES.filter('), true);
   check('あて先が0人のときは、選び方に応じた言い方をする',
-    appHtml.includes('支部にほかのスタッフがいません。「自分」を選ぶか、管理者にご連絡ください')
+    appHtml.includes('支部にほかのスタッフがいません。「誰でも回答OK」を選ぶか、管理者にご連絡ください')
     && appHtml.includes("'あて先の相手を選んでください'"), true);
-  check('出欠確認を開くと公開モードが初期選択される',
-    appHtml.includes("mode:kind==='attend'?'public':'all_staff'"), true);
+  check('日程調整を開くと公開モードが初期選択される',
+    appHtml.includes("REQFORM={mode:'public',picked:[],"), true);
   check('公開モードを送信APIへ明示する',
-    appHtml.includes("public_access:attend&&REQFORM.mode==='public'"), true);
+    appHtml.includes("const publicMode=REQFORM.mode==='public';")
+    && appHtml.includes('public_access:publicMode})'), true);
   /* 依頼フォームの説明文はすべて撤去した（2026-08-19）。
      「いまのあて先：○○」の行もその一部で、宛先の欄そのものを見れば分かる */
   check('依頼フォームに「いまのあて先」の行は無い',
@@ -628,44 +634,45 @@ async function testAttendance() {
   check('宛先の見出しは「宛先」の2文字',
     appHtml.includes('<label class="fl" style="margin-top:0">宛先</label>')
       && !appHtml.includes('あて先の選び方'), true);
-  check('通常依頼の差出人・あて先・送信日時を控えめな1行にまとめる',
-    appHtml.includes('<p class="rq-meta">差出人：${esc(sender?sender.nickname')
-      && appHtml.includes(' ・ あて先：${esc(r.target_label')
-      && appHtml.includes(' ・ 送信日時：${fmtDT(r.created_at)}</p>'), true);
-  check('通常依頼の本文を主役にする接頭辞付きクラスがある',
-    appHtml.includes('class="rq-body"')
-      && styleSource.includes('.rq-body{white-space:pre-wrap;color:var(--ink);font-size:16px;line-height:1.8'), true);
-  check('通常依頼のメタ情報は小さく控えめな色にする',
-    styleSource.includes('.rq-meta{color:var(--sub);font-size:12px;line-height:1.5'), true);
-  check('依頼タブは受けた依頼と完了済みの依頼を切り替える',
-    appHtml.includes('<span class="segb">完了済みの依頼</span>')
-      && !appHtml.includes('<span class="segb">送った依頼</span>'), true);
+  /* タスク（ふつうの依頼）は機能ごと撤去した（2026-10-05）。
+     詳細・完了・取り消しの画面と、そのためだけのCSSが残っていないこと */
+  check('タスクの詳細・完了の画面は残っていない',
+    appHtml.includes('class="rq-body"') || appHtml.includes('class="rq-meta"')
+      || appHtml.includes('completeRequest') || appHtml.includes('undoRequestCompletion')
+      || appHtml.includes('hasConfirmed('), false);
+  check('タスクの詳細だけで使うCSSは残っていない',
+    styleSource.includes('.rq-body{') || styleSource.includes('.rq-meta{'), false);
+  check('日程調整のタブは未回答と回答済みを切り替える',
+    appHtml.includes('<span class="segb">未回答${pending')
+      && appHtml.includes('<span class="segb">回答済み</span>')
+      && !appHtml.includes('<span class="segb">完了済みの依頼</span>'), true);
+  check('画面の名前は「日程調整」',
+    appHtml.includes('<h1 class="page">日程調整</h1>')
+      && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
+      && !appHtml.includes("label:'依頼'") && !appHtml.includes("label:'受けた依頼'"), true);
   /* アイコンだけだと何のボタンか伝わらなかったので、文字ラベル付きの
-     固定ボタンにしてある。「送信した依頼」の文言そのものを検査する */
-  check('送った依頼は文字ラベル付きの固定ボタンで切り替える',
+     固定ボタンにしてある。「送った日程調整」の文言そのものを検査する */
+  check('送った日程調整は文字ラベル付きの固定ボタンで切り替える',
     appHtml.includes('class="rq-fab"')
       && appHtml.includes('toggleSentRequests()')
-      && appHtml.includes("ic(REQTAB==='sent'?'back':'megaphone')")
-      && appHtml.includes("REQTAB==='sent'?'受けた依頼へ戻る':'送信した依頼'")
+      && appHtml.includes("ic(REQTAB==='sent'?'back':'send')")
+      && appHtml.includes("REQTAB==='sent'?'一覧へ戻る':'送った日程調整'")
       && styleSource.includes('.rq-fab{position:fixed;'), true);
   check('依頼一覧は固定ボタンに隠れない余白を持つ',
     appHtml.includes('class="rq-list-space"') && styleSource.includes('.rq-list-space{padding-bottom:'), true);
-  check('通常依頼だけ完了と取り消しを操作できる',
-    appHtml.includes('>完了</button>')
-      && appHtml.includes('>完了を取り消す</button>')
-      && appHtml.includes("method:'DELETE'")
-      && appHtml.includes("toast('完了しました')")
-      && appHtml.includes("toast('完了を取り消しました')"), true);
+  check('完了と取り消しの操作は残っていない',
+    appHtml.includes('>完了を取り消す</button>') || appHtml.includes("toast('完了しました')"), false);
   /* 出欠は「まだ答えられるのに答えていない」ものだけを未処理として数える。
      日程を決める（確定するともう答えられない）は確定した時点で完了済みへ、
-     参加を確認する（確定後の予定に答える）は答えるまで受けた依頼に残る */
-  check('未処理件数は未完了の通常依頼と、まだ答えられる未回答の出欠確認を数える',
+     参加を確認する（確定後の予定に答える）は答えるまで未回答に残る */
+  check('未処理件数は、まだ答えられる未回答の出欠確認だけを数える',
     appHtml.includes('function requestNeedsAction(r)')
       && appHtml.includes('function attendStillAnswerable(r)')
       && appHtml.includes("return !!ev&&ev.votable===true;")
       && appHtml.includes('if(!attendStillAnswerable(r))return false;')
       && appHtml.includes('return !attendResponses(r).some(a=>a.user_id===ME.id);')
-      && appHtml.includes('if(!isAttend(r))return !hasConfirmed(r,ME.id);'), true);
+      && appHtml.includes('if(!isAttend(r))return false;')
+      && appHtml.includes('function allRequests(){return (DB.requests||[]).filter(isAttend);}'), true);
   /* 答えた瞬間に一覧の振り分けまで更新する。カード1枚だけ差し替えていたころは
      再読み込みするまで受けた依頼に残り続けていた */
   check('出欠の回答後は一覧も静かに描き直す',
@@ -683,12 +690,12 @@ async function testAttendance() {
   check('完了済みの依頼は新しい順のまま',
     appHtml.includes('function myRequests(){')
       && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
-  /* 入口は「日程を決める」「タスクを追加」の2つ（2026-08-19）。
-     以前は「新しく送る」1つに入ってから、中でもう一度3択を出していたが、
-     ボタンを分けたほうが1タップ短く、名前だけで用途が分かる */
-  check('依頼画面の入口は日程・タスクの2つのボタン',
-    appHtml.includes('onclick="openRequestForm(\'attend\')">${ic(\'calendar\')}日程を決める</button>')
-      && appHtml.includes('onclick="openRequestForm()">${ic(\'megaphone\')}タスクを追加</button>'), true);
+  /* 入口は「日程を決める」「空き時間を確認」の2つ。
+     「タスクを追加」は別のアプリへ移ったので外した（2026-10-05） */
+  check('日程調整の入口は日程・空き時間の2つのボタン',
+    appHtml.includes('onclick="openRequestForm()">${ic(\'calendar\')}日程を決める</button>')
+      && appHtml.includes('onclick="openFreeslotForm()">${ic(\'clock\')}空き時間を確認</button>')
+      && !appHtml.includes('タスクを追加'), true);
   check('旧「新しく送る」の入口は残っていない',
     appHtml.includes('新しく送る</button>') || appHtml.includes('openSendPicker('), false);
   /* 「参加を確認する」は機能ごと撤去した（2026-08-19）。
@@ -857,14 +864,15 @@ async function testAttendance() {
   check('出欠を送ったあとページ遷移しない',
     appHtml.includes('location.assign(attendShareUrl'), false);
   check('出欠を送ったあとは集計シートを開く',
-    appHtml.includes('if(attend)openAttendDetail(request.id);'), true);
+    appHtml.includes("toast(`${request.recipient_ids.length}名に送りました`);")
+      && /\n  openAttendDetail\(request\.id\);\n\}/.test(appHtml), true);
   check('公開出欠の詳細に共有URLを表示する',
     appHtml.includes('誰でも回答できる共有URL'), true);
   check('公開出欠は回答人数に分母を表示しない',
     appHtml.includes("isPublicAttend(r)?`${numAns}人が回答`")
       && appHtml.includes('回答人数に制限なし'), true);
   check('回答人数は実際に回答した人だけを数える',
-    appHtml.includes('const numAns=att?attendAnswered(r).length:0;'), true);
+    appHtml.includes('const numAns=attendAnswered(r).length;'), true);
   /* 締切は年を選ばせない。締切に去年を選ぶことはなく、選択肢に並べても
      押し間違いのもとになる。月日から今日以降でいちばん近い年を当てる */
   check('依頼と出欠に共通の任意締切欄がある',
@@ -955,50 +963,54 @@ async function testAttendance() {
   });
   check('公開出欠も確定後は変更できない', publicLate.status, 409);
 
-  // ---- ふつうの依頼が壊れていないこと ----
+  // ---- タスク（ふつうの依頼）はもう作れないこと（2026-10-05 撤去） ----
   const normal = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: 'ふつうの依頼', body: '本文', target_label: 'x', recipient_ids: ['u_e2e_staff3'],
   });
-  check('ふつうの依頼は今までどおり作れる', normal.status, 200);
-  check('締切日を付けずに依頼を作れる', normal.json.request?.due_date, undefined);
-  check('ふつうの依頼には出欠の印が付かない', normal.json.request?.kind, 'normal');
-  check('ふつうの依頼には公開URLを発行しない', normal.json.request?.public_url, undefined);
-  const normalMail = await getDB(TOKENS.staff3);
-  check('ふつうの依頼はメール履歴に残さない',
-    (normalMail.emails || []).some((m) => String(m.subject || '').includes(normal.json.request?.subject)), false);
-  const notAttend = await api(TOKENS.staff3, 'PUT', `/api/requests/${normal.json.request?.id}/response`,
-    { answers: [{ option_id: 'op0', response: 'ok' }] });
-  check('ふつうの依頼には出欠で答えられない', notAttend.status, 400);
-
-  const normalWithDue = await api(TOKENS.staff, 'POST', '/api/requests', {
-    subject: '締切付きの依頼', body: '本文', target_label: '個別',
-    recipient_ids: ['u_e2e_staff3'], due_date: dueDate, due_time: '17:00',
+  check('タスクは作れない', normal.status, 400);
+  const normalKind = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: 'ふつうの依頼', body: '本文', target_label: 'x', recipient_ids: ['u_e2e_staff3'], kind: 'normal',
   });
-  check('締切日を付けた通常依頼を作れる', normalWithDue.status, 200);
-  const normalWithDueView = await getDB(TOKENS.staff3);
-  check('締切日を付けた通常依頼を読み出せる',
-    (normalWithDueView.requests || []).find((r) => r.id === normalWithDue.json.request?.id)?.due_date,
+  check('kind に normal を付けてもタスクは作れない', normalKind.status, 400);
+
+  const dueOpts = [{ date: dueDate, has_date: true, has_time: false }];
+  const attendWithDue = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '締切付きの日程調整', body: '本文', target_label: '個別',
+    recipient_ids: ['u_e2e_staff3'], due_date: dueDate, due_time: '17:00', kind: 'attend', options: dueOpts,
+  });
+  check('締切日を付けた日程調整を作れる', attendWithDue.status, 200);
+  const attendWithDueView = await getDB(TOKENS.staff3);
+  check('締切日を付けた日程調整を読み出せる',
+    (attendWithDueView.requests || []).find((r) => r.id === attendWithDue.json.request?.id)?.due_date,
     dueDate);
-  check('通常依頼でも締切の時刻を読み出せる',
-    (normalWithDueView.requests || []).find((r) => r.id === normalWithDue.json.request?.id)?.due_time,
+  check('日程調整の締切の時刻を読み出せる',
+    (attendWithDueView.requests || []).find((r) => r.id === attendWithDue.json.request?.id)?.due_time,
     '17:00');
+  const noDue = await api(TOKENS.staff, 'POST', '/api/requests', {
+    subject: '締切なしの日程調整', recipient_ids: ['u_e2e_staff3'], kind: 'attend', options: dueOpts,
+  });
+  check('締切日を付けずに日程調整を作れる', noDue.json.request?.due_date, undefined);
 
   const badDueTime = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '不正な締切時刻', recipient_ids: ['u_e2e_staff3'], due_date: dueDate, due_time: '25:00',
+    kind: 'attend', options: dueOpts,
   });
   check('時刻の形が違う締切は作れない', badDueTime.status, 400);
   /* 日付の無い時刻は締切として使えないので、黙って落として依頼そのものは通す */
   const timeOnlyDue = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '時刻だけの締切', recipient_ids: ['u_e2e_staff3'], due_time: '17:00',
+    kind: 'attend', options: dueOpts,
   });
-  check('日付の無い締切時刻は捨てる', timeOnlyDue.json.request?.due_time, undefined);
+  check('日付の無い締切時刻は捨てる', [timeOnlyDue.status, timeOnlyDue.json.request?.due_time], [200, undefined]);
 
   const malformedDue = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '不正な締切', recipient_ids: ['u_e2e_staff3'], due_date: '2026-02-30',
+    kind: 'attend', options: dueOpts,
   });
   check('実在しない締切日は作れない', malformedDue.status, 400);
   const pastDue = await api(TOKENS.staff, 'POST', '/api/requests', {
     subject: '過去の締切', recipient_ids: ['u_e2e_staff3'], due_date: '2000-01-01',
+    kind: 'attend', options: dueOpts,
   });
   check('昨日以前の締切日は作れない', pastDue.status, 400);
 
@@ -1257,8 +1269,9 @@ async function run() {
     check('引っ越し前からあった依頼が読める', (admin.requests || []).some((r) => r.id === 'rq_osaka'), true);
     check('引っ越し前からあった出欠が読める', (admin.event_responses || []).some((r) => r.id === 'er_old'), true);
     check('引っ越し前からあった通知が読める', (admin.notifications || []).some((n) => n.id === 'nt_old'), true);
-    check('依頼の確認状況も引き継がれている',
-      (admin.requests || []).find((r) => r.id === 'rq_osaka')?.read_by?.some((x) => x.user_id === 'u_e2e_staff2'), true);
+    check('出欠確認の種類と候補も引き継がれている',
+      [(admin.requests || []).find((r) => r.id === 'rq_osaka')?.kind,
+        (admin.requests || []).find((r) => r.id === 'rq_osaka')?.options?.length], ['attend', 1]);
 
     // store 側からは取り除かれているはず（二重管理になると必ず食い違う）
     const raw = await readStoreRaw();
@@ -1280,6 +1293,23 @@ async function run() {
     check('退避した原本には引っ越し前の面談が入っている',
       (before.interviews || []).some((iv) => iv.id === 'iv_old'), true);
     check('退避した原本にはまだ引っ越し済みの印が無い', before.movedToTablesV1 === undefined, true);
+  }
+
+  console.log('\n─────── タスク機能の撤去 ───────');
+  {
+    /* タスク（ふつうの依頼）は 2026-10-05 に機能ごと撤去した。
+       起動時に、残っていたタスク・その通知・完了の記録の表を消す */
+    const admin = await getDB(TOKENS.admin);
+    check('残っていたタスクは消えている', (admin.requests || []).some((r) => r.id === 'rq_task_old'), false);
+    check('タスクの通知は消えている', (admin.notifications || []).some((n) => n.id === 'nt_task'), false);
+    check('出欠確認は消していない', (admin.requests || []).some((r) => r.id === 'rq_osaka'), true);
+    check('読み出す依頼はすべて出欠確認', (admin.requests || []).every((r) => r.kind === 'attend'), true);
+    check('依頼に完了の記録（read_by）を付けない',
+      (admin.requests || []).some((r) => 'read_by' in r), false);
+    const c = createClient({ url: 'file:' + DB_PATH });
+    const tbl = await c.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'request_reads'");
+    c.close();
+    check('完了の記録の表（request_reads）は無い', tbl.rows.length, 0);
   }
 
   console.log('\n─────── 情報漏えい（他支部のデータが見えないこと） ───────');
@@ -1322,68 +1352,42 @@ async function run() {
     check('他支部のプロフィールを巻き添えで消していない', !!(admin.profiles || {}).u_e2e_staff2, true);
   }
 
-  console.log('\n─────── 依頼（専用API） ───────');
+  console.log('\n─────── 日程調整（専用API） ───────');
   {
+    const futureDay = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(Date.now() + 10 * 86400000));
+    const opts = [{ date: futureDay, has_date: true, has_time: false }];
     const sent = await api(TOKENS.staff, 'POST', '/api/requests', {
-      subject: '東京の依頼', body: 'テスト本文', target_label: '支部全員',
-      recipient_ids: ['u_e2e_staff3', 'u_e2e_staff4'],
+      subject: '東京の日程調整', body: 'テスト本文', target_label: '支部全員',
+      recipient_ids: ['u_e2e_staff3', 'u_e2e_staff4'], kind: 'attend', options: opts,
     });
-    check('スタッフが依頼を送れる', sent.status, 200);
+    check('スタッフが日程調整を送れる', sent.status, 200);
     REQ_ID = sent.json.request?.id;
     check('依頼IDが返る', typeof REQ_ID === 'string', true);
 
-    const internView = await getDB(TOKENS.staff3);
-    const mine = (internView.requests || []).find((r) => r.id === REQ_ID);
-    check('あて先のインターン生に依頼が見えている', !!mine, true);
-    check('通知が積まれている', (internView.notifications || []).some((n) => n.msg?.includes('東京の依頼')), true);
+    const otherView = await getDB(TOKENS.staff3);
+    const mine = (otherView.requests || []).find((r) => r.id === REQ_ID);
+    check('あて先のスタッフに日程調整が見えている', !!mine, true);
+    check('通知が積まれている', (otherView.notifications || []).some((n) => n.msg?.includes('東京の日程調整')), true);
 
     const other = await getDB(TOKENS.staff2);
     check('他支部のスタッフには見えない', (other.requests || []).some((r) => r.id === REQ_ID), false);
 
+    /* 「完了」はタスクのためだけの操作だったので、APIごと外した */
     const read = await api(TOKENS.staff3, 'POST', `/api/requests/${REQ_ID}/read`);
-    check('あて先の人が確認できる', read.status, 200);
-    const afterRead = await getDB(TOKENS.staff3);
-    const r = (afterRead.requests || []).find((x) => x.id === REQ_ID);
-    check('自分の確認が記録されている', (r?.read_by || []).some((x) => x.user_id === 'u_e2e_staff3'), true);
-
-    // 二度押しても増えない（回線の再送や連打で二重に記録されないこと）
-    await api(TOKENS.staff3, 'POST', `/api/requests/${REQ_ID}/read`);
-    const twice = await getDB(TOKENS.staff3);
-    const r2 = (twice.requests || []).find((x) => x.id === REQ_ID);
-    check('二度確認しても記録は1件のまま', (r2?.read_by || []).filter((x) => x.user_id === 'u_e2e_staff3').length, 1);
-
-    const notMine = await api(TOKENS.staff2, 'POST', `/api/requests/${REQ_ID}/read`);
-    check('あて先でない人は確認できない', notMine.status, 403);
-
-    const secondDone = await api(TOKENS.staff4, 'POST', `/api/requests/${REQ_ID}/read`);
-    check('別のあて先も自分の完了を記録できる', secondDone.status, 200);
+    check('完了のAPIは無い', read.status, 404);
     const undo = await api(TOKENS.staff3, 'DELETE', `/api/requests/${REQ_ID}/read`);
-    check('完了した本人は完了を取り消せる', undo.status, 200);
-    const afterUndo = await getDB(TOKENS.staff3);
-    const undoneRequest = (afterUndo.requests || []).find((x) => x.id === REQ_ID);
-    check('取り消した本人の完了記録だけ消える',
-      (undoneRequest?.read_by || []).some((x) => x.user_id === 'u_e2e_staff3'), false);
-    check('別の人の完了記録は消えない',
-      (undoneRequest?.read_by || []).some((x) => x.user_id === 'u_e2e_staff4'), true);
-    const undoAgain = await api(TOKENS.staff3, 'DELETE', `/api/requests/${REQ_ID}/read`);
-    check('完了取り消しは再送されても成功する', undoAgain.status, 200);
+    check('完了取り消しのAPIは無い', undo.status, 404);
 
-    const attendForRead = await api(TOKENS.staff, 'POST', '/api/requests', {
-      subject: '完了対象外の出欠', body: '', target_label: '個別',
-      recipient_ids: ['u_e2e_staff3'], kind: 'attend',
-      options: [{ start: '2026-09-10T10:00:00+09:00', end: '2026-09-10T11:00:00+09:00' }],
-    });
-    const completeAttend = await api(TOKENS.staff3, 'POST',
-      `/api/requests/${attendForRead.json.request?.id}/read`);
-    check('出欠確認は完了扱いにできない', completeAttend.status, 400);
     /* インターン生のアカウントを廃止したので、
        「送れない相手」の検証は他支部のスタッフで行う */
     const crossSend = await api(TOKENS.staff2, 'POST', '/api/requests', {
-      subject: 'なりすまし', recipient_ids: ['u_e2e_staff4'],
+      subject: 'なりすまし', recipient_ids: ['u_e2e_staff4'], kind: 'attend', options: opts,
     });
-    check('他支部の相手には依頼を送れない', crossSend.status, 403);
+    check('他支部の相手には日程調整を送れない', crossSend.status, 403);
     const crossBranch = await api(TOKENS.staff, 'POST', '/api/requests', {
-      subject: '他支部あて', recipient_ids: ['u_e2e_staff2'],
+      subject: '他支部あて', recipient_ids: ['u_e2e_staff2'], kind: 'attend', options: opts,
     });
     check('他支部あてには送れない', crossBranch.status, 403);
   }
@@ -1940,7 +1944,7 @@ async function run() {
         && serverSource.includes("'/sw.js': 'sw.js'"), true);
       check('通知の設定は2種類を別々に切り替えられる',
         appHtml.includes("row('interview','面談の申請が届いたとき'")
-        && appHtml.includes("row('request','依頼・参加確認が届いたとき'")
+        && appHtml.includes("row('request','参加確認が届いたとき'")
         && appHtml.includes("document.getElementById('push_interview').checked")
         && appHtml.includes("document.getElementById('push_request').checked")
         && appHtml.includes('function pushSubscribe(prefs)'), true);
@@ -2351,22 +2355,28 @@ async function run() {
     }
     c.close();
 
+    const blastDay = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(Date.now() + 10 * 86400000));
     const blast = await api(TOKENS.staff, 'POST', '/api/requests', {
-      subject: '一斉テスト', body: '全員確認してください',
+      subject: '一斉テスト', body: '全員答えてください',
       target_label: '支部全員', recipient_ids: users.map((u) => u.id),
+      kind: 'attend', options: [{ date: blastDay, has_date: true, has_time: false }],
     });
     const blastId = blast.json.request?.id;
+    const blastOpt = blast.json.request?.options?.[0]?.id;
 
     const t0 = Date.now();
-    const codes = await Promise.all(users.map((u) => rawPost(u.token, `/api/requests/${blastId}/read`, {})));
+    const codes = await Promise.all(users.map((u) => rawPost(u.token, `/api/requests/${blastId}/response`,
+      { answers: [{ option_id: blastOpt, response: 'ok' }] }, 'PUT')));
     const ms = Date.now() - t0;
     const okCount = codes.filter((s) => s === 200).length;
-    check(`${N}人が同時に確認して全員成功する`, okCount, N);
+    check(`${N}人が同時に回答して全員成功する`, okCount, N);
 
     const view = await getDB(TOKENS.staff);
     const rq = (view.requests || []).find((r) => r.id === blastId);
-    check(`確認が${N}件すべて記録されている`, (rq?.read_by || []).length, N);
-    console.log(`       （${N}件の同時確認にかかった時間: ${ms}ms）`);
+    check(`回答が${N}件すべて記録されている`, (rq?.responses || []).length, N);
+    console.log(`       （${N}件の同時回答にかかった時間: ${ms}ms）`);
 
     /* 締切前にインターン生が一斉に面談を申請する状況。
        アカウントが無いので、支部リンクから名前だけで一斉に申し込む。

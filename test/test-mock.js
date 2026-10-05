@@ -205,7 +205,6 @@
     { id: 'nt_1', type: '面談申請', msg: '鈴木 彩香さんが面談を申請しました', at: at(-1, 9, 40), branch_id: HOME_BRANCH },
     { id: 'nt_2', type: 'イベント作成', msg: '「7月度 支部定例ミーティング」が作成されました', at: at(-3, 11, 0), branch_id: HOME_BRANCH },
     { id: 'nt_3', type: '面談確定', msg: '田中 悠斗さんの面談日程が確定しました', at: at(-2, 21, 30), branch_id: HOME_BRANCH },
-    { id: 'nt_4', type: '依頼', msg: '佐藤 健さんから「【デジマ】SNS投稿の担当わけ」が届きました', at: at(0, 11, 30), branch_id: HOME_BRANCH },
   ];
 
   /* ---------- インターン先マスタ ----------
@@ -221,36 +220,9 @@
     u_staff3: { departments: ['クライアント', 'アライアンス'] },
   };
 
-  /* ---------- 依頼 ---------- */
-  var requests = [
-    {
-      id: 'rq_1', sender_id: 'u_badmin', branch_id: HOME_BRANCH,
-      subject: '来週の定例、資料の準備をお願いします',
-      body: 'お疲れ様です。\n7月度の定例ミーティングに向けて、各自の担当分の資料を前日までにご準備ください。\n\n形式は自由です。よろしくお願いします。',
-      target_label: '支部の全スタッフ',
-      recipient_ids: ['u_staff1', 'u_staff2', 'u_staff3'],
-      read_by: [{ user_id: 'u_staff2', at: at(-2, 10) }],
-      created_at: at(-3, 9, 20),
-    },
-    {
-      id: 'rq_2', sender_id: 'u_staff1', branch_id: HOME_BRANCH,
-      subject: '中間報告会のリハーサル日程について',
-      body: 'お疲れ様です。\n中間報告会に向けたリハーサルを来週おこないます。\n参加できる日をこのあとの面談でお知らせください。',
-      target_label: '田中 悠斗、鈴木 彩香',
-      recipient_ids: ['u_int1', 'u_int2'],
-      read_by: [{ user_id: 'u_int2', at: at(-1, 20) }],
-      created_at: at(-2, 18, 0),
-    },
-    {
-      id: 'rq_3', sender_id: 'u_staff2', branch_id: HOME_BRANCH,
-      subject: '【デジマ】SNS投稿の担当わけ',
-      body: '今月のSNS投稿の担当を決めたいです。\n希望があれば今週中に連絡してください。',
-      target_label: 'デジマ（部署）',
-      recipient_ids: ['u_staff1'],
-      read_by: [],
-      created_at: at(0, 11, 30),
-    },
-  ];
+  /* ---------- 依頼 ----------
+     タスク（ふつうの依頼）は 2026-10-05 に撤去したので、置くのは出欠確認だけ */
+  var requests = [];
 
   /* ---------- 出欠確認 ----------
      依頼の一種（kind:'attend'）。候補ごとに ○△× を集め、送った人が1つ選んで確定する。
@@ -301,7 +273,6 @@
       confirmed: null,
       // 答える前から他の人の回答が見える。○が最多の3つめが最有力になる
       responses: BIG_RESPONSES,
-      read_by: [{ user_id: 'u_staff2', at: at(-1, 9, 10) }],
       created_at: at(-1, 8, 40),
     },
     {
@@ -318,7 +289,6 @@
         ans('u_staff3', 'no', 'ok', 'ok'),
         ans('u_badmin', 'may', 'ok', 'ok'),
       ),
-      read_by: [{ user_id: 'u_staff1', at: at(-2, 13, 5) }],
       created_at: at(-2, 12, 30),
     },
     {
@@ -335,7 +305,6 @@
         ans('u_staff2', 'may', 'ok', 'no'),
         ans('u_staff3', 'no', 'ok', 'ok'),
       ),
-      read_by: [{ user_id: 'u_staff1', at: at(-4, 20, 0) }],
       created_at: at(-5, 10, 0),
     },
     {
@@ -348,7 +317,6 @@
       confirmed: null,
       // 1人だけ回答済み。残り2人は「まだ回答していない」に入る
       responses: ans('u_staff2', 'ok', 'may', 'no'),
-      read_by: [],
       created_at: at(0, 9, 0),
     },
   ];
@@ -512,14 +480,15 @@
 
     /* --- 依頼・出欠・通知（本番では専用テーブルを持つ専用API） --- */
     if (path === '/api/requests' && method === 'POST') {
+      // 本番と同じく、出欠確認（kind:'attend'）以外は受け付けない
+      if (!body || body.kind !== 'attend') return json({ error: 'タスクの機能は終了しました' }, 400);
       var rq = {
         id: 'rq_' + uid(), sender_id: ME.id, branch_id: ME.branch_id,
         subject: (body && body.subject) || '', body: (body && body.body) || '',
         target_label: (body && body.target_label) || null,
         recipient_ids: (body && body.recipient_ids) || [],
-        read_by: [], created_at: new Date().toISOString(),
-        // 出欠確認のときは候補の日時が付く。本番と同じ形で持たせる
-        kind: (body && body.kind) === 'attend' ? 'attend' : 'normal',
+        created_at: new Date().toISOString(),
+        kind: 'attend',
         options: ((body && body.options) || []).map(function (o, i) {
           return { id: 'op' + i, start: o.start, end: o.end || o.start };
         }),
@@ -527,30 +496,15 @@
       };
       STORE.requests = STORE.requests || [];
       STORE.requests.push(rq);
-      var isAtt = rq.kind === 'attend';
       var noti = {
-        id: 'nt_' + uid(), type: isAtt ? '出欠確認' : '依頼', branch_id: ME.branch_id,
-        msg: isAtt
-          ? ME.nickname + 'さんから出欠確認「' + rq.subject + '」が届きました'
-          : ME.nickname + 'さんから「' + rq.subject + '」が届きました',
+        id: 'nt_' + uid(), type: '出欠確認', branch_id: ME.branch_id,
+        msg: ME.nickname + 'さんから出欠確認「' + rq.subject + '」が届きました',
         at: new Date().toISOString(),
       };
       STORE.notifications = STORE.notifications || [];
       STORE.notifications.push(noti);
       touch();
       return json({ ok: true, request: rq, notification: noti });
-    }
-    var readMatch = /^\/api\/requests\/([^/]+)\/read$/.exec(path);
-    if (readMatch && method === 'POST') {
-      var target = (STORE.requests || []).filter(function (r) { return r.id === readMatch[1]; })[0];
-      if (!target) return json({ error: '依頼が見つかりません' }, 404);
-      var at = new Date().toISOString();
-      target.read_by = target.read_by || [];
-      if (!target.read_by.some(function (x) { return x.user_id === ME.id; })) {
-        target.read_by.push({ user_id: ME.id, at: at });
-      }
-      touch();
-      return json({ ok: true, read: { user_id: ME.id, at: at } });
     }
     /* 出欠確認に答える。本番と同じく、自分の回答だけを入れ替える */
     var attAnsMatch = /^\/api\/requests\/([^/]+)\/response$/.exec(path);

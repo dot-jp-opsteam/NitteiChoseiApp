@@ -182,16 +182,8 @@ async function initDB() {
       if (!/duplicate column/i.test(e.message || '')) throw e;
     }
   }
-  /* 「確認しました」を依頼の行に配列で持つと、300人が同じ1行を奪い合うことになる。
-     1人1行にすることで、何人が同時に押しても衝突しない */
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS request_reads (
-      request_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      read_at TEXT NOT NULL,
-      PRIMARY KEY (request_id, user_id)
-    )
-  `);
+  /* タスク（ふつうの依頼）の「完了」を持っていた request_reads は、
+     タスク機能ごと撤去した（2026-10-05）。表は purgeTaskRequests() が消す */
   /* 出欠の回答。読んだ印と同じ考えで、1人1候補につき1行にして衝突を避ける */
   await client.execute(`
     CREATE TABLE IF NOT EXISTS request_responses (
@@ -362,7 +354,6 @@ async function initDB() {
   await push.initPushTable(client);
   for (const ddl of [
     'CREATE INDEX IF NOT EXISTS idx_requests_branch ON requests(branch_id)',
-    'CREATE INDEX IF NOT EXISTS idx_request_reads_user ON request_reads(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_event_responses_event ON event_responses(event_id)',
     'CREATE INDEX IF NOT EXISTS idx_notifications_branch ON notifications(branch_id)',
     'CREATE INDEX IF NOT EXISTS idx_notifications_at ON notifications(at)',
@@ -479,20 +470,15 @@ async function migrateStoreToTables() {
     await backupStore('専用テーブルへの引っ越し前');
 
     let moved = 0;
+    /* kind が無い昔の依頼はタスク扱いになり、直後の purgeTaskRequests() で消える */
     for (const rq of db.requests || []) {
       await client.execute({
-        sql: `INSERT OR IGNORE INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, due_date)
-              VALUES (?,?,?,?,?,?,?,?,?)`,
+        sql: `INSERT OR IGNORE INTO requests (id, sender_id, branch_id, subject, body, target_label, recipient_ids, created_at, due_date, kind, options)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         args: [rq.id, rq.sender_id, rq.branch_id || null, rq.subject || '', rq.body || '',
           rq.target_label || null, JSON.stringify(rq.recipient_ids || []), rq.created_at || new Date().toISOString(),
-          rq.due_date || null],
+          rq.due_date || null, rq.kind || null, JSON.stringify(rq.options || [])],
       });
-      for (const r of rq.read_by || []) {
-        await client.execute({
-          sql: 'INSERT OR IGNORE INTO request_reads (request_id, user_id, read_at) VALUES (?,?,?)',
-          args: [rq.id, r.user_id, r.at || new Date().toISOString()],
-        });
-      }
       moved++;
     }
     for (const er of db.event_responses || []) {
@@ -543,6 +529,29 @@ async function migrateStoreToTables() {
   });
 }
 
+/* ---------- タスク（ふつうの依頼）の撤去 ----------
+   タスクを出す機能は別のアプリへ移ったので、2026-10-05 に機能ごと取り除いた。
+   残っているタスクは、付随する削除リスト・回答・通知ごと消し、
+   「完了」の記録だけを持っていた request_reads は表ごと捨てる。
+   消す対象が無くなれば何もしないので、起動のたびに呼んでよい */
+async function purgeTaskRequests() {
+  const rs = await client.execute("SELECT id FROM requests WHERE kind IS NULL OR kind = 'normal'");
+  const ids = rs.rows.map((r) => r.id);
+  for (let i = 0; i < ids.length; i += REQUEST_ID_CHUNK) {
+    const part = ids.slice(i, i + REQUEST_ID_CHUNK);
+    const marks = part.map(() => '?').join(',');
+    for (const table of ['request_trash', 'request_responses']) {
+      await client.execute({ sql: `DELETE FROM ${table} WHERE request_id IN (${marks})`, args: part });
+    }
+  }
+  await client.execute("DELETE FROM requests WHERE kind IS NULL OR kind = 'normal'");
+  const notes = await client.execute("DELETE FROM notifications WHERE type = '依頼'");
+  await client.execute('DROP TABLE IF EXISTS request_reads');
+  if (ids.length || notes.rowsAffected) {
+    console.log(`タスクを${ids.length}件、タスクの通知を${notes.rowsAffected}件削除しました`);
+  }
+}
+
 /* ---------- 専用テーブルの読み書き ---------- */
 const parseIds = (s) => { try { return JSON.parse(s) || []; } catch { return []; } };
 
@@ -564,7 +573,7 @@ async function selectByRequestIds(sql, requestIds) {
   return out;
 }
 
-/* 依頼を、フロントが期待する形（read_by 付き）に組み立てて返す */
+/* 依頼（出欠確認）を、フロントが期待する形（回答付き）に組み立てて返す */
 async function listRequestsFor(user) {
   const isAdmin = user.role === 'admin';
   const rs = isAdmin
@@ -579,21 +588,15 @@ async function listRequestsFor(user) {
   const trash = await client.execute({ sql: 'SELECT request_id, deleted_at FROM request_trash WHERE user_id = ?', args: [user.id] });
   const trashedAt = new Map(trash.rows.map((t) => [t.request_id, t.deleted_at]));
 
-  /* 付随する3つの表は、その人に見える依頼のぶんだけを引く。
+  /* 付随する2つの表は、その人に見える依頼のぶんだけを引く。
      以前は3つとも全件を読み、取ってからJSで捨てていた。
      依頼が増えるほど、また同時に見る人が増えるほど無駄が積み上がる
      （通知1件で全員が取り直すため、300人規模で顕著になる）*/
   const ids = rows.map((r) => r.id);
-  const [reads, answers, publicPeople] = await Promise.all([
-    selectByRequestIds('SELECT * FROM request_reads', ids),
+  const [answers, publicPeople] = await Promise.all([
     selectByRequestIds('SELECT * FROM request_responses', ids),
     selectByRequestIds('SELECT request_id, respondent_id, display_name, created_at FROM public_attendance_respondents', ids),
   ]);
-  const byRequest = new Map();
-  for (const r of reads) {
-    if (!byRequest.has(r.request_id)) byRequest.set(r.request_id, []);
-    byRequest.get(r.request_id).push({ user_id: r.user_id, at: r.read_at });
-  }
   const respOf = new Map();
   for (const a of answers) {
     if (!respOf.has(a.request_id)) respOf.set(a.request_id, []);
@@ -612,7 +615,6 @@ async function listRequestsFor(user) {
     recipient_ids: parseIds(r.recipient_ids), created_at: r.created_at,
     due_date: r.due_date || undefined,
     due_time: r.due_time || undefined,
-    read_by: byRequest.get(r.id) || [],
     trashed_at: trashedAt.get(r.id) || null,
     kind: r.kind || 'normal',
     options: safeJson(r.options, []),
@@ -748,7 +750,6 @@ async function purgeRequestTrashRows(rows) {
           sql: 'UPDATE requests SET recipient_ids = ? WHERE id = ?',
           args: [JSON.stringify(ids), request_id],
         });
-        await client.execute({ sql: 'DELETE FROM request_reads WHERE request_id = ? AND user_id = ?', args: [request_id, user_id] });
         await client.execute({ sql: 'DELETE FROM request_responses WHERE request_id = ? AND user_id = ?', args: [request_id, user_id] });
       }
       await client.execute({ sql: 'DELETE FROM request_trash WHERE request_id = ? AND user_id = ?', args: [request_id, user_id] });
@@ -2515,38 +2516,32 @@ app.put('/api/db', requireAuth, async (req, res) => {
    ここでは触る1行だけを読み書きするので、何人が同時に押しても待ち合わせが起きない。
    ========================================================= */
 
-/* 依頼を送る。スタッフ・支部管理者だけ */
+/* 出欠確認（日程を決める）を送る。スタッフ・支部管理者だけ。
+   ふつうの依頼（タスク）は 2026-10-05 に機能ごと撤去したので、kind が attend 以外は受け付けない */
 app.post('/api/requests', requireAuth, async (req, res) => {
   const actor = req.authUser;
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '依頼を送れるのはスタッフだけです' });
   }
   const { subject, body, target_label, recipient_ids, kind, options, public_access, due_date, due_time } = req.body || {};
+  if (kind !== 'attend') return res.status(400).json({ error: 'タスクの機能は終了しました' });
   if (!subject || !String(subject).trim()) return res.status(400).json({ error: '件名を入力してください' });
   const dueDate = normalizeDueDate(due_date);
   if (dueDate === undefined) return res.status(400).json({ error: '締切日が正しくありません' });
   const dueTime = normalizeDueTime(due_time, dueDate);
   if (dueTime === undefined) return res.status(400).json({ error: '締切の時刻が正しくありません' });
-  /* 出欠確認のときは候補の日時が要る。候補は画面から来た値をそのまま信じず、
-     日時として読める形かどうかをここで確かめる */
-  const isAttend = kind === 'attend';
-  const isPublic = isAttend && public_access === true;
+  const isPublic = public_access === true;
   let ids = Array.isArray(recipient_ids) ? recipient_ids.filter(Boolean) : [];
   /* 出欠確認は送信者自身も回答者になる。公開モードは対象者が決まっていないため、
      アプリ内の固定あて先は送信者だけにする */
-  ids = isPublic
-    ? [actor.id]
-    : [...new Set(isAttend ? [...ids, actor.id] : ids)];
-  if (!ids.length) return res.status(400).json({ error: 'あて先を選んでください' });
-  let opts = [];
-  if (isAttend) {
-    opts = (Array.isArray(options) ? options : [])
-      .map((o, i) => normalizeAttendOption(o, 'op' + i));
-    if (!opts.length) return res.status(400).json({ error: '候補の日時を1件以上追加してください' });
-    if (opts.length > 30) return res.status(400).json({ error: '候補は30件までです' });
-    if (opts.some((o) => !o)) {
-      return res.status(400).json({ error: '候補の日時が正しくありません' });
-    }
+  ids = isPublic ? [actor.id] : [...new Set([...ids, actor.id])];
+  /* 候補の日時は画面から来た値をそのまま信じず、日時として読める形かどうかをここで確かめる */
+  const opts = (Array.isArray(options) ? options : [])
+    .map((o, i) => normalizeAttendOption(o, 'op' + i));
+  if (!opts.length) return res.status(400).json({ error: '候補の日時を1件以上追加してください' });
+  if (opts.length > 30) return res.status(400).json({ error: '候補は30件までです' });
+  if (opts.some((o) => !o)) {
+    return res.status(400).json({ error: '候補の日時が正しくありません' });
   }
   try {
     // あて先は自分の支部の人だけ（全体管理者は制限なし）
@@ -2563,10 +2558,10 @@ app.post('/api/requests', requireAuth, async (req, res) => {
       sender_id: actor.id, branch_id: actor.branch_id || null,
       subject: String(subject).trim(), body: String(body || ''),
       target_label: target_label || null, recipient_ids: ids,
-      created_at: new Date().toISOString(), read_by: [],
+      created_at: new Date().toISOString(),
       due_date: dueDate || undefined,
       due_time: dueTime || undefined,
-      kind: isAttend ? 'attend' : 'normal', options: opts, confirmed: null, event_id: null,
+      kind: 'attend', options: opts, confirmed: null, event_id: null,
       public_url: publicToken
         ? `${process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`}/a/${publicToken}`
         : undefined,
@@ -2582,18 +2577,16 @@ app.post('/api/requests', requireAuth, async (req, res) => {
     /* 出欠確認は、あて先ひとりずつのメール履歴にも残す。
        依頼の一覧を見ていない人でも、メール画面から気づけるようにするため。
        delivered は 0（＝アプリ内の記録のみ）。実際の送信はしていない */
-    if (isAttend) await recordAttendMails(actor, request);
+    await recordAttendMails(actor, request);
 
     const notification = await insertNotification({
-      type: isAttend ? '出欠確認' : '依頼', branch_id: actor.branch_id || null,
-      msg: isAttend
-        ? `${actor.nickname}さんから出欠確認「${request.subject}」が届きました`
-        : `${actor.nickname}さんから「${request.subject}」が届きました`,
+      type: '出欠確認', branch_id: actor.branch_id || null,
+      msg: `${actor.nickname}さんから出欠確認「${request.subject}」が届きました`,
     });
     /* 端末の通知欄にも出す。送った本人は ids に含まれる（出欠は自分も回答者）ので、
        自分の送信で自分の端末が鳴らないよう外しておく */
     push.sendToUsers(client, ids.filter((id) => id !== actor.id), 'request', {
-      title: isAttend ? '参加確認が届きました' : '依頼が届きました',
+      title: '参加確認が届きました',
       body: `${actor.nickname}さんから「${request.subject}」`,
       url: `/?req=${encodeURIComponent(request.id)}`, tag: 'request',
     }).catch((e) => console.warn('依頼の通知に失敗しました', e));
@@ -2726,60 +2719,8 @@ app.put('/api/attendance/:token/response', limitPublicWrite, async (req, res) =>
   }
 });
 
-/* 通常依頼を「完了」にする。何人が同時に押しても衝突しない。
-   二度押しても状態が変わらない（同じ行を上書きするだけ） */
-app.post('/api/requests/:id/read', requireAuth, async (req, res) => {
-  const actor = req.authUser;
-  try {
-    const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
-    const row = rs.rows[0];
-    if (!row) return res.status(404).json({ error: '依頼が見つかりません' });
-    if ((row.kind || 'normal') !== 'normal') {
-      return res.status(400).json({ error: '出欠確認は完了の対象ではありません' });
-    }
-    // あて先の人だけが完了できる（見えない依頼に印を付けられないようにする）
-    if (!parseIds(row.recipient_ids).includes(actor.id)) {
-      return res.status(403).json({ error: 'この依頼のあて先ではありません' });
-    }
-    const at = new Date().toISOString();
-    await client.execute({
-      sql: 'INSERT INTO request_reads (request_id, user_id, read_at) VALUES (?,?,?) ON CONFLICT(request_id, user_id) DO NOTHING',
-      args: [req.params.id, actor.id, at],
-    });
-    res.json({ ok: true, read: { user_id: actor.id, at } });
-  } catch (e) {
-    console.error('依頼の完了に失敗しました', e);
-    res.status(500).json({ error: '完了できませんでした' });
-  }
-});
-
-/* 完了を取り消す。複合主キーで本人の1行だけを消すため、他の人の状態には触れない。
-   行がすでに無い再送も成功として扱い、通信の再試行で画面を止めない */
-app.delete('/api/requests/:id/read', requireAuth, async (req, res) => {
-  const actor = req.authUser;
-  try {
-    const rs = await client.execute({ sql: 'SELECT * FROM requests WHERE id = ?', args: [req.params.id] });
-    const row = rs.rows[0];
-    if (!row) return res.status(404).json({ error: '依頼が見つかりません' });
-    if ((row.kind || 'normal') !== 'normal') {
-      return res.status(400).json({ error: '出欠確認は完了の対象ではありません' });
-    }
-    if (!parseIds(row.recipient_ids).includes(actor.id)) {
-      return res.status(403).json({ error: 'この依頼のあて先ではありません' });
-    }
-    await client.execute({
-      sql: 'DELETE FROM request_reads WHERE request_id = ? AND user_id = ?',
-      args: [req.params.id, actor.id],
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('依頼の完了取り消しに失敗しました', e);
-    res.status(500).json({ error: '完了を取り消せませんでした' });
-  }
-});
-
 /* 依頼を削除リストへ移す。自分だけに効く（あて先の他の人・送った本人には見え続ける）。
-   通常依頼・出欠確認のどちらも対象。管理者は recipient_ids に無くても全件が見えるため、
+   管理者は recipient_ids に無くても全件が見えるため、
    あて先チェックは管理者だけ免除する */
 app.post('/api/requests/:id/trash', requireAuth, async (req, res) => {
   const actor = req.authUser;
@@ -3885,6 +3826,7 @@ app.get('*', (req, res) => {
 initDB()
   // 依頼・出欠・通知が store に残っていれば、一度だけ専用テーブルへ移す
   .then(() => migrateStoreToTables())
+  .then(() => purgeTaskRequests())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`OPS日調アプリ サーバー起動: http://localhost:${PORT}`);

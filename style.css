@@ -576,9 +576,6 @@
   /* 隠している状態。押せば戻せることが分かるよう、消すのではなく色を落とす */
   .btn.sm.iconly.off{color:var(--mut);border-color:var(--line2)}
   /* 時間の範囲。「13:00 〜 15:30」を1行に収める */
-  /* ---------- 通常依頼の詳細 ---------- */
-  .rq-meta{color:var(--sub);font-size:12px;line-height:1.5;margin:8px 0 0}
-  .rq-body{white-space:pre-wrap;color:var(--ink);font-size:16px;line-height:1.8;margin-top:18px}
   /* 締切は「月・日・時刻」の3つを1行に並べる。年は入力させないので、
      決まった日付は下に文で出して取り違えを防ぐ */
   .due-field{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:14px}
