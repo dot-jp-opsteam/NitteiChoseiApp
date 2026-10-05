@@ -3798,6 +3798,14 @@ const PUBLIC_FILES = {
   // 日程調整ページ（空き時間を集める）。apply.html と同じくログイン処理を通さない
   '/free.html': 'free.html',
   '/attendance.html': 'attendance.html',
+  /* 左メニューにカーソルを乗せると流れる、回答画面のデモ動画。
+     tools/record-demos.mjs が demo/ に書き出す */
+  '/demo/apply.mp4': 'demo/apply.mp4',
+  '/demo/free.mp4': 'demo/free.mp4',
+  '/demo/attend.mp4': 'demo/attend.mp4',
+  '/demo/apply.webm': 'demo/apply.webm',
+  '/demo/free.webm': 'demo/free.webm',
+  '/demo/attend.webm': 'demo/attend.webm',
   // Google Search Console のサイト所有権確認用。確認状態を保つため削除しないこと
   '/googlee6411894890471cb.html': 'googlee6411894890471cb.html',
 };

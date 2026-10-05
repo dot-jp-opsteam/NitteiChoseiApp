@@ -1912,3 +1912,15 @@
   .fs-pdayname{color:var(--sub);min-width:64px;flex:0 0 auto}
   .fs-pdaytime{color:var(--ink);word-break:break-word}
   .fs-note{margin:6px 0 0;font-size:13px;color:var(--ink);white-space:pre-wrap}
+
+  /* ---------- 回答画面のデモ動画（ホバーで出る） ---------- */
+  .demotip{position:fixed;z-index:90;width:264px;box-sizing:border-box;padding:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 14px 34px rgba(0,0,0,.3);pointer-events:none;
+    opacity:0;visibility:hidden;transform:translateY(-4px);
+    transition:opacity .15s,transform .15s,visibility .15s}
+  .demotip.on{opacity:1;visibility:visible;transform:none}
+  .demotip .dt-cap b{display:block;font-size:13px;color:var(--ink)}
+  .demotip .dt-cap span{display:block;margin-top:2px;font-size:12px;line-height:1.5;color:var(--sub)}
+  .demotip video{display:block;width:100%;aspect-ratio:3/4;margin-top:8px;
+    border-radius:10px;background:var(--panel2);object-fit:cover}

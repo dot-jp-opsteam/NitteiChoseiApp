@@ -25,6 +25,7 @@
 | `attendance.html` | 公開の出欠回答ページ（**ログイン不要**・`/style.css` を読む） |
 | `server/server.js` | Express API 本体 |
 | `server/` の他 | `slots.js` 空き枠 / `google.js` カレンダー / `stream.js` SSE / `mail.js` / `ical.js` / `auth.js` / `dblock.js` |
+| `demo/` | 左メニュー・ホームのホバーで流れる「相手の回答画面」の動画（mp4＋webm）。**手で編集せず** `node tools/record-demos.mjs` で作る |
 | `tools/` | テストと道具（下記） |
 | `_specs/` | 設計書。**新機能の前にここを見る** |
 
@@ -80,6 +81,7 @@ node tools/e2e.mjs --only 出欠  # 見出しに その語 を含む区画だけ
 node tools/test-stream.mjs     # SSE（27件）
 node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
 # 確認用ページ（tools/make-test-page.mjs）は今後作らない・走らせない（2026-10-05 の指示）
+node tools/record-demos.mjs    # demo/ の動画を撮り直す（要 Playwright と ffmpeg・約1分・8124番を使う）
 ```
 
 **e2eでは公開ページの回数制限を切ってある**（`PUBLIC_WRITE_PER_MIN=0`）。
@@ -90,6 +92,10 @@ node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
 仕様を変えたら、その検査を**消さずに新しい仕様へ書き換える**こと。
 
 ## 落とし穴（何度も踏んでいるもの）
+
+- **`apply.html` / `free.html` / `attendance.html` の見た目や流れを変えたら、
+  `node tools/record-demos.mjs` で `demo/` の動画も撮り直す。** 動画が古いと、
+  ホバーで見せる「相手の画面」が実物と食い違う（ホバー表示は `index.html` の `DEMOS`）
 
 - **CSSのクラス名には接頭辞を付ける。** `empty` `mark` のような短い名前は既存と衝突し、
   テストは全部通ったまま画面だけ崩れる

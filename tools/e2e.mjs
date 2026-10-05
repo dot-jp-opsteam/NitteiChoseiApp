@@ -649,7 +649,7 @@ async function testAttendance() {
   /* スタッフの「日程調整」タブは、回答を見る「面談一覧・時間」と、作成フォームを
      直接開く「候補日を送る」「空き時間を聞く」に分けた。インターン生は受け取るだけなので「日程調整」のまま */
   check('スタッフの左メニューは「面談一覧・時間」＋作成フォームを開く2つ',
-    appHtml.includes("{id:'interviews',label:'面談一覧・時間',ic:'list'},\n    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm'},\n    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm'}")
+    appHtml.includes("{id:'interviews',label:'面談一覧・時間',ic:'list'},\n    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},\n    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'}")
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
       && appHtml.includes('<h1 class="page">日程調整</h1>')
       && !appHtml.includes('面談一覧・確定</') && !appHtml.includes("'面談一覧・確定'"), true);
@@ -668,6 +668,26 @@ async function testAttendance() {
     appHtml.includes('<span class="sl">面談申請リンク</span>')
       && appHtml.includes('<h3>面談申請リンク</h3>')
       && !appHtml.includes('リンク作成') && !appHtml.includes('インターン生に渡すリンクを作る'), true);
+  /* 3つのフォームは、送った相手の画面が見えず違いが分かりにくい。
+     カーソルを乗せると回答の様子の動画（demo/*.mp4）が下に流れる */
+  check('3つのフォームの入口にデモ動画のホバー表示が付いている',
+    appHtml.includes('data-demo="${t.demo}"') && appHtml.includes("demo:'attend'") && appHtml.includes("demo:'free'")
+      && appHtml.includes('data-demo="apply" onclick="openInternInviteLink()"')
+      && appHtml.includes("'候補日を送る','候補日を出して都合を聞く',0,false,'attend'")
+      && appHtml.includes("'空き時間を聞く','URLで空いている時間を集める',0,false,'free'")
+      && ['attend', 'free', 'apply'].every((k) => appHtml.includes(`src:'/demo/${k}'`))
+      && appHtml.includes('type="video/mp4"') && appHtml.includes('type="video/webm"'), true);
+  for (const k of ['attend', 'free', 'apply']) {
+    for (const [ext, mime] of [['mp4', 'video/mp4'], ['webm', 'video/webm']]) {
+      const vr = await fetch(BASE + `/demo/${k}.${ext}`);
+      const vbuf = Buffer.from(await vr.arrayBuffer());
+      check(`デモ動画 ${k}.${ext} が配信される`, vr.status === 200 && vr.headers.get('content-type') === mime && vbuf.length > 10000, true);
+      // 動画は途中から読めること（Range）。先頭だけ欲しい再生側の要求に応えられないと、再生が始まらないブラウザがある
+      const rr = await fetch(BASE + `/demo/${k}.${ext}`, { headers: { Range: 'bytes=0-99' } });
+      check(`デモ動画 ${k}.${ext} は途中から読める`, rr.status, 206);
+    }
+  }
+  check('デモ動画の置き場以外は配信されない', (await fetch(BASE + '/demo/nothing.mp4')).status, 404);
   /* アイコンだけだと何のボタンか伝わらなかったので、文字ラベル付きの
      固定ボタンにしてある。「送った日程調整」の文言そのものを検査する */
   check('送った日程調整は文字ラベル付きの固定ボタンで切り替える',

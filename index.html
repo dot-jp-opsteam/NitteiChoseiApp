@@ -1580,6 +1580,70 @@ function bindReveal(root){
    ログインはGoogleアカウントだけで、パスワードそのものを扱わなくなったため */
 
 /* =========================================================
+   回答画面のデモ動画（ホバーで出る）
+   ---------------------------------------------------------
+   「候補日を送る」「空き時間を聞く」「面談申請リンク」は、送った相手の画面が
+   見えないので、違いが分かりにくい。data-demo を持つボタンにカーソルを
+   乗せると、その下に回答している様子の動画を流す。
+   動画は demo/ の mp4 と webm。tools/record-demos.mjs で撮り直せる。
+   ホバーが無い端末（スマホなど）では出さない
+   ========================================================= */
+const DEMOS={
+  attend:{src:'/demo/attend',title:'候補日を送る',note:'こちらが決めた候補日に、相手が ○ △ × で答えます'},
+  free:{src:'/demo/free',title:'空き時間を聞く',note:'相手が空いている時間を、カレンダーから自由に選びます'},
+  apply:{src:'/demo/apply',title:'面談申請リンク',note:'学生が名前・担当・希望日時を入れて面談を申し込みます'},
+};
+let demoTipEl=null, demoFor=null, demoTimer=0;
+function demoTip(){
+  if(demoTipEl)return demoTipEl;
+  demoTipEl=document.createElement('div');
+  demoTipEl.className='demotip';
+  demoTipEl.setAttribute('role','tooltip');
+  demoTipEl.innerHTML='<div class="dt-cap"><b></b><span></span></div><video muted loop playsinline preload="none"></video>';
+  document.body.appendChild(demoTipEl);
+  return demoTipEl;
+}
+function demoShow(target){
+  const d=DEMOS[target.dataset.demo];
+  if(!d||!matchMedia('(hover:hover)').matches)return;
+  const tip=demoTip(),v=tip.querySelector('video');
+  tip.querySelector('b').textContent=d.title+'（相手の画面）';
+  tip.querySelector('span').textContent=d.note;
+  // H.264 を再生できないブラウザもあるので、mp4 と webm を並べて再生できるほうに任せる
+  if(v.dataset.demo!==d.src){
+    v.dataset.demo=d.src;
+    v.innerHTML=`<source src="${d.src}.mp4" type="video/mp4"><source src="${d.src}.webm" type="video/webm">`;
+    v.load();
+  }
+  // 下に出す。入りきらなければ画面の下端に合わせる
+  const r=target.getBoundingClientRect(),w=tip.offsetWidth;
+  tip.style.left=Math.max(8,Math.min(r.left,innerWidth-w-8))+'px';
+  tip.style.top=(r.bottom+6)+'px';
+  tip.classList.add('on');
+  const over=r.bottom+6+tip.offsetHeight-(innerHeight-8);
+  if(over>0)tip.style.top=Math.max(8,r.bottom+6-over)+'px';
+  v.currentTime=0;
+  if(!matchMedia('(prefers-reduced-motion:reduce)').matches)v.play().catch(()=>{});
+}
+function demoHide(){
+  clearTimeout(demoTimer);demoFor=null;
+  if(!demoTipEl)return;
+  demoTipEl.classList.remove('on');
+  demoTipEl.querySelector('video').pause();
+}
+document.addEventListener('mouseover',e=>{
+  const t=e.target.closest?e.target.closest('[data-demo]'):null;
+  if(t===demoFor)return;
+  demoHide();
+  if(!t)return;
+  demoFor=t;
+  // 通り過ぎただけでは出さない
+  demoTimer=setTimeout(()=>demoShow(t),250);
+});
+document.addEventListener('click',demoHide,true);
+window.addEventListener('blur',demoHide);
+
+/* =========================================================
    NAVIGATION
    ========================================================= */
 // ic は ICON の名前。実体は index.html 冒頭の ICON に入っている
@@ -1592,15 +1656,15 @@ const NAV={
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
-    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm'},
-    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm'},
+    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
+    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
-    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm'},
-    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm'},
+    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
+    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
@@ -1646,7 +1710,7 @@ function defaultTab(){return 'home';}
 function buildNav(){
   /* run が付いたものは画面ではなく、作成フォームを直接開く（押した画面は変わらない） */
   document.getElementById('sbNav').innerHTML=NAV[ME.role].map(t=>
-    `<button class="sb-item" data-tab="${t.id}" onclick="${t.run?`sbRun(${t.run})`:`sbGo('${t.id}')`}" title="${t.label}">
+    `<button class="sb-item" data-tab="${t.id}"${t.demo?` data-demo="${t.demo}"`:''} onclick="${t.run?`sbRun(${t.run})`:`sbGo('${t.id}')`}" title="${t.label}">
       <span class="si">${ic(t.ic)}</span><span class="sl">${t.label}</span></button>`).join('');
 
   /* 下段は「日常的に使う道具」だけを置く。
@@ -1654,7 +1718,7 @@ function buildNav(){
      テーマだけはここにも出す。プロフィール →「ほかの設定」の中は深すぎて、
      「見づらい」と思った人がたどり着けなかったため */
   document.getElementById('sbAct').innerHTML=`
-    ${ME.role!=='intern'?`<button class="sb-item" onclick="openInternInviteLink()" title="インターン生に渡す、面談の申請リンク">
+    ${ME.role!=='intern'?`<button class="sb-item" data-demo="apply" onclick="openInternInviteLink()" title="インターン生に渡す、面談の申請リンク">
       <span class="si">${ic('link')}</span><span class="sl">面談申請リンク</span></button>`:''}
     <button class="sb-item" onclick="openGoogleCalendarSettings()" title="Googleカレンダーと連携する">
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
@@ -1849,8 +1913,8 @@ function flushPendingRefresh(){
    一覧に説明が並ぶと読む量が増えて選びにくくなるため。
    呼び出し側は説明を書いたまま残してあるので、必要になれば
    <span class="hxd"> を戻すだけでまた出せる */
-function hex(act,icon,t,d,badge,dot){
-  return `<button class="hex" onclick="${act}">
+function hex(act,icon,t,d,badge,dot,demo){
+  return `<button class="hex"${demo?` data-demo="${demo}"`:''} onclick="${act}">
     ${badge?`<span class="hxb">${badge}</span>`:''}
     ${dot?`<span class="hxdot" title="日程が未確定のものがあります"></span>`:''}
     <span class="hxi">${ic(icon)}</span>
@@ -1912,13 +1976,13 @@ function viewHome(){
     /* 2列で並ぶので、回答を見る「面談一覧・時間」を左上に置き、作る2つを続ける */
     items.push(
       hex("go('interviews')",'list','面談一覧・時間','面談・日程調整・空き時間の回答',pend+unread,sentUnconfirmed>0),
-      hex('openRequestForm()','calendar-check','候補日を送る','候補日を出して都合を聞く'),
-      hex('openFreeslotForm()','clock','空き時間を聞く','URLで空いている時間を集める'),
+      hex('openRequestForm()','calendar-check','候補日を送る','候補日を出して都合を聞く',0,false,'attend'),
+      hex('openFreeslotForm()','clock','空き時間を聞く','URLで空いている時間を集める',0,false,'free'),
       hex("go('avset')",'alarm','受けられる時間','曜日ごとの受付時間'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
        毎日使うものではないので、六角形の上に控えめな帯として置く */
-    const linkBtn=`<button class="flatbtn" onclick="openInternInviteLink()">
+    const linkBtn=`<button class="flatbtn" data-demo="apply" onclick="openInternInviteLink()">
       <span class="fb-ic">${ic('link')}</span>
       <span class="fb-tx"><b>面談申請リンク</b><small>インターン生に渡すと面談を申請できます（支部で共通）</small></span>
       <span class="fb-go">${ic('chevron')}</span></button>`;
