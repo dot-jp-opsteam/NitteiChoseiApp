@@ -375,5 +375,78 @@ console.log('\n[ 空き時間の帯まとめ index.html ]');
   check('選んでいなければ空', T.fsOwnRanges([]), []);
 }
 
+console.log('\n[ 受けられない時間の表 index.html の blkIntervals / blkHit / blkColumnPlan ]');
+{
+  /* 表のマスは「時刻」。学生の申請画面と同じく、21:00・21:30・22:00 に×なら
+     21:00〜22:00 が受けられない（21:00〜22:30 ではない） */
+  const B = load('index.html', ['blkIntervals', 'blkHit', 'blkColumnPlan']);
+  const t = (h, m, day = 7) => new Date(2026, 7, day, h, m, 0, 0).getTime();
+  const at = (h, m, day) => new Date(t(h, m, day)).toISOString();
+  const hitsOf = (blocks) => {
+    const v = B.blkIntervals(blocks);
+    const out = [];
+    for (let m = 9 * 60; m <= 24 * 60; m += 30) if (B.blkHit(v, t(0, m))) out.push(m / 60);
+    return out;
+  };
+  // 1日ぶんの列。xs に入っている時刻だけ×、ほかは○
+  const column = (xs, extra = {}) => {
+    const cells = [];
+    for (let m = 9 * 60; m <= 24 * 60; m += 30) {
+      const st = extra[m / 60] || (xs.includes(m / 60) ? 'x' : 'ok');
+      cells.push({ t: t(0, m), st });
+    }
+    return cells;
+  };
+  let n = 0;
+  const newId = () => 'n' + (++n);
+  const plan = (xs, blocks = [], extra) => B.blkColumnPlan(column(xs, extra), blocks, newId);
+  const span = (b) => [b.kind, b.start, b.end];
+
+  // 作る側
+  check('21:00・21:30・22:00 に× → 21:00〜22:00 で保存',
+    plan([21, 21.5, 22]).added.map(span), [['range', at(21, 0), at(22, 0)]]);
+  check('×1つ → その時刻から30分',
+    plan([21]).added.map(span), [['slot', at(21, 0), at(21, 30)]]);
+  check('離れた×は別々',
+    plan([10, 21, 21.5]).added.map(span),
+    [['slot', at(10, 0), at(10, 30)], ['range', at(21, 0), at(21, 30)]]);
+  check('23:30・24:00 に× → 23:30〜24:00（翌日へはみ出さない）',
+    plan([23.5, 24]).added.map(span), [['range', at(23, 30), at(24, 0)]]);
+  check('予定ありのマスをはさんでもひと続き',
+    plan([21, 22], [], { 21.5: 'lock' }).added.map(span), [['range', at(21, 0), at(22, 0)]]);
+  check('過ぎた時間は保存し直さない',
+    plan([12], [], { 9: 'past', 9.5: 'past' }).added.map(span), [['slot', at(12, 0), at(12, 30)]]);
+
+  // 読む側（作ったものを読み戻すと、同じマスが×になる）
+  check('range は終わりの時刻も×',
+    hitsOf([{ kind: 'range', start: at(21, 0), end: at(22, 0) }]), [21, 21.5, 22]);
+  check('slot は始まりの1マスだけ×',
+    hitsOf([{ kind: 'slot', start: at(21, 0), end: at(21, 30) }]), [21]);
+  check('以前の作り（30分の slot を並べた）は、つないで読む',
+    hitsOf([{ kind: 'slot', start: at(21, 0), end: at(21, 30) },
+      { kind: 'slot', start: at(21, 30), end: at(22, 0) }]), [21, 21.5, 22]);
+  check('日時でまとめて追加（kind なし）は range と同じ',
+    hitsOf([{ start: at(13, 0), end: at(14, 0) }]), [13, 13.5, 14]);
+  check('Googleの予定は×に数えない',
+    hitsOf([{ kind: 'external-google', start: at(13, 0), end: at(14, 0) }]), []);
+
+  // 作り直し：列に見えている自分の分は外し、Googleの予定と別の日は触らない
+  const old = [
+    { id: 'a', kind: 'slot', start: at(21, 0), end: at(21, 30) },
+    { id: 'b', kind: 'slot', start: at(21, 30), end: at(22, 0) },
+    { id: 'g', kind: 'external-google', start: at(13, 0), end: at(14, 0) },
+    { id: 'o', kind: 'slot', start: at(21, 0, 8), end: at(21, 30, 8) },
+  ];
+  check('保存済みが無ければ外すものも無い', plan([21, 21.5]).removedIds, []);
+  check('作り直すときは同じ列の古い分を外す', plan([21, 21.5], old).removedIds, ['a', 'b']);
+  // 9時より前にはみ出していた分は、はみ出した部分だけ残す
+  const early = [{ id: 'e', start: at(8, 0), end: at(10, 0) }];
+  check('9時より前の部分は残す（9:00 も×のまま）',
+    plan([9, 9.5, 10], early).added.map(span),
+    [['range', at(9, 0), at(10, 0)], ['range', at(8, 0), at(9, 0)]]);
+  check('9:00 の×を外したら、前の部分は 8:30 までにする',
+    plan([], early).added.map(span), [['range', at(8, 0), at(8, 30)]]);
+}
+
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

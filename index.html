@@ -974,6 +974,82 @@ function genSlots(staffId,days=14){
 // 不可時間エディタ用：週マトリクス表データ生成（月曜始まり7日 × 30分刻み）
 // state: 'off'（過ぎた時間）/ 'free'（受付中）/ 'block'（不可・解除可）/ 'locked'（予定・面談あり＝操作不可）
 const BLK_GRID_START=9*60,BLK_GRID_END=24*60;
+
+/* ===== 受けられない時間：保存データ ⇔ 表の×（時刻） =====
+   表のマスは「時刻」。学生の申請画面と同じく、続けて×を付けたら「最初の×〜最後の×」、
+   ×が1つだけなら「その時刻から30分」とみなす。保存は次の2種類：
+     kind:'slot'  … ×1つぶん。start〜start+30分。表には start の1マスだけ×で出る
+     kind:'range' … 続いた×。start〜end。表には start から end まで（end も含む）×で出る
+   kind の無いもの（日時でまとめて追加）は range と同じに読む。
+   以前の作り（1マス＝30分の slot を並べて保存）も、続いた slot をつないで読めば同じ意味になる。
+   tools/test-fmt.mjs から切り出して動かすので、文字列に波括弧を入れないこと */
+function blkIntervals(blocks){
+  const H=30*60000;
+  const out=[];
+  const slots=[];
+  (blocks||[]).forEach(b=>{
+    if(b.kind==='external-google')return;
+    const s=new Date(b.start).getTime(),e=new Date(b.end).getTime();
+    if(b.kind==='slot')slots.push({s:s,e:e});
+    else out.push({s:s,e:e,incl:true});
+  });
+  slots.sort((a,b)=>a.s-b.s);
+  let cur=null;
+  slots.forEach(x=>{
+    if(cur&&x.s<=cur.e){cur.e=Math.max(cur.e,x.e);return;}
+    if(cur)out.push({s:cur.s,e:cur.e,incl:cur.e-cur.s>H});
+    cur={s:x.s,e:x.e};
+  });
+  if(cur)out.push({s:cur.s,e:cur.e,incl:cur.e-cur.s>H});
+  return out;
+}
+/* 時刻 t のマスが×かどうか */
+function blkHit(intervals,t){
+  return intervals.some(v=>v.s<=t&&(t<v.e||(v.incl&&t===v.e)));
+}
+/* 1日ぶん（表の1列）の×の並びから、保存し直す内容を作る。
+   cells は上から順に {t:時刻(ms), st:'x'|'lock'|'ok'|'past'}。
+   その列に見えている自分の不可時間はいったん全部外し、×の並びから作り直す。
+   列の外（9時より前など）にはみ出していた分は、はみ出した部分だけ残す。
+   面談・Googleの予定（lock）をはさんだ×どうしは、ひと続きとして扱う */
+function blkColumnPlan(cells,blocks,newId){
+  const H=30*60000;
+  const live=cells.filter(c=>c.st!=='past');
+  if(!live.length)return{added:[],removedIds:[]};
+  const from=live[0].t,last=live[live.length-1].t,to=last+H;
+  const isoOf=ms=>new Date(ms).toISOString();
+  const added=[],removedIds=[];
+  let i=0;
+  while(i<live.length){
+    if(live[i].st!=='x'){i++;continue;}
+    let j=i,end=i;
+    while(j+1<live.length&&(live[j+1].st==='x'||live[j+1].st==='lock')&&live[j+1].t-live[j].t===H){
+      j++;if(live[j].st==='x')end=j;
+    }
+    const s=live[i].t;
+    added.push(end===i
+      ?{id:newId(),start:isoOf(s),end:isoOf(s+H),note:'面談不可',kind:'slot'}
+      :{id:newId(),start:isoOf(s),end:isoOf(live[end].t),note:'面談不可',kind:'range'});
+    i=end+1;
+  }
+  const xFrom=live[0].st==='x';
+  (blocks||[]).forEach(b=>{
+    if(b.kind==='external-google')return;
+    const s=new Date(b.start).getTime(),e=new Date(b.end).getTime();
+    const incl=b.kind!=='slot';
+    if(!(s<=last&&(e>from||(incl&&e===from))))return;
+    removedIds.push(b.id);
+    if(s<from){
+      /* はみ出した前の部分。終わりを列の先頭の時刻にすると、そのマスが×で出てしまうので、
+         先頭が×でないときは30分手前で切る */
+      const pe=xFrom?from:from-H;
+      if(pe>s)added.push({id:newId(),start:isoOf(s),end:isoOf(pe),note:b.note||'',kind:'range'});
+    }
+    if(e>to)added.push({id:newId(),start:isoOf(to),end:isoOf(e),note:b.note||'',kind:incl?'range':'slot'});
+  });
+  return{added,removedIds};
+}
+
 function genEditGrid(staffId,weekOffset){
   const blocks=((DB.availability[staffId]||{}).blocks||[]);
   const taken=(DB.interviews||[]).filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
@@ -988,8 +1064,11 @@ function genEditGrid(staffId,weekOffset){
   for(let i=0;i<7;i++){const d=new Date(first);d.setDate(first.getDate()+i);days.push(d);}
   /* 表の時間帯は、全員・全曜日 09:00〜24:00 に固定（2026-10-05 の指示）。
      曜日ごとの「面談を受けられる時間」の外側や休みの曜日のマスも押せる。
-     行は枠の始まりの時刻なので、24:00 の行（翌日 0:00〜0:30 の枠）まで出す */
+     各行は「時刻」を表す（学生の申請画面と同じ考え方）。21:00・21:30・22:00 に×なら
+     21:00〜22:00 が受けられない。だから 24:00 の行まで出す */
   const times=[];for(let t=BLK_GRID_START;t<=BLK_GRID_END;t+=30)times.push(t);
+  const google=blocks.filter(b=>b.kind==='external-google');
+  const own=blkIntervals(blocks);
   const grid=days.map(day=>{
     return times.map(t=>{
       const dt=new Date(day);dt.setHours(Math.floor(t/60),t%60,0,0);
@@ -998,16 +1077,13 @@ function genEditGrid(staffId,weekOffset){
       if(st<now)return{state:'off',iso};
       const takenHit=taken.some(x=>Math.abs(x-st)<30*60000-1);
       if(takenHit)return{state:'locked',iso,label:'面談'};
-      const blk=blocks.find(b=>{const bs=new Date(b.start).getTime(),be=new Date(b.end).getTime();return st<be&&en>bs;});
-      if(blk){
-        /* 自分で入れた不可時間は、枠タップでもまとめて追加でも、
-           カレンダー上でそのまま解除できるようにする（登録済み一覧を廃止したため）。
-           Googleカレンダーから取り込んだ予定（external-google）だけは
-           向こうが元なので、ここでは外せない「予定あり」のままにする */
-        return blk.kind==='external-google'
-          ?{state:'locked',iso,label:'予定'}
-          :{state:'block',iso,blockId:blk.id};
-      }
+      /* Googleカレンダーから取り込んだ予定（external-google）は
+         向こうが元なので、ここでは外せない「予定あり」のままにする */
+      if(google.some(b=>st<new Date(b.end).getTime()&&en>new Date(b.start).getTime()))
+        return{state:'locked',iso,label:'予定'};
+      /* 自分で入れた不可時間は、枠タップでもまとめて追加でも、
+         カレンダー上でそのまま解除できる（登録済み一覧を廃止したため） */
+      if(blkHit(own,st))return{state:'block',iso};
       return{state:'free',iso};
     });
   });
@@ -3459,9 +3535,11 @@ function viewAvailSet(){
     const label=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
     const cells=egrid.map(dayCol=>{
       const c=dayCol[ti];
-      if(c.state==='off')return `<td class="bt-c off">×</td>`;
-      if(c.state==='locked')return `<td class="bt-c locked" title="${c.label}あり">－</td>`;
-      if(c.state==='block')return `<td class="bt-c block" data-iso="${c.iso}" data-block-id="${c.blockId}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップまたはドラッグで解除">×</td>`;
+      /* 押せないマスにも data-iso を付ける。保存し直すとき、列の並び（どこが過ぎた時間で、
+         どこが予定ありか）をそのまま読むため（blkColumnPlan） */
+      if(c.state==='off')return `<td class="bt-c off" data-iso="${c.iso}">×</td>`;
+      if(c.state==='locked')return `<td class="bt-c locked" data-iso="${c.iso}" title="${c.label}あり">－</td>`;
+      if(c.state==='block')return `<td class="bt-c block" data-iso="${c.iso}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップまたはドラッグで解除">×</td>`;
       return `<td class="bt-c ok" data-iso="${c.iso}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップ、または同じ日の中で上下になぞって不可にする">○</td>`;
     }).join('');
     return `<tr><th class="bt-t">${label}</th>${cells}</tr>`;
@@ -3516,7 +3594,7 @@ function viewAvailSet(){
         <span class="wm">${monthLabel}</span>
         <button class="pg" onclick="avSetWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
-      <label class="fl"><span>時間をタップ（受けられない <span id="avBlockedCnt">${blockedCnt}</span>枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）</span></label>
+      <label class="fl"><span>時間をタップ（受けられない <span id="avBlockedCnt">${blockedCnt}</span>枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）。21:00〜22:00 を外すなら 21:00・21:30・22:00 の3マスに×</span></label>
       ${table}
       <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
         <span><span class="legend-dot" style="background:var(--panel);border:1px solid var(--line)"></span>受けられる（タップで外す）</span>
@@ -3539,10 +3617,6 @@ function blocksOf(db,userId){
   db.availability[userId]=db.availability[userId]||{};
   db.availability[userId].blocks=db.availability[userId].blocks||[];
   return db.availability[userId];
-}
-function makeSlotBlock(iso){
-  const st=new Date(iso),en=new Date(st.getTime()+30*60000);
-  return {id:'blk_'+uid(),start:st.toISOString(),end:en.toISOString(),note:'面談不可',kind:'slot'};
 }
 /* 追加・削除をまとめて反映する。ドラッグで一気に操作した分も1回の保存で済ませる。
    blocks 全体を置き換えるのではなく増減だけを適用することで、
@@ -3611,7 +3685,7 @@ function avPointerDown(e,iso){
    往復してもモードが入れ替わらないようにする */
 function startAvDrag(cell,iso){
   const mode=cell.classList.contains('block')?'unblock':'block';
-  AVDRAG={mode,touched:new Set(),added:[],removedIds:[],col:dragColOf(cell)};
+  AVDRAG={mode,touched:new Set(),col:dragColOf(cell)};
   document.body.classList.add('noselect');
   avDragApply(cell,iso);
 }
@@ -3685,27 +3759,24 @@ function avDragMove(e){
 }
 function avDragApply(cell,iso){
   if(!AVDRAG||AVDRAG.touched.has(iso))return;
+  /* ここでは見た目だけ変える。保存する中身は、指を離したときに
+     その列の×の並びから作り直す（avDragEnd → blkColumnPlan）。
+     1マスずつ保存すると「続いた×＝最初〜最後の時刻」という意味にならないため */
   if(AVDRAG.mode==='block'){
     if(!cell.classList.contains('ok'))return;
-    const b=makeSlotBlock(iso);
-    AVDRAG.added.push(b);
-    cell.classList.remove('ok');cell.classList.add('block');
-    cell.dataset.blockId=b.id;cell.textContent='×';
+    cell.classList.remove('ok');cell.classList.add('block');cell.textContent='×';
   }else{
     if(!cell.classList.contains('block'))return;
-    const bid=cell.dataset.blockId;
-    if(bid)AVDRAG.removedIds.push(bid);
-    /* 「まとめて追加」で入れた不可時間は1件で何マスもまたぐ。1マス外すと
-       その1件ごと消えるので、同じ id を持つマスは全部そろえて戻す。
-       表を描き直さない作りなので、ここでそろえないと見た目だけ食い違う */
-    const same=bid?document.querySelectorAll(`.booktable .bt-c.block[data-block-id="${bid}"]`):[cell];
-    same.forEach(td=>{
-      td.classList.remove('block');td.classList.add('ok');
-      delete td.dataset.blockId;td.textContent='○';
-      if(td!==cell&&td.dataset.iso)AVDRAG.touched.add(td.dataset.iso);
-    });
+    cell.classList.remove('block');cell.classList.add('ok');cell.textContent='○';
   }
   AVDRAG.touched.add(iso);
+}
+/* 表の1列ぶんのマスを、上から順に {t, st} の形で読み取る */
+function avColumnCells(col){
+  if(!col||!col.table)return[];
+  return Array.prototype.filter.call(col.table.querySelectorAll('tbody .bt-c'),td=>td.cellIndex===col.index)
+    .map(td=>({t:new Date(td.dataset.iso).getTime(),
+      st:td.classList.contains('block')?'x':td.classList.contains('locked')?'lock':td.classList.contains('off')?'past':'ok'}));
 }
 async function avDragEnd(){
   document.removeEventListener('pointermove',avDragMove);
@@ -3713,13 +3784,14 @@ async function avDragEnd(){
   document.removeEventListener('pointercancel',avDragEnd);
   document.body.classList.remove('noselect');
   if(!AVDRAG)return;
-  const {touched,added,removedIds}=AVDRAG;
+  const {touched,col}=AVDRAG;
   AVDRAG=null;
+  if(!touched.size)return;
+  const {added,removedIds}=blkColumnPlan(avColumnCells(col),((DB.availability||{})[ME.id]||{}).blocks||[],()=>'blk_'+uid());
   /* なぞっている間に画面のセルはもう塗り替えてある（avDragApply）。
      ここで描き直すと、指を離すたびに表がまるごと作り直されて
      スマホでは画面が一瞬ちらつき、見ていた位置も飛ぶ。
      保存が通ったときは何もせず、失敗したときだけ本当の状態へ戻す */
-  if(!touched.size)return;
   const ok=await applyBlockChanges({added,removedIds});
   if(!ok){renderQuiet();return;}
   // 表は描き直さないので、見出しの枠数だけその場で数え直す
