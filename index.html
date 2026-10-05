@@ -987,8 +987,9 @@ function genEditGrid(staffId,weekOffset){
   const days=[];
   for(let i=0;i<7;i++){const d=new Date(first);d.setDate(first.getDate()+i);days.push(d);}
   /* 表の時間帯は、全員・全曜日 09:00〜24:00 に固定（2026-10-05 の指示）。
-     曜日ごとの「面談を受けられる時間」の外側や休みの曜日のマスも押せる */
-  const times=[];for(let t=BLK_GRID_START;t+30<=BLK_GRID_END;t+=30)times.push(t);
+     曜日ごとの「面談を受けられる時間」の外側や休みの曜日のマスも押せる。
+     行は枠の始まりの時刻なので、24:00 の行（翌日 0:00〜0:30 の枠）まで出す */
+  const times=[];for(let t=BLK_GRID_START;t<=BLK_GRID_END;t+=30)times.push(t);
   const grid=days.map(day=>{
     return times.map(t=>{
       const dt=new Date(day);dt.setHours(Math.floor(t/60),t%60,0,0);
