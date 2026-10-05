@@ -7,11 +7,12 @@
    index.html を直したあとにこれを実行すると、
    test/デザイン確認用.html が最新の見た目で作り直される。
 
-   やっていること（index.html への変更は3か所だけ）：
+   やっていること（index.html への変更は4か所だけ）：
      1. style.css の参照を ../style.css に直す（testフォルダの中にあるため）
      2. 利用規約・プライバシーポリシーのリンクを相対パスに直す
         （file:// で開くと / 始まりのリンクはドライブの一番上を指してしまう）
-     3. アプリ本体より先に test-mock.js を読み込ませる
+     3. holidays.js の参照を相対パスに直す（同じく / 始まりは file:// で読めない）
+     4. アプリ本体より先に test-mock.js を読み込ませる
         （偽のfetchを仕込み、ログインを通らずダミーデータで動かすため）
 
    アプリ本体のコードそのものには一切手を入れていない。
@@ -53,7 +54,9 @@ const out = BANNER + html
   )
   // 2
   .replace('href="/terms.html"', 'href="../terms.html"')
-  .replace('href="/privacy.html"', 'href="../privacy.html"');
+  .replace('href="/privacy.html"', 'href="../privacy.html"')
+  // 祝日の表。/ 始まりのままだと file:// で読めず、ホームの描画が途中で落ちて空白になる
+  .replace('src="/holidays.js"', 'src="../holidays.js"');
 
 await mkdir(OUT_DIR, { recursive: true });
 await writeFile(OUT, out, 'utf8');
