@@ -156,7 +156,24 @@ async function centerOf(locator) {
   const b = await locator.boundingBox();
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
-async function glide(page, p) { await page.mouse.move(p.x, p.y, { steps: 16 }); await sleep(250); }
+/* マウスを from から to へ、ms ミリ秒かけて動かす。時計に合わせて位置を決めるので、
+   マシンが重くても動きが止まらず、なめらか（出だしと終わりはゆっくり）。
+   steps 指定の move は待ち時間なしに一気に送られ、カーソルが瞬間移動してカクついた */
+let MOUSE = { x: 0, y: 0 };
+const ease = (t) => t * t * (3 - 2 * t);
+async function moveTo(page, to, ms, easing = true) {
+  const from = MOUSE;
+  const t0 = Date.now();
+  for (;;) {
+    const k = Math.min(1, (Date.now() - t0) / ms);
+    const e = easing ? ease(k) : k;
+    await page.mouse.move(from.x + (to.x - from.x) * e, from.y + (to.y - from.y) * e);
+    if (k >= 1) break;
+    await wait(8);
+  }
+  MOUSE = { x: to.x, y: to.y };
+}
+async function glide(page, p) { await moveTo(page, p, 900); await sleep(250); }
 async function click(page, locator) {
   await scrollTo(page, locator);
   await glide(page, await centerOf(locator));
@@ -170,11 +187,7 @@ async function click(page, locator) {
 async function dragSlots(page, from, to) {
   await glide(page, from);
   await page.mouse.down(); await wait(500);          // 押したまま、少し間を置く
-  const N = 36;
-  for (let i = 1; i <= N; i++) {
-    await page.mouse.move(from.x + (to.x - from.x) * i / N, from.y + (to.y - from.y) * i / N);
-    await wait(45);
-  }
+  await moveTo(page, to, 1800, false);                // 一定の速さでなぞる
   await wait(600);                                    // 離す前に、選ばれた範囲を見せる
   await page.mouse.up(); await wait(1400);            // 離したあとも、結果を見せる
 }
@@ -293,7 +306,7 @@ function encode(frames, endT, destBase) {
   list.push(`file '${String(frames.length - 1).padStart(5, '0')}.jpg'`); // concat の決まり：最後は重ねて書く
   fs.writeFileSync(path.join(dir, 'list.txt'), list.join('\n') + '\n');
   const head = ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'list.txt'),
-    '-an', '-vf', `fps=20,scale=${W * S}:-2`];
+    '-an', '-vf', `fps=24,scale=${W * S}:-2`];
   execFileSync('ffmpeg', [...head, '-c:v', 'libx264', '-preset', 'slow', '-crf', '21',
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart', destBase + '.mp4']);
   execFileSync('ffmpeg', [...head, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '30',
@@ -324,13 +337,14 @@ try {
     await ctx.addInitScript(CURSOR_JS);
     const page = await ctx.newPage();
     page.on('pageerror', (e) => console.warn(`  ${name}: ページのエラー ${e.message}`));
+    MOUSE = { x: 0, y: 0 };
     await scene(page, urls[name]);
     const cap = CAPTURE.get(page);
     await cap.stop();
     await ctx.close();
     const base = path.join(OUT_DIR, name);
     encode(cap.frames, cap.endT, base);
-    console.log(`  ${name}: ${cap.frames.length}コマ（約${(cap.frames.length / ((cap.endT - cap.frames[0].t) / 1000)).toFixed(0)}コマ/秒）`);
+    console.log(`  ${name}: ${cap.frames.length}コマ（約${(cap.frames.length / ((cap.endT - cap.frames[0].t) / 1000)).toFixed(0)}コマ/秒、最大間隔${Math.max(...cap.frames.slice(1).map((f, i) => f.t - cap.frames[i].t)).toFixed(0)}ms）`);
     const kb = (ext) => (fs.statSync(`${base}.${ext}`).size / 1024).toFixed(0);
     console.log(`作成しました: demo/${name}.mp4（${kb('mp4')}KB）・demo/${name}.webm（${kb('webm')}KB）`);
   }
