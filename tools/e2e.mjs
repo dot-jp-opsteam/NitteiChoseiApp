@@ -1701,11 +1701,12 @@ async function run() {
         (wk1.json.days || [])[0],
         `${next.getFullYear()}-${p(next.getMonth() + 1)}-${p(next.getDate())}`);
     }
-    /* 表の高さはスタッフの受付時間に関わらず9:00〜23:00で固定。
-       週ごとに伸び縮みすると、同じ時刻の行が上下にずれて選びにくくなるため */
+    /* 表の高さは全員・全曜日 9:00〜24:00 で固定（2026-10-06 から。以前は 9:00〜23:00）。
+       行は「時刻」で、21:00・21:30・22:00 を選んだら 21:00〜22:00 の意味になるので、
+       終わりを表す 24:00 の行まで出す */
     check('表はいつも9:00から始まる', (slotRes.json.times || [])[0], '09:00');
-    check('表は22:30の枠で終わる', (slotRes.json.times || []).slice(-1)[0], '22:30');
-    check('30分刻みで28行ある', (slotRes.json.times || []).length, 28);
+    check('表は24:00の行で終わる', (slotRes.json.times || []).slice(-1)[0], '24:00');
+    check('30分刻みで31行ある', (slotRes.json.times || []).length, 31);
     check('表の中身が日数ぶんある', (slotRes.json.grid || []).length, 7);
     check('表の1列が時間の数と一致する',
       (slotRes.json.grid || [])[0]?.length, (slotRes.json.times || []).length);

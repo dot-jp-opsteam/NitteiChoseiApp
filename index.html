@@ -758,7 +758,7 @@ function ivGroups(iv){
   const sorted=[...first.keys()].sort((a,b)=>new Date(a)-new Date(b));
   const runs=[];
   for(const iso of sorted){
-    const key=ymd(new Date(iso));
+    const key=slotYmd(iso);
     if(allDay[key]){
       const found=runs.find(r=>r.allDay&&r.key===key);
       if(found){found.slots.push(iso);continue;}
@@ -766,7 +766,7 @@ function ivGroups(iv){
     }
     const last=runs[runs.length-1];
     const prev=last&&!last.allDay&&last.slots[last.slots.length-1];
-    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS&&key===ymd(new Date(prev))){
+    if(prev&&new Date(iso)-new Date(prev)===SLOT_MS&&key===slotYmd(prev)){
       last.slots.push(iso);continue;
     }
     runs.push({allDay:false,key,slots:[iso]});
@@ -793,8 +793,19 @@ function fmtGroupRange(g){
     if(prev&&new Date(iso)-new Date(prev)===SLOT_MS)run.push(iso);
     else runs.push([iso]);
   });
-  const times=runs.map(r=>`${hm(r[0])}〜${hm(runEnd(r))}`).join('＆');
-  return `${fmtDate(g.slots[0])} ${times}`;
+  const times=runs.map(r=>`${hm24(r[0])}〜${hm24(runEnd(r))}`).join('＆');
+  return `${fmtDate(slotDayStart(g.slots[0]))} ${times}`;
+}
+/* 申請画面の表のいちばん下は 24:00 の行（中身は翌日 0:00）。希望に 0:00 は出てこないので、
+   0:00 は「前の日の 24:00」として読む（apply.html の hm / dayKey と同じ扱い） */
+function slotDayStart(iso){
+  const d=new Date(iso);
+  return (d.getHours()===0&&d.getMinutes()===0)?new Date(d.getTime()-1):d;
+}
+function slotYmd(iso){return ymd(slotDayStart(iso));}
+function hm24(iso){
+  const d=new Date(iso);
+  return (d.getHours()===0&&d.getMinutes()===0)?'24:00':hm(d);
 }
 /* 希望日時の一覧に必ず添える一文。
    「10:00〜10:30」を面談の長さと読み違えられることがあったため、
@@ -2045,14 +2056,15 @@ function viewHome(){
     const sentUnconfirmed=sentUnconfirmedAttendCount();
     /* 所属部署はプロフィールの「ほかの設定」へ移した。
        「受けられる時間」の入口は「この日は受けられない時間」を初期表示にしている。
-       曜日ごとの受付時間（面談を受けられる時間）は、その画面の中から開く。
+       曜日ごとの受付時間（面談を受けられる時間）は 2026-10-06 に使うのをやめた。
+       全員・全曜日 09:00〜24:00 で、外したい時間を「受けられない時間」で×にする。
        カレンダー連携は左メニューだけに置く（ホームにもプロフィールにも出さない） */
     /* 2列で並ぶので、回答を見る「面談一覧・時間」を左上に置き、作る2つを続ける */
     items.push(
       hex("go('interviews')",'list','面談一覧・時間','面談・日程調整・空き時間の回答',pend+unread,sentUnconfirmed>0),
       hex('openRequestForm()','calendar-check','候補日を送る','候補日を出して都合を聞く',0,false,'attend'),
       hex('openFreeslotForm()','clock','空き時間を聞く','URLで空いている時間を集める',0,false,'free'),
-      hex("go('avset')",'alarm','受けられる時間','曜日ごとの受付時間'),
+      hex("go('avset')",'alarm','受けられる時間','受けられない時間を外す'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
        毎日使うものではないので、六角形の上に控えめな帯として置く */
@@ -2153,7 +2165,7 @@ function renderGoogleCalendarSettings(data){
       <button class="btn block" style="margin-top:8px;color:var(--bad);border-color:var(--bad-line)" onclick="disconnectGoogleCalendar()">連携を解除</button>`);
   }else{
     openSheet(`<h3>Googleカレンダー連携</h3>
-      <p class="page-sub">連携すると、カレンダーに予定がある時間は受付時間内でも自動で×になります。二重予約の心配がなくなります。</p>
+      <p class="page-sub">連携すると、カレンダーに予定がある時間は自動で×になります。二重予約の心配がなくなります。</p>
       <button class="btn pri block" style="margin-top:16px" onclick="startGoogleConnect(this)">Googleカレンダーと連携する</button>
       ${openCalendarButton()}`);
   }
@@ -3583,9 +3595,7 @@ function viewAvailSet(){
 
   return `
     <h1 class="page">この日は受けられない時間</h1>
-    <p class="page-sub">曜日ごとの「面談を受けられる時間」から、日にちを指定して外します。ここで外した時間は、インターン生の申請画面で「×」になり選べなくなります。</p>
-    <button class="btn block" style="margin-top:10px" onclick="openAvailabilitySettings()">
-      ${ic('alarm')}面談を受けられる時間</button>
+    <p class="page-sub">面談を受けられる時間は、全員・全曜日 09:00〜24:00 です。受けられない時間に×を付けると、インターン生の申請画面や日程調整のページで、その時間が「×」になり選べなくなります。</p>
 
     <h3 style="margin:20px 2px 8px;font-size:15px">① カレンダーから枠をタップ</h3>
     <div class="card"><div class="cb">
@@ -5160,7 +5170,7 @@ async function copyFreeslotUrl(){
 function fsTally(responses){
   const map={};
   (responses||[]).forEach(function(r){
-    (r.choices||[]).forEach(function(iso){
+    fsSegments(r.choices).forEach(function(iso){
       if(!map[iso])map[iso]=[];
       map[iso].push(r.name);
     });
@@ -5168,6 +5178,26 @@ function fsTally(responses){
   return map;
 }
 const FS_SLOT_MS=30*60*1000;
+
+/* 学生が選んだ「時刻」を、空いている30分の区切り（その時刻から30分）に直す。
+   表の行は時刻で、21:00・21:30・22:00 を選んだら 21:00〜22:00 の意味
+   （申請画面の runEnd と同じ読み方）。続いた並びの最後は「終わりの時刻」なので数えない。
+   1つだけ選んだときは、その時刻から30分とみなす。
+   集計はこの区切りの単位で重ねるので、人によって終わりが違っても正しくかぶりが出る。
+   ※ tools/test-fmt.mjs が波括弧を数えて切り出すので、
+     この関数の中に波括弧を含む文字列や正規表現を書かないこと */
+function fsSegments(choices){
+  const isos=(choices||[]).slice().sort(function(a,b){return new Date(a)-new Date(b);});
+  const out=[];
+  isos.forEach(function(iso,i){
+    const prev=isos[i-1],next=isos[i+1];
+    const hasPrev=!!prev&&new Date(iso)-new Date(prev)===FS_SLOT_MS;
+    const hasNext=!!next&&new Date(next)-new Date(iso)===FS_SLOT_MS;
+    if(hasPrev&&!hasNext)return;
+    out.push(iso);
+  });
+  return out;
+}
 
 /* 続いていて、かつ顔ぶれが同じ枠を1本の帯にまとめる。
    戻りは [{start, end, names}]（end は最後の枠の終わり時刻）。
@@ -5204,7 +5234,7 @@ function fsBest(ranges){
 /* 1人分の空き時間を帯にまとめる。顔ぶれの比較はしない。
    「終日OK」の日も、ほかの日と同じく時間の帯で出す */
 function fsOwnRanges(choices){
-  const isos=(choices||[]).slice().sort(function(a,b){return new Date(a)-new Date(b);});
+  const isos=fsSegments(choices);
   const out=[];
   isos.forEach(function(iso){
     const end=new Date(new Date(iso).getTime()+FS_SLOT_MS).toISOString();
@@ -5276,6 +5306,8 @@ function fsPeopleHTML(responses){
 }
 function fsHM(iso){
   const d=new Date(iso);
+  // 表のいちばん下は 24:00（中身は翌日 0:00）。空き時間に 0:00 は無いので 24:00 と読む
+  if(d.getHours()===0&&d.getMinutes()===0)return '24:00';
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 // 「8/25(月)」。曜日が無いと、どの日の話か読み取りにくい

@@ -8,15 +8,21 @@
 
 const SLOT_MINUTES = 30;
 
-/* 申請ページの表に出す時間の幅。スタッフの設定に関わらず、いつもこの高さで出す。
-   週によって表の高さが変わると、同じ時刻の行が上下にずれて選びにくいため。
-   受け付けていない時間は「×」として並ぶ */
+/* 申請ページの表に出す時間の幅。全員・全曜日 09:00〜24:00（2026-10-06 の指示）。
+   曜日ごとの「面談を受けられる時間」（weekly）はもう使わない。選べないのは
+   「受けられない時間」・Googleの予定・確定した面談・過ぎた時刻だけ。
+   スタッフの「受けられない時間」の表（index.html の genEditGrid）と同じ幅にしてある。
+   表の行は「時刻」で、21:00・21:30・22:00 を選んだら 21:00〜22:00 の意味になる。
+   だから終わりを表す 24:00 の行（翌日 0:00）まで出す */
 const GRID_START = '09:00';
-const GRID_END = '23:00';
+const GRID_END = '24:00';
+const GRID_START_M = 9 * 60;
+const GRID_END_M = 24 * 60;
 
 /* 曜日ごとの受付時間の既定値。スタッフが何も設定していないときに使う。
    0=日曜。設定していない人でも実際に選んでもらえるよう、
-   曜日を問わず9〜23時を受け付ける（2026-08-05にユーザーの指示で広げた） */
+   曜日を問わず9〜23時を受け付ける（2026-08-05にユーザーの指示で広げた）。
+   ※2026-10-06 からは枠の計算に weekly を使っていない（上の GRID_* を参照） */
 const DEFAULT_WEEKLY = {
   0: { on: true, s: GRID_START, e: GRID_END },
   1: { on: true, s: GRID_START, e: GRID_END },
@@ -63,7 +69,6 @@ function prepBlocks(availability) {
 function generateSlots(availability, takenMs, opts = {}) {
   const days = opts.days || 14;
   const nowMs = opts.now ? new Date(opts.now).getTime() : Date.now();
-  const weekly = (availability && availability.weekly) || DEFAULT_WEEKLY;
   const blocks = prepBlocks(availability);
   const taken = (takenMs || []).filter((t) => Number.isFinite(t));
 
@@ -73,15 +78,8 @@ function generateSlots(availability, takenMs, opts = {}) {
     day.setHours(0, 0, 0, 0);
     day.setDate(day.getDate() + off);
 
-    const conf = weekly[day.getDay()];
-    if (!conf || !conf.on) continue;
-
-    const startM = toMinutes(conf.s);
-    const endM = toMinutes(conf.e);
-    if (startM === null || endM === null) continue;
-
     const slots = [];
-    for (let t = startM; t + SLOT_MINUTES <= endM; t += SLOT_MINUTES) {
+    for (let t = GRID_START_M; t <= GRID_END_M; t += SLOT_MINUTES) {
       const dt = new Date(day);
       dt.setHours(Math.floor(t / 60), t % 60, 0, 0);
       const st = dt.getTime();
@@ -132,7 +130,6 @@ const VALIDATION_DAYS = 30;
  */
 function generateWeekGrid(availability, takenMs, weekOffset, opts = {}) {
   const nowMs = opts.now ? new Date(opts.now).getTime() : Date.now();
-  const weekly = (availability && availability.weekly) || DEFAULT_WEEKLY;
   const blocks = prepBlocks(availability);
   const taken = (takenMs || []).filter((t) => Number.isFinite(t));
 
@@ -153,19 +150,11 @@ function generateWeekGrid(availability, takenMs, weekOffset, opts = {}) {
     days.push(d);
   }
 
-  /* 表の縦幅はいつも同じ（9:00〜23:00）。
-     スタッフの受付時間に合わせて伸び縮みさせると、週を移るたびに行がずれて
-     同じ時刻を探しにくくなる。受け付けていない時間は「×」として並ぶ */
-  const minM = toMinutes(GRID_START);
-  const maxM = toMinutes(GRID_END);
-
+  /* 表の縦幅はいつも同じ（9:00〜24:00）。行は「時刻」なので 24:00 の行まで出す */
   const times = [];
-  for (let t = minM; t + SLOT_MINUTES <= maxM; t += SLOT_MINUTES) times.push(t);
+  for (let t = GRID_START_M; t <= GRID_END_M; t += SLOT_MINUTES) times.push(t);
 
   const grid = days.map((day) => {
-    const conf = weekly[day.getDay()];
-    const s = conf && conf.on ? toMinutes(conf.s) : null;
-    const e = conf && conf.on ? toMinutes(conf.e) : null;
     return times.map((t) => {
       const dt = new Date(day);
       dt.setHours(Math.floor(t / 60), t % 60, 0, 0);
@@ -173,8 +162,6 @@ function generateWeekGrid(availability, takenMs, weekOffset, opts = {}) {
       const en = st + SLOT_MINUTES * 60 * 1000;
       const iso = dt.toISOString();
       const off = { state: 'off', iso };
-      if (s === null || e === null) return off;             // 受け付けていない曜日
-      if (t < s || t + SLOT_MINUTES > e) return off;        // 受付時間の外
       if (st < nowMs) return off;                           // 過ぎた時刻
       if (taken.some((x) => Math.abs(x - st) < SLOT_MINUTES * 60 * 1000 - 1)) return off;
       if (blocks.some(([bs, be]) => st < be && en > bs)) return off;

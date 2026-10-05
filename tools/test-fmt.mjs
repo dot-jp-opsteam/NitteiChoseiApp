@@ -65,11 +65,14 @@ console.log('\n[ 申請画面 apply.html の fmtRanges ]');
     A.fmtRanges([iso(10, 0), iso(10, 30), iso(13, 0)]), '10:00〜10:30＆13:00〜13:30');
   check('順番がばらばらでも時刻順に直す',
     A.fmtRanges([iso(18, 0), iso(17, 0), iso(17, 30)]), '17:00〜18:00');
+  // 表のいちばん下の 24:00 の行（中身は翌日 0:00）
+  check('23:00・23:30・24:00 → 23:00〜24:00',
+    A.fmtRanges([iso(23, 0), iso(23, 30), iso(0, 0, 8)]), '23:00〜24:00');
 }
 
 console.log('\n[ スタッフ画面 index.html の fmtGroupRange ]');
 {
-  const I = load('index.html', ['pad', 'hm', 'runEnd', 'fmtGroupRange'],
+  const I = load('index.html', ['pad', 'hm', 'hm24', 'slotDayStart', 'runEnd', 'fmtGroupRange'],
     'var SLOT_MS=30*60*1000; function fmtDate(){return "8/7(金)";}');
   check('枠1つ → 開始＋30分',
     I.fmtGroupRange({ slots: [iso(17, 0)] }), '8/7(金) 17:00〜17:30');
@@ -82,13 +85,16 @@ console.log('\n[ スタッフ画面 index.html の fmtGroupRange ]');
     I.fmtGroupRange({ allDay: true, slots: [iso(10, 0), iso(10, 30), iso(13, 0)] }),
     '8/7(金) 10:00〜10:30＆13:00〜13:30');
   check('枠なし → —', I.fmtGroupRange({ slots: [] }), '—');
+  // 表のいちばん下の 24:00 の行（中身は翌日 0:00）は「24:00」と読む
+  check('23:00・23:30・24:00 → 23:00〜24:00',
+    I.fmtGroupRange({ slots: [iso(23, 0), iso(23, 30), iso(0, 0, 8)] }), '8/7(金) 23:00〜24:00');
 }
 
 /* 打ち込まれた開始時刻を、希望に含まれる30分枠に突き合わせる部分。
    ここが緩むと、学生が出していない時刻で面談が確定してしまう */
 console.log('\n[ スタッフ画面 index.html の開始時刻チェック ]');
 {
-  const I = load('index.html', ['pad', 'hm', 'runEnd', 'fmtGroupRange', 'ivTimeVal', 'ivSlotFor', 'ivTimeErr'],
+  const I = load('index.html', ['pad', 'hm', 'hm24', 'slotDayStart', 'runEnd', 'fmtGroupRange', 'ivTimeVal', 'ivSlotFor', 'ivTimeErr'],
     'var SLOT_MS=30*60*1000; var IV_TIME={}; function fmtDate(){return "8/7(金)";}');
   const g = { slots: [iso(17, 0), iso(17, 30), iso(18, 0)] };   // 17:00〜18:00 の希望
   check('範囲の先頭は通る', I.ivSlotFor(g, '17:00'), g.slots[0]);
@@ -316,7 +322,7 @@ console.log('\n[ 日程調整画面 free.html の fmtRanges ]');
 /* 空き時間のかぶり。複数の学生が同じ枠を選ぶほど人数が積み上がる */
 console.log('\n[ 空き時間のかぶり集計 index.html ]');
 {
-  const T = load('index.html', ['fsTally']);
+  const T = load('index.html', ['fsSegments', 'fsTally'], 'var FS_SLOT_MS=30*60*1000;');
   const a = '2026-08-25T05:00:00.000Z';
   const b = '2026-08-25T05:30:00.000Z';
   const c = '2026-08-26T05:00:00.000Z';
@@ -327,7 +333,9 @@ console.log('\n[ 空き時間のかぶり集計 index.html ]');
   ];
   const tally = T.fsTally(responses);
   check('同じ枠に3人が集まる', tally[a], ['山田', '佐藤', '鈴木']);
-  check('1人だけの枠も数える', tally[b], ['山田']);
+  /* 選んだのは「時刻」。山田の a・b（続いた2つ）は a〜b の意味なので、b は終わりの時刻で数えない */
+  check('続いた並びの最後は終わりの時刻なので数えない', b in tally, false);
+  check('1つだけ選んだ枠も数える', tally[c], ['佐藤']);
   check('誰も選んでいない枠は持たない', 'x' in tally, false);
 
 }
@@ -337,22 +345,22 @@ console.log('\n[ 空き時間のかぶり集計 index.html ]');
 console.log('\n[ 空き時間の帯まとめ index.html ]');
 {
   const T = load('index.html',
-    ['fsTally', 'fsRanges', 'fsBest', 'fsOwnRanges'], 'var FS_SLOT_MS=30*60*1000;');
+    ['fsSegments', 'fsTally', 'fsRanges', 'fsBest', 'fsOwnRanges'], 'var FS_SLOT_MS=30*60*1000;');
   const at = (h, m, day = 7) => iso(h, m, day);
 
-  // 山田は 9:00〜11:00 通し、佐藤は 10:00〜11:00 だけ
+  // 山田は 9:00〜11:00 通し、佐藤は 10:00〜11:00 だけ（選ぶのは時刻。終わりの 11:00 も選ぶ）
   const tally = T.fsTally([
-    { name: '山田', choices: [at(9, 0), at(9, 30), at(10, 0), at(10, 30)] },
-    { name: '佐藤', choices: [at(10, 0), at(10, 30)] },
+    { name: '山田', choices: [at(9, 0), at(9, 30), at(10, 0), at(10, 30), at(11, 0)] },
+    { name: '佐藤', choices: [at(10, 0), at(10, 30), at(11, 0)] },
   ]);
   const r = T.fsRanges(tally);
   check('顔ぶれが変わる所で割れる', r.length, 2);
   check('前半は山田だけ', [r[0].start, r[0].end, r[0].names], [at(9, 0), at(10, 0), ['山田']]);
   check('後半は2人', [r[1].start, r[1].end, r[1].names], [at(10, 0), at(11, 0), ['佐藤', '山田']]);
 
-  // 途中で人が増えて、また減る → 3本
+  // 途中で人が増えて、また減る → 3本（山田 9:00〜10:30、佐藤は 9:30 だけ＝9:30〜10:00）
   const r3 = T.fsRanges(T.fsTally([
-    { name: '山田', choices: [at(9, 0), at(9, 30), at(10, 0)] },
+    { name: '山田', choices: [at(9, 0), at(9, 30), at(10, 0), at(10, 30)] },
     { name: '佐藤', choices: [at(9, 30)] },
   ]));
   check('増えて減ると3本になる', r3.map((x) => x.names.length), [1, 2, 1]);
@@ -369,9 +377,17 @@ console.log('\n[ 空き時間の帯まとめ index.html ]');
   check('誰も答えていなければ空', T.fsBest([]), []);
 
   // 1人分。「終日OK」の日も、ほかと同じく時間の帯で出す
-  check('1人分もまとめる',
+  check('1人分もまとめる（9:00・9:30 は 9:00〜9:30、10:30 だけは 10:30〜11:00）',
     T.fsOwnRanges([at(10, 30), at(9, 0), at(9, 30)]),
-    [{ start: at(9, 0), end: at(10, 0) }, { start: at(10, 30), end: at(11, 0) }]);
+    [{ start: at(9, 0), end: at(9, 30) }, { start: at(10, 30), end: at(11, 0) }]);
+  check('21:00・21:30・22:00 → 21:00〜22:00（21:00〜22:30 ではない）',
+    T.fsOwnRanges([at(21, 0), at(21, 30), at(22, 0)]), [{ start: at(21, 0), end: at(22, 0) }]);
+  check('人によって終わりが違っても、かぶりは正しく出る',
+    T.fsRanges(T.fsTally([
+      { name: '山田', choices: [at(21, 0), at(21, 30), at(22, 0)] },
+      { name: '佐藤', choices: [at(21, 0), at(21, 30)] },
+    ])).map((x) => [x.start, x.end, x.names.length]),
+    [[at(21, 0), at(21, 30), 2], [at(21, 30), at(22, 0), 1]]);
   check('選んでいなければ空', T.fsOwnRanges([]), []);
 }
 

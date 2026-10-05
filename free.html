@@ -100,7 +100,11 @@ function pad(n){return String(n).padStart(2,'0');}
 var WD_JP=['日','月','火','水','木','金','土'];
 /* 祝日は holidays.js の holidayName(y,m,d) を使う。m=0-11。
    アプリ本体と同じファイルを読んでいるので、両方の画面で祝日がずれることはない */
-function hm(iso){var d=new Date(iso);return pad(d.getHours())+':'+pad(d.getMinutes());}
+/* 表のいちばん下の行は 24:00（中身は翌日 0:00）。この画面に 0:00 の枠は無いので、
+   0:00 は必ず「その日の 24:00」として読む */
+function hm(iso){var d=new Date(iso);
+  if(d.getHours()===0&&d.getMinutes()===0)return '24:00';
+  return pad(d.getHours())+':'+pad(d.getMinutes());}
 function fmtDT(iso){if(!iso)return '—';var d=new Date(iso);
   return (d.getMonth()+1)+'/'+d.getDate()+'('+WD_JP[d.getDay()]+') '+pad(d.getHours())+':'+pad(d.getMinutes());}
 // 'YYYY-MM-DD' を、その端末の暦の日付に直す。ISOのまま new Date すると UTC 扱いでずれる
@@ -116,8 +120,10 @@ var AVAIL_NOTE_SENT='上に出ているのは、あなたが空いている時�
 
 var SLOT_MS=30*60*1000;
 // その枠が何日のものか。ISOのままだと日付がUTC基準になるので、必ずここを通す
+// 24:00 の行（翌日 0:00）は、表のとおり前の日の枠として数える
 function dayKey(iso){
   var d=new Date(iso);
+  if(d.getHours()===0&&d.getMinutes()===0)d=new Date(d.getTime()-1);
   return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 }
 
@@ -186,6 +192,7 @@ function fmtRanges(list){
 // 「8/5(火)」
 function fmtDay(iso){
   var d=new Date(iso);
+  if(d.getHours()===0&&d.getMinutes()===0)d=new Date(d.getTime()-1);
   return (d.getMonth()+1)+'/'+d.getDate()+'('+WD_JP[d.getDay()]+')';
 }
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
