@@ -173,23 +173,25 @@ async function moveTo(page, to, ms, easing = true) {
   }
   MOUSE = { x: to.x, y: to.y };
 }
-async function glide(page, p) { await moveTo(page, p, 900); await sleep(250); }
+async function glide(page, p) { await moveTo(page, p, 700); await sleep(200); }
 async function click(page, locator) {
   await scrollTo(page, locator);
   await glide(page, await centerOf(locator));
   await page.mouse.down(); await sleep(80); await page.mouse.up();
   await sleep(500);
 }
-/* 空いている枠（○）を選ぶ。まず縦になぞって、続いた時間をまとめて選ぶところを
-   ゆっくり見せる。そのあと別の日をひとつ押す。
-   マウスを動かすたびに少し待つのは、録画のコマ（1秒20枚）に、なぞった軌跡と
-   色が付いていく様子が写るようにするため */
-async function dragSlots(page, from, to) {
+/* 空いている枠（○）を選ぶ。縦になぞって、続いた時間をまとめて選ぶところを見せる。
+   1回目のなぞりの終わりの近くから、2列となりの日を、今度は逆向きになぞる
+   （上下に行ったり来たりしない・ひとつ押すだけの無駄な動きをしない道すじ）。
+   動かしている最中のコマ（1秒20枚ほど）に、なぞった軌跡と色が付いていく様子が写る */
+const DRAG_SPEED = 0.14; // なぞる速さ（画面の点 / ミリ秒）
+async function dragSlots(page, from, to, tail = 1400) {
   await glide(page, from);
-  await page.mouse.down(); await wait(500);          // 押したまま、少し間を置く
-  await moveTo(page, to, 1800, false);                // 一定の速さでなぞる
-  await wait(600);                                    // 離す前に、選ばれた範囲を見せる
-  await page.mouse.up(); await wait(1400);            // 離したあとも、結果を見せる
+  await page.mouse.down(); await wait(400);           // 押したまま、少し間を置く
+  const dist = Math.hypot(to.x - from.x, to.y - from.y);
+  await moveTo(page, to, Math.max(400, dist / DRAG_SPEED), false); // 一定の速さでなぞる
+  await wait(500);                                    // 離す前に、選ばれた範囲を見せる
+  await page.mouse.up(); await wait(tail);            // 離したあとも、結果を見せる
 }
 async function pickSlots(page) {
   const cells = page.locator('td.bt-c.ok');
@@ -203,18 +205,31 @@ async function pickSlots(page) {
   const cols = {};
   boxes.forEach((b) => { (cols[b.x] = cols[b.x] || []).push(b); });
   const xs = Object.keys(cols).map(Number).sort((a, b) => a - b);
-  const colA = xs.find((x) => cols[x].length >= 4) ?? xs.find((x) => cols[x].length >= 3);
-  const colB = xs.find((x) => x !== colA && cols[x].length >= 1);
-  const cellsA = cols[colA];
+  const ia = xs.findIndex((x) => cols[x].length >= 4);
+  const idxA = ia >= 0 ? ia : xs.findIndex((x) => cols[x].length >= 3);
+  const cellsA = cols[xs[idxA]];
   const last = Math.min(cellsA.length - 1, 5);          // 最大6マス（3時間ぶん）なぞる
+  // 2列となり。無ければ近い列を探す（3マス以上続いているもの）
+  const idxB = [idxA + 2, idxA + 3, idxA + 1, idxA - 2, idxA - 1].find((k) => k >= 0 && k < xs.length && k !== idxA && cols[xs[k]].length >= 4);
   // なぞる範囲の真ん中を画面の中央に持ってくる（横長で縦が短いので、上下の端が切れないように）
   await scrollTo(page, cells.nth(cellsA[Math.floor(last / 2)].i));
   const from = await centerOf(cells.nth(cellsA[0].i));
   const to = await centerOf(cells.nth(cellsA[last].i));
-  await dragSlots(page, from, to);
-  // ほかの日をひとつ押す
-  if (colB !== undefined) await click(page, cells.nth(cols[colB][0].i));
-  await sleep(500);
+  await dragSlots(page, from, to, 600);
+  if (idxB === undefined) { await wait(1000); return; }
+  // 2回目：1回目の終わりと同じ高さから、逆向き（上）へなぞる
+  const cellsB = cols[xs[idxB]];
+  const endY = (await cells.nth(cellsA[last].i).boundingBox()).y;
+  // 最初に測った位置は、スクロールする前のもの。いまの位置で測り直す
+  const ysB = [];
+  for (const c of cellsB) ysB.push((await cells.nth(c.i).boundingBox()).y);
+  let j = 0;
+  ysB.forEach((y, k) => { if (Math.abs(y - endY) < Math.abs(ysB[j] - endY)) j = k; });
+  const k2 = j >= 3 ? j - 3 : Math.min(cellsB.length - 1, j + 3);  // 上に3マス分。足りなければ下へ
+  const from2 = await centerOf(cells.nth(cellsB[j].i));
+  const to2 = await centerOf(cells.nth(cellsB[k2].i));
+  await dragSlots(page, from2, to2, 1400);
+  await sleep(300);
 }
 
 /* 送信が終わって完了の表示が出るまで待ち、それを少し見せて終わる。
