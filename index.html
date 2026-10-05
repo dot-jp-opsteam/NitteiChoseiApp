@@ -1319,7 +1319,7 @@ function openDeepLink(){
   history.replaceState({tab:currentTab},'',location.pathname);
   const r=allRequests().find(x=>x.id===id);
   if(!r){toast('この参加確認は見つかりませんでした');return;}
-  go('requests');
+  if(ME.role==='intern')go('requests');else showHub('req');
   openAttendDetail(id);
 }
 async function logout(){
@@ -1551,6 +1551,7 @@ document.addEventListener('keydown',e=>{
 });
 /* 画面ナビを選んだとき、狭い画面では広げたままだと中身が見えないので畳む */
 function sbGo(tab){ if(isNarrow())collapseSidebar(); go(tab); }
+function sbRun(fn){ if(isNarrow())collapseSidebar(); fn(); }
 
 /* =========================================================
    スクロール連動フェードアップ
@@ -1590,16 +1591,16 @@ const NAV={
   ],
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
-    {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'requests',label:'日程を決める',ic:'calendar-check'},
-    {id:'freeslots',label:'空き時間を確認',ic:'clock'},
+    {id:'interviews',label:'面談一覧・時間',ic:'list'},
+    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm'},
+    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
-    {id:'interviews',label:'面談一覧',ic:'list'},
-    {id:'requests',label:'日程を決める',ic:'calendar-check'},
-    {id:'freeslots',label:'空き時間を確認',ic:'clock'},
+    {id:'interviews',label:'面談一覧・時間',ic:'list'},
+    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm'},
+    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
@@ -1643,8 +1644,9 @@ function defaultTab(){return 'home';}
    上段＝画面ナビ、下段＝設定系。畳んだときはアイコンだけになるので、
    title を付けてマウスを乗せれば名前が分かるようにしている */
 function buildNav(){
+  /* run が付いたものは画面ではなく、作成フォームを直接開く（押した画面は変わらない） */
   document.getElementById('sbNav').innerHTML=NAV[ME.role].map(t=>
-    `<button class="sb-item" data-tab="${t.id}" onclick="sbGo('${t.id}')" title="${t.label}">
+    `<button class="sb-item" data-tab="${t.id}" onclick="${t.run?`sbRun(${t.run})`:`sbGo('${t.id}')`}" title="${t.label}">
       <span class="si">${ic(t.ic)}</span><span class="sl">${t.label}</span></button>`).join('');
 
   /* 下段は「日常的に使う道具」だけを置く。
@@ -1752,7 +1754,7 @@ function go(tab,saveHistory=true){
   // ほかの画面へ移るときは全画面を解除する。解除し忘れるとサイドバーが隠れたままになる
   if(tab!=='home'&&calFull){calFull=false;document.documentElement.setAttribute('data-calfull','0');}
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
-  if(tab==='freeslots')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く
+  if(tab==='interviews'&&IVHUB==='free')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く
   document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   if(saveHistory)history.pushState({tab},'',location.href);
   window.scrollTo(0,0);
@@ -1765,7 +1767,7 @@ window.addEventListener('popstate',e=>{
 });
 /* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
    そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
-const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',freeslots:'a4',
+const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',
   avset:'a2',branches:'a4',users:'a3'};
 /* ホーム以外の画面の右上に置く「ホームへ戻る」。
    スマホでは左メニューが隠れていて、行った先から戻れなくなるため */
@@ -1781,7 +1783,6 @@ function viewFor(t){
   if(t==='my')return viewMyInterviews();
   if(t==='interviews')return viewStaffInterviews();
   if(t==='requests')return viewRequests();
-  if(t==='freeslots')return viewFreeslots();
   if(t==='avset')return viewAvailSet();
   if(t==='branches')return viewBranches();
   if(t==='users')return viewUsers();
@@ -1908,11 +1909,11 @@ function viewHome(){
        「受けられる時間」の入口は「この日は受けられない時間」を初期表示にしている。
        曜日ごとの受付時間（面談を受けられる時間）は、その画面の中から開く。
        カレンダー連携は左メニューだけに置く（ホームにもプロフィールにも出さない） */
-    /* 2列で並ぶので、日程を決める・空き時間を確認を上の段にまとめる */
+    /* 2列で並ぶので、回答を見る「面談一覧・時間」を左上に置き、作る2つを続ける */
     items.push(
-      hex("go('requests')",'calendar-check','日程を決める','候補を送って都合を聞く',unread,sentUnconfirmed>0),
-      hex("go('freeslots')",'clock','空き時間を確認','URLで学生の空きを集める'),
-      hex("go('interviews')",'list','面談一覧・確定','あなた宛の面談申請',pend),
+      hex("go('interviews')",'list','面談一覧・時間','面談・日程調整・空き時間の回答',pend+unread,sentUnconfirmed>0),
+      hex('openRequestForm()','calendar-check','候補日を送る','候補日を出して都合を聞く'),
+      hex('openFreeslotForm()','clock','空き時間を聞く','URLで空いている時間を集める'),
       hex("go('avset')",'alarm','受けられる時間','曜日ごとの受付時間'),
     );
     /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
@@ -2281,7 +2282,30 @@ function ivRow(iv,zone){
       ${zone.del?`<button class="btn sm iconly" onclick="event.stopPropagation();deleteInterviewRow('${iv.id}')" aria-label="一覧から削除" title="一覧から削除">${ic('trash')}</button>`:''}
     </div>`;
 }
+/* 「面談一覧・時間」は、面談・日程調整・空き時間の回答結果を1か所で見る入口。
+   作る側（候補日を送る／空き時間を聞く）は左メニューとホームから直接フォームを開く */
+let IVHUB='iv'; // 'iv' | 'req' | 'free'
+function showHub(sub){
+  IVHUB=sub;
+  if(currentTab==='interviews'){
+    if(sub==='free')loadFreeslots();
+    renderQuiet();
+  }else go('interviews');
+}
 function viewStaffInterviews(){
+  const pending=myRequests().filter(requestNeedsAction).length;
+  const seg=`<div class="seg" style="margin-bottom:14px">
+    <label><input type="radio" name="ivHub" ${IVHUB==='iv'?'checked':''} onchange="showHub('iv')">
+      <span class="segb">面談</span></label>
+    <label><input type="radio" name="ivHub" ${IVHUB==='req'?'checked':''} onchange="showHub('req')">
+      <span class="segb">日程調整${pending?`（${pending}）`:''}</span></label>
+    <label><input type="radio" name="ivHub" ${IVHUB==='free'?'checked':''} onchange="showHub('free')">
+      <span class="segb">空き時間${FSLIST.length?`（${FSLIST.length}）`:''}</span></label>
+  </div>`;
+  return `<h1 class="page">面談一覧・時間</h1>${seg}${
+    IVHUB==='req'?requestsPanel():IVHUB==='free'?freeslotsPanel():interviewsPanel()}`;
+}
+function interviewsPanel(){
   /* 状態（申請中→確定済み→不成立）を最優先にするのは、並べ替えを変えても同じ。
      「まだ手を付けていないもの」が下に沈むと、並べ替えた意味が無くなるため。
      その中の順番だけを IVSORT で切り替える */
@@ -2292,7 +2316,7 @@ function viewStaffInterviews(){
   const all=(DB.interviews||[]).filter(iv=>{
     return ME.role==='admin'||iv.staff_id===ME.id;
   }).sort((a,b)=>{const order={applied:0,fixed:1,failed:2};return order[a.status]-order[b.status]||inner(a,b);});
-  if(!all.length)return `<h1 class="page">面談一覧</h1><div class="empty"><div class="ei">${ic('list')}</div><p>担当する面談はまだありません。</p></div>`;
+  if(!all.length)return `<div class="empty"><div class="ei">${ic('list')}</div><p>担当する面談はまだありません。</p></div>`;
   // フィルタ適用
   const q=(IVFILTER.q||'').trim();
   const list=all.filter(iv=>{
@@ -2315,14 +2339,14 @@ function viewStaffInterviews(){
       <button class="${IVSORT==='new'?'on':''}" onclick="setIvSort('new')">申請が新しい順</button>
       <button class="${IVSORT==='wish'?'on':''}" onclick="setIvSort('wish')">希望日が近い順</button>
     </div>`;
-  if(!list.length)return `<h1 class="page">面談一覧</h1>
+  if(!list.length)return `
     ${filterBar}
     <div class="empty"><div class="ei">${ic('search')}</div><p>条件に一致する面談がありません。</p></div>`;
   const zones=IV_ZONES.map(z=>({z,items:list.filter(z.match)})).filter(g=>g.items.length);
   const zoneHtml=zones.map(({z,items})=>`
       ${z.label?`<div class="iv-zoneh">${z.label}<span style="opacity:.7"> ${items.length}</span></div>`:''}
       <div class="rowlist">${items.map(iv=>ivRow(iv,z)).join('')}</div>`).join('');
-  return `<h1 class="page">面談一覧</h1>
+  return `
     ${filterBar}
     <div class="card">${zoneHtml}</div>`;
 }
@@ -4465,10 +4489,13 @@ function sortSentByConfirm(list){
     return new Date(b.created_at)-new Date(a.created_at);
   });
 }
+/* インターン生の「日程調整」画面。スタッフは「面談一覧・時間」の中で同じパネルを見る */
 function viewRequests(){
+  return `<h1 class="page">日程調整</h1>${requestsPanel()}`;
+}
+function requestsPanel(){
   const canSend=canSendRequest();
   const received=myRequests();
-  // 答えたものは回答済みへ移る
   const inbox=sortInboxByDue(received.filter(requestNeedsAction));
   const done=received.filter(r=>!requestNeedsAction(r));
   const pending=inbox.length;
@@ -4480,11 +4507,8 @@ function viewRequests(){
     <label><input type="radio" name="reqTab" ${REQTAB==='done'?'checked':''} onchange="setReqTab('done')">
       <span class="segb">回答済み</span></label>
   </div>`;
-  /* 以前は「新しく送る」1つに入ってから中でもう一度種類を選ばせていたが、
-     入口を分けたほうが1タップ短く、名前だけで用途が分かる */
-  return `<h1 class="page">${ME.role==='intern'?'日程調整':'日程を決める'}</h1>
-    ${canSend?`<div class="btn-row" style="margin-bottom:16px">
-      <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('calendar')}日程を決める</button>
+  return `${canSend?`<div class="btn-row" style="margin-bottom:16px">
+      <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('calendar')}候補日を送る</button>
     </div>`:''}
     ${tabs}
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
@@ -4555,11 +4579,10 @@ async function loadFreeslots(){
   }catch(e){toast(e.message);}
 }
 
-/* 「空き時間を確認」の画面。以前は日程調整の中の1タブだった */
-function viewFreeslots(){
-  return `<h1 class="page">空き時間を確認</h1>
-    <div class="btn-row" style="margin-bottom:16px">
-      <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を確認</button>
+/* 「面談一覧・時間」の中の空き時間パネル */
+function freeslotsPanel(){
+  return `<div class="btn-row" style="margin-bottom:16px">
+      <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を聞く</button>
     </div>
     ${viewFreeslotList()}`;
 }
@@ -4577,7 +4600,7 @@ function viewFreeslotList(){
 }
 
 function openFreeslotForm(){
-  openSheet(`<h3>空き時間を確認</h3>
+  openSheet(`<h3>空き時間を聞く</h3>
     <p class="fine">URLを作って学生に送ると、空いている時間を教えてもらえます。
     担当は自分に決まるので、学生は選びません。何人でも回答できます。</p>
     <label class="fl">件名<span class="req">*</span></label>
@@ -4595,7 +4618,7 @@ async function submitFreeslot(){
   btn.disabled=true;
   try{
     const r=await fsJSON('/api/freeslots',{method:'POST',body:JSON.stringify({title})});
-    await loadFreeslots();
+    showHub('free');
     showFreeslotUrl(r);
   }catch(e){
     err.textContent=e.message;err.classList.add('show');btn.disabled=false;
@@ -4609,7 +4632,7 @@ function showFreeslotUrl(f){
     <input class="fs-url" id="fsUrl" readonly value="${esc(f.url)}">
     <button class="btn pri block" style="margin-top:16px" onclick="copyFreeslotUrl()">URLをコピー</button>
     <p class="fine" style="margin-top:10px">このURLを学生に送ってください。
-    届いた分は「空き時間を確認」の画面から見られます。</p>`);
+    届いた分は「面談一覧・時間」の「空き時間」から見られます。</p>`);
 }
 async function copyFreeslotUrl(){
   const el=document.getElementById('fsUrl');
@@ -5555,7 +5578,7 @@ function renderRequestForm(keepText){
      「あて先＋件名・本文」を左、「締切＋候補日」を右にすると、左右の高さが釣り合う */
   const cols=[colTarget+colText, reqDueFieldHTML()+reqOptionsHTML()];
 
-  const html=`<h3>日程を決める</h3>
+  const html=`<h3>候補日を送る</h3>
     <div class="sheet2">
       <section class="s2col">${cols[0]}</section>
       <section class="s2col">${cols[1]}</section>
@@ -5656,7 +5679,7 @@ async function submitRequest(){
     return;
   }
   REQFORM=null;REQTAB='sent';
-  closeSheet();updateBell();render();
+  closeSheet();updateBell();showHub('req');
   toast(`${request.recipient_ids.length}名に送りました`);
   /* 出欠確認は送ったあとに集計を開く。共有URLのコピー欄がここにあるので、
      「誰でも回答OK」で送った人はそのまま配れる。

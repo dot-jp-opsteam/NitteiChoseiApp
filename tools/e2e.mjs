@@ -646,14 +646,19 @@ async function testAttendance() {
     appHtml.includes('<span class="segb">未回答${pending')
       && appHtml.includes('<span class="segb">回答済み</span>')
       && !appHtml.includes('<span class="segb">完了済みの依頼</span>'), true);
-  /* スタッフの「日程調整」タブは「日程を決める」「空き時間を確認」の2つに分けた。
-     インターン生は受け取るだけなので「日程調整」のまま */
-  check('スタッフのタブは「日程を決める」と「空き時間を確認」に分かれている',
-    appHtml.includes("{id:'requests',label:'日程を決める',ic:'calendar-check'},\n    {id:'freeslots',label:'空き時間を確認',ic:'clock'}")
+  /* スタッフの「日程調整」タブは、回答を見る「面談一覧・時間」と、作成フォームを
+     直接開く「候補日を送る」「空き時間を聞く」に分けた。インターン生は受け取るだけなので「日程調整」のまま */
+  check('スタッフの左メニューは「面談一覧・時間」＋作成フォームを開く2つ',
+    appHtml.includes("{id:'interviews',label:'面談一覧・時間',ic:'list'},\n    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm'},\n    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm'}")
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
-      && appHtml.includes("ME.role==='intern'?'日程調整':'日程を決める'")
-      && appHtml.includes('<h1 class="page">空き時間を確認</h1>')
-      && !appHtml.includes("label:'依頼'") && !appHtml.includes("label:'受けた依頼'"), true);
+      && appHtml.includes('<h1 class="page">日程調整</h1>')
+      && !appHtml.includes('面談一覧・確定</') && !appHtml.includes("'面談一覧・確定'"), true);
+  check('「面談一覧・時間」に面談・日程調整・空き時間の回答がまとまっている',
+    appHtml.includes('<h1 class="page">面談一覧・時間</h1>')
+      && appHtml.includes("onchange=\"showHub('req')\"")
+      && appHtml.includes("onchange=\"showHub('free')\"")
+      && appHtml.includes("IVHUB==='req'?requestsPanel():IVHUB==='free'?freeslotsPanel():interviewsPanel()")
+      && appHtml.includes("if(tab==='interviews'&&IVHUB==='free')loadFreeslots();"), true);
   /* カレンダー連携の入口は左メニューだけ。ホームの入口タイルにもプロフィールにも置かない */
   check('カレンダー連携の入口は左メニューだけにある',
     (appHtml.match(/openGoogleCalendarSettings\(\)"/g) || []).length === 1
@@ -705,9 +710,11 @@ async function testAttendance() {
       && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
   /* 入口は「日程を決める」「空き時間を確認」の2つ。
      「タスクを追加」は別のアプリへ移ったので外した（2026-10-05） */
-  check('「日程を決める」「空き時間を確認」はそれぞれの画面に作るボタンがある',
-    appHtml.includes('onclick="openRequestForm()">${ic(\'calendar\')}日程を決める</button>')
-      && appHtml.includes('onclick="openFreeslotForm()">${ic(\'clock\')}空き時間を確認</button>')
+  check('作成ボタンは「候補日を送る」「空き時間を聞く」で、ホームからもフォームを直接開く',
+    appHtml.includes('onclick="openRequestForm()">${ic(\'calendar\')}候補日を送る</button>')
+      && appHtml.includes('onclick="openFreeslotForm()">${ic(\'clock\')}空き時間を聞く</button>')
+      && appHtml.includes("hex('openRequestForm()','calendar-check','候補日を送る'")
+      && appHtml.includes("hex('openFreeslotForm()','clock','空き時間を聞く'")
       && !appHtml.includes('タスクを追加'), true);
   check('旧「新しく送る」の入口は残っていない',
     appHtml.includes('新しく送る</button>') || appHtml.includes('openSendPicker('), false);
@@ -2264,9 +2271,9 @@ async function run() {
     // スタッフ側。依頼画面から発行して、届いた分を見る入口があること
     {
       const appHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-      check('「空き時間を確認」は独立した画面で、開くと一覧を取りに行く',
-        appHtml.includes("if(t==='freeslots')return viewFreeslots();")
-          && appHtml.includes("if(tab==='freeslots')loadFreeslots();"), true);
+      check('空き時間の一覧は「面談一覧・時間」の中に出る',
+        appHtml.includes('function freeslotsPanel()')
+          && appHtml.includes("showHub('free');"), true);
       check('日程調整の中に「空き時間」のタブは残っていない',
         appHtml.includes("setReqTab('free')"), false);
       check('発行のAPIを叩いている', appHtml.includes("'/api/freeslots'"), true);
