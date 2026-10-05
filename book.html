@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>予約 | OPS日調アプリ</title>
+<!-- 合言葉が入ったURLなので、検索結果に出さない -->
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<!-- 予約スケジュールの予約ページ（/b/<合言葉>）と、予約の変更・キャンセル（/b/manage/<合言葉>）。
+     Googleカレンダーの予約ページに見た目と動きを合わせるため、アプリ本体の style.css は読まない
+     （外部サイトに埋め込まれることもあるので、アプリの装飾が混ざらないほうがよい）。
+     クラス名はすべて bk- で始める（短い名前の衝突を避けるため） -->
+<style>
+  :root{
+    --bk-blue:#1a73e8; --bk-blue-d:#1765cc; --bk-blue-soft:#e8f0fe;
+    --bk-ink:#202124; --bk-sub:#5f6368; --bk-line:#dadce0; --bk-bg:#f8f9fa;
+    --bk-panel:#ffffff; --bk-bad:#d93025; --bk-bad-soft:#fce8e6; --bk-ok:#188038; --bk-ok-soft:#e6f4ea;
+    --bk-accent:#039be5;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bk-bg);color:var(--bk-ink);
+    font-family:"Noto Sans JP",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.5}
+  button{font-family:inherit}
+  .bk-wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+  .bk-card{background:var(--bk-panel);border:1px solid var(--bk-line);border-radius:12px;overflow:hidden;
+    display:grid;grid-template-columns:320px 1fr;min-height:560px}
+  .bk-side{border-right:1px solid var(--bk-line);padding:24px}
+  .bk-main{padding:24px;min-width:0}
+  .bk-avatar{width:48px;height:48px;border-radius:50%;background:var(--bk-accent);color:#fff;display:flex;
+    align-items:center;justify-content:center;font-weight:700;font-size:20px;overflow:hidden}
+  .bk-avatar img{width:100%;height:100%;object-fit:cover}
+  .bk-host{color:var(--bk-sub);margin-top:12px;font-size:14px}
+  .bk-title{font-size:24px;font-weight:500;margin:4px 0 16px;line-height:1.3;word-break:break-word}
+  .bk-meta{display:flex;gap:12px;align-items:flex-start;color:var(--bk-ink);margin:10px 0}
+  .bk-meta svg{flex:none;width:20px;height:20px;color:var(--bk-sub);margin-top:1px}
+  .bk-meta .bk-fine{color:var(--bk-sub);font-size:12px}
+  .bk-desc{white-space:pre-wrap;color:var(--bk-ink);margin:16px 0 0;word-break:break-word}
+  .bk-h2{font-size:20px;font-weight:500;margin:0 0 4px}
+  .bk-tz{color:var(--bk-sub);font-size:12px;margin-bottom:16px}
+
+  /* 月のミニカレンダー */
+  .bk-mini{margin-top:24px;user-select:none}
+  .bk-mini-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .bk-mini-head b{font-weight:500}
+  .bk-mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+  .bk-mini-grid .bk-dow{font-size:11px;color:var(--bk-sub);padding:4px 0}
+  .bk-day{border:0;background:transparent;border-radius:50%;width:34px;height:34px;margin:0 auto;font-size:12px;
+    color:#b0b3b8;cursor:default;display:flex;align-items:center;justify-content:center}
+  .bk-day.bk-has{color:var(--bk-blue);font-weight:700;background:var(--bk-blue-soft);cursor:pointer}
+  .bk-day.bk-has:hover{background:#d2e3fc}
+  .bk-day.bk-today{box-shadow:inset 0 0 0 1px var(--bk-blue)}
+  .bk-day.bk-sel{background:var(--bk-blue);color:#fff}
+  .bk-day.bk-out{visibility:hidden}
+  .bk-icon-btn{border:0;background:transparent;width:36px;height:36px;border-radius:50%;cursor:pointer;color:var(--bk-sub);
+    display:inline-flex;align-items:center;justify-content:center}
+  .bk-icon-btn:hover:not(:disabled){background:#f1f3f4}
+  .bk-icon-btn:disabled{opacity:.3;cursor:default}
+  .bk-icon-btn svg{width:20px;height:20px}
+
+  /* 週の表示 */
+  .bk-weekbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .bk-today-btn{border:1px solid var(--bk-line);background:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;color:var(--bk-ink)}
+  .bk-today-btn:hover{background:#f1f3f4}
+  .bk-range{font-size:16px;margin-left:4px}
+  .bk-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+  .bk-col-head{text-align:center;padding-bottom:8px;border-bottom:1px solid var(--bk-line);margin-bottom:10px}
+  .bk-col-head .bk-dw{font-size:11px;color:var(--bk-sub)}
+  .bk-col-head .bk-dn{font-size:22px;line-height:1.4}
+  .bk-col-head.bk-today .bk-dn{color:var(--bk-blue);font-weight:700}
+  .bk-col-body{display:flex;flex-direction:column;gap:8px}
+  .bk-slot{border:1px solid var(--bk-line);background:#fff;color:var(--bk-blue);border-radius:6px;padding:9px 4px;
+    font-size:14px;font-weight:500;cursor:pointer;text-align:center}
+  .bk-slot:hover{border-color:var(--bk-blue);background:var(--bk-blue-soft)}
+  .bk-slot:focus-visible{outline:2px solid var(--bk-blue);outline-offset:1px}
+  .bk-none{color:#9aa0a6;font-size:12px;text-align:center;padding-top:6px}
+  .bk-empty{border:1px dashed var(--bk-line);border-radius:8px;padding:28px 16px;text-align:center;color:var(--bk-sub);margin-top:8px}
+  .bk-link-btn{border:0;background:transparent;color:var(--bk-blue);font-weight:500;cursor:pointer;padding:8px 12px;border-radius:6px;font-size:14px}
+  .bk-link-btn:hover{background:var(--bk-blue-soft)}
+  .bk-loading{color:var(--bk-sub);padding:40px 0;text-align:center}
+
+  /* スマホ：選んだ日の枠を並べる */
+  .bk-daylist{display:none}
+  .bk-daylist-head{font-weight:500;margin:20px 0 10px}
+  .bk-daylist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+
+  /* 予約フォーム（重ねて出す） */
+  .bk-scrim{position:fixed;inset:0;background:rgba(32,33,36,.6);display:none;align-items:center;justify-content:center;
+    padding:16px;z-index:50}
+  .bk-scrim.bk-open{display:flex}
+  .bk-dialog{background:#fff;border-radius:12px;width:100%;max-width:520px;max-height:calc(100vh - 32px);overflow:auto;
+    box-shadow:0 8px 28px rgba(0,0,0,.28)}
+  .bk-dialog-head{padding:20px 24px 8px;display:flex;align-items:flex-start;gap:8px}
+  .bk-dialog-head h3{font-size:20px;font-weight:500;margin:0;flex:1}
+  .bk-dialog-body{padding:4px 24px 8px}
+  .bk-dialog-foot{padding:12px 24px 20px;display:flex;justify-content:flex-end;gap:8px}
+  .bk-summary{background:var(--bk-bg);border-radius:8px;padding:12px 14px;margin-bottom:16px}
+  .bk-summary .bk-meta{margin:4px 0}
+  .bk-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .bk-field{margin-bottom:14px}
+  .bk-field label{display:block;font-size:12px;color:var(--bk-sub);margin-bottom:4px}
+  .bk-field label .bk-req{color:var(--bk-bad);margin-left:2px}
+  .bk-field input,.bk-field textarea{width:100%;border:1px solid var(--bk-line);border-radius:6px;padding:10px 12px;
+    font-family:inherit;font-size:16px;color:var(--bk-ink);background:#fff}
+  .bk-field textarea{min-height:72px;resize:vertical}
+  .bk-field input:focus,.bk-field textarea:focus{outline:2px solid var(--bk-blue);outline-offset:-1px;border-color:var(--bk-blue)}
+  .bk-inline{display:flex;gap:8px}
+  .bk-inline input{flex:1}
+  .bk-err{color:var(--bk-bad);font-size:13px;margin:4px 0 0;display:none}
+  .bk-err.bk-show{display:block}
+  .bk-banner{border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px}
+  .bk-banner.bk-bad{background:var(--bk-bad-soft);color:var(--bk-bad)}
+  .bk-banner.bk-info{background:var(--bk-blue-soft);color:var(--bk-blue-d)}
+  .bk-btn{border:0;border-radius:6px;padding:9px 20px;font-size:14px;font-weight:500;cursor:pointer}
+  .bk-btn.bk-pri{background:var(--bk-blue);color:#fff}
+  .bk-btn.bk-pri:hover:not(:disabled){background:var(--bk-blue-d)}
+  .bk-btn.bk-ghost{background:transparent;color:var(--bk-blue)}
+  .bk-btn.bk-ghost:hover{background:var(--bk-blue-soft)}
+  .bk-btn.bk-danger{background:transparent;color:var(--bk-bad);border:1px solid var(--bk-line)}
+  .bk-btn.bk-danger:hover{background:var(--bk-bad-soft)}
+  .bk-btn.bk-line{background:#fff;color:var(--bk-blue);border:1px solid var(--bk-line)}
+  .bk-btn:disabled{opacity:.5;cursor:default}
+
+  /* 完了・予約の確認 */
+  .bk-done{max-width:560px;margin:40px auto;background:#fff;border:1px solid var(--bk-line);border-radius:12px;padding:32px 28px}
+  .bk-done-mark{width:48px;height:48px;border-radius:50%;background:var(--bk-ok-soft);color:var(--bk-ok);display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+  .bk-done-mark.bk-x{background:var(--bk-bad-soft);color:var(--bk-bad)}
+  .bk-done-mark svg{width:28px;height:28px}
+  .bk-done h2{font-size:22px;font-weight:500;margin:0 0 6px}
+  .bk-done .bk-lead{color:var(--bk-sub);margin:0 0 20px}
+  .bk-done .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+  .bk-manage-link{word-break:break-all;font-size:12px;color:var(--bk-sub);background:var(--bk-bg);border-radius:6px;padding:8px 10px;margin-top:8px}
+  .bk-foot{text-align:center;color:#9aa0a6;font-size:12px;margin:16px 0 32px}
+  .bk-closed{max-width:560px;margin:60px auto;text-align:center;color:var(--bk-sub);background:#fff;border:1px solid var(--bk-line);border-radius:12px;padding:40px 24px}
+  .bk-closed h2{color:var(--bk-ink);font-weight:500}
+
+  #bkToast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#323232;color:#fff;
+    padding:12px 18px;border-radius:6px;opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:calc(100% - 32px)}
+  #bkToast.bk-show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  @media (max-width:860px){
+    .bk-wrap{margin:0;padding:0}
+    .bk-card{grid-template-columns:1fr;border-radius:0;border-left:0;border-right:0;min-height:100vh}
+    .bk-side{border-right:0;border-bottom:1px solid var(--bk-line);padding:20px 16px}
+    .bk-main{padding:16px}
+    .bk-title{font-size:22px}
+    .bk-weekview{display:none}
+    .bk-daylist{display:block}
+    .bk-mini{margin-top:0}
+    .bk-mini-side{display:none}
+    .bk-mini-main{display:block}
+    .bk-row2{grid-template-columns:1fr}
+    .bk-dialog{max-height:100vh;border-radius:12px 12px 0 0;align-self:flex-end}
+    .bk-scrim{padding:0;align-items:flex-end}
+    .bk-done{margin:0;border-radius:0;border-left:0;border-right:0;min-height:100vh}
+  }
+  @media (min-width:861px){ .bk-mini-main{display:none} }
+</style>
+</head>
+<body>
+<main id="bkMain"><div class="bk-loading">読み込んでいます…</div></main>
+<div class="bk-scrim" id="bkScrim" onclick="if(event.target===this)closeDialog()">
+  <div class="bk-dialog" id="bkDialog" role="dialog" aria-modal="true"></div>
+</div>
+<div id="bkToast" role="status"></div>
+
+<script>
+/* 予約スケジュールの公開ページ。ログインは通らない。
+   /b/<合言葉>          … 空いている枠を選んで予約する
+   /b/manage/<合言葉>   … 予約の確認・日時の変更・キャンセル
+   枠の判断はすべてサーバーが持つ（ここは並べるだけ）。時刻は日本時間で固定 */
+'use strict';
+
+const PARTS = location.pathname.split('/').filter(Boolean);
+const MODE = PARTS[1] === 'manage' ? 'manage' : 'book';
+const TOKEN = MODE === 'manage' ? (PARTS[2] || '') : (PARTS[1] || '');
+const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+
+const S = {
+  info: null,          // ページの情報（タイトル・長さ・質問など）
+  manage: null,        // 変更ページのときの予約
+  slots: {},           // 'YYYY-MM-DD' -> ['09:00', ...]
+  loaded: [],          // 読み込み済みの範囲 [fromYmd, toYmd)（文字列比較で足りる）
+  weekStart: null,     // 表示中の週の先頭（日曜）
+  month: null,         // ミニカレンダーの月（1日）
+  selDay: null,        // 選んだ日（スマホの一覧・ミニカレンダーの印）
+  picking: false,      // 変更ページで日時を選び直しているか
+  busy: false,
+  error: '',
+};
+
+/* ---------- 小道具 ---------- */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function pad(n){return String(n).padStart(2,'0');}
+function ymd(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function parseYmd(s){var p=s.split('-').map(Number);return new Date(p[0],p[1]-1,p[2]);}
+function addDays(d,n){var x=new Date(d);x.setDate(x.getDate()+n);return x;}
+function sunday(d){var x=new Date(d);x.setHours(0,0,0,0);x.setDate(x.getDate()-x.getDay());return x;}
+function todayYmd(){return ymd(new Date());}
+/* 枠の開始時刻（日本時間の 'YYYY-MM-DD' と 'HH:MM'）を、ずれない形の日時にする */
+function slotIso(day,time){return new Date(day+'T'+time+':00+09:00').toISOString();}
+function addMin(time,min){var p=time.split(':').map(Number);var t=p[0]*60+p[1]+min;return pad(Math.floor(t/60))+':'+pad(t%60);}
+function dayLabel(day){var d=parseYmd(day);return (d.getMonth()+1)+'月'+d.getDate()+'日('+DOW[d.getDay()]+')';}
+function longDay(day){var d=parseYmd(day);return d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日 '+DOW[d.getDay()]+'曜日';}
+function toast(msg){var t=document.getElementById('bkToast');t.textContent=msg;t.classList.add('bk-show');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('bk-show');},2600);}
+
+async function api(path,opts){
+  opts=opts||{};
+  try{
+    var r=await fetch(path,{method:opts.method||'GET',headers:{'Content-Type':'application/json'},
+      body:opts.body?JSON.stringify(opts.body):undefined});
+    var data=await r.json().catch(function(){return {};});
+    return {ok:r.ok,status:r.status,data:data};
+  }catch(e){return {ok:false,status:0,data:{error:'通信できませんでした。電波の良いところでやり直してください'}};}
+}
+
+const IC = {
+  clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  video:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>',
+  pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6.2 7-11a7 7 0 10-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+  phone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z"/></svg>',
+  cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg>',
+  left:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>',
+  right:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>',
+  close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+};
+
+/* ---------- 枠の読み込み ----------
+   1回に42日（月のカレンダー1枚）ずつ読む。読み込み済みの日は聞き直さない */
+function slotsPath(){return MODE==='manage'?'/api/book/manage/'+TOKEN+'/slots':'/api/book/'+TOKEN+'/slots';}
+function isLoaded(day){return S.loaded.some(function(r){return day>=r[0]&&day<r[1];});}
+async function ensureRange(from,days){
+  // 予約期間の外は聞かない
+  var w=S.info.window;
+  var start=from<w.from?w.from:from;
+  var end=ymd(addDays(parseYmd(from),days));
+  var winEnd=ymd(addDays(parseYmd(w.to),1));
+  if(end>winEnd)end=winEnd;
+  if(start>=end)return true;
+  // 読んでいない最初の日から読む
+  var d=start;
+  while(d<end&&isLoaded(d))d=ymd(addDays(parseYmd(d),1));
+  if(d>=end)return true;
+  var n=Math.min(42,Math.round((parseYmd(end)-parseYmd(d))/86400000));
+  var r=await api(slotsPath()+'?from='+d+'&days='+n);
+  if(!r.ok){S.error=r.data.error||'空き状況を読み込めませんでした';return false;}
+  S.error='';
+  Object.assign(S.slots,r.data.days||{});
+  S.loaded.push([d,ymd(addDays(parseYmd(d),n))]);
+  return ensureRange(from,days);
+}
+function resetSlots(){S.slots={};S.loaded=[];}
+function slotsOf(day){return S.slots[day]||[];}
+function inWindow(day){return day>=S.info.window.from&&day<=S.info.window.to;}
+
+/* 次に空いている日を探す（今見ている週の後ろから、予約期間の終わりまで） */
+async function findNext(fromDay){
+  var d=fromDay;
+  for(var i=0;i<12&&d<=S.info.window.to;i++){
+    if(!await ensureRange(d,42))return null;
+    for(var k=0;k<42;k++){
+      var day=ymd(addDays(parseYmd(d),k));
+      if(day>S.info.window.to)return null;
+      if(slotsOf(day).length)return day;
+    }
+    d=ymd(addDays(parseYmd(d),42));
+  }
+  return null;
+}
+
+/* ---------- 描画：左の欄 ---------- */
+function locationMeta(loc){
+  if(!loc)return '';
+  if(loc.type==='meet')return '<div class="bk-meta">'+IC.video+'<div>Google Meet<div class="bk-fine">ビデオ会議の情報は確認メールに記載されます</div></div></div>';
+  if(loc.type==='place'&&loc.text)return '<div class="bk-meta">'+IC.pin+'<div>'+esc(loc.text)+'</div></div>';
+  if(loc.type==='phone')return '<div class="bk-meta">'+IC.phone+'<div>電話'+(loc.text?'<div class="bk-fine">'+esc(loc.text)+'</div>':'')+'</div></div>';
+  return '';
+}
+function avatar(staff){
+  var nm=(staff&&staff.nickname)||'';
+  if(staff&&staff.avatar_url)return '<div class="bk-avatar"><img src="'+esc(staff.avatar_url)+'" alt="" referrerpolicy="no-referrer"></div>';
+  return '<div class="bk-avatar">'+esc(nm.slice(0,1)||'?')+'</div>';
+}
+function sideHTML(){
+  var i=S.info;
+  return '<aside class="bk-side">'+
+    avatar(i.staff)+
+    '<div class="bk-host">'+esc(i.staff.nickname)+'</div>'+
+    '<h1 class="bk-title">'+esc(i.title)+'</h1>'+
+    '<div class="bk-meta">'+IC.clock+'<div>'+i.duration+'分の予約</div></div>'+
+    locationMeta(i.location)+
+    (i.description?'<p class="bk-desc">'+esc(i.description)+'</p>':'')+
+    '<div class="bk-mini bk-mini-side">'+miniHTML()+'</div>'+
+  '</aside>';
+}
+
+/* ---------- 描画：月のミニカレンダー ---------- */
+function miniHTML(){
+  var m=S.month;
+  var first=sunday(m);
+  var cells='';
+  for(var k=0;k<42;k++){
+    var d=addDays(first,k);var day=ymd(d);
+    if(d.getMonth()!==m.getMonth()){cells+='<span class="bk-day bk-out"></span>';continue;}
+    var has=slotsOf(day).length>0;
+    var cls='bk-day'+(has?' bk-has':'')+(day===todayYmd()?' bk-today':'')+(day===S.selDay?' bk-sel':'');
+    cells+=has
+      ?'<button class="'+cls+'" onclick="pickDay(\''+day+'\')" aria-label="'+dayLabel(day)+' 空きあり">'+d.getDate()+'</button>'
+      :'<span class="'+cls+'" aria-hidden="true">'+d.getDate()+'</span>';
+  }
+  var prevOk=ymd(addDays(m,-1))>=S.info.window.from;
+  var nextM=new Date(m.getFullYear(),m.getMonth()+1,1);
+  var nextOk=ymd(nextM)<=S.info.window.to;
+  return '<div class="bk-mini-head"><b>'+m.getFullYear()+'年'+(m.getMonth()+1)+'月</b><span>'+
+      '<button class="bk-icon-btn" onclick="moveMonth(-1)" '+(prevOk?'':'disabled')+' aria-label="前の月">'+IC.left+'</button>'+
+      '<button class="bk-icon-btn" onclick="moveMonth(1)" '+(nextOk?'':'disabled')+' aria-label="次の月">'+IC.right+'</button></span></div>'+
+    '<div class="bk-mini-grid">'+DOW.map(function(w){return '<span class="bk-dow">'+w+'</span>';}).join('')+cells+'</div>';
+}
+
+/* ---------- 描画：週の表示（PC）と、選んだ日の一覧（スマホ） ---------- */
+function weekHTML(){
+  var ws=S.weekStart;var we=addDays(ws,6);
+  var prevOk=ymd(addDays(ws,-1))>=S.info.window.from;
+  var nextOk=ymd(addDays(ws,7))<=S.info.window.to;
+  var rangeLabel=ws.getFullYear()+'年'+(ws.getMonth()+1)+'月'+ws.getDate()+'日～'+
+    (we.getMonth()!==ws.getMonth()?(we.getMonth()+1)+'月':'')+we.getDate()+'日';
+  var any=false;
+  var cols='';
+  for(var k=0;k<7;k++){
+    var d=addDays(ws,k);var day=ymd(d);var list=slotsOf(day);
+    if(list.length)any=true;
+    cols+='<div><div class="bk-col-head'+(day===todayYmd()?' bk-today':'')+'"><div class="bk-dw">'+DOW[d.getDay()]+'</div><div class="bk-dn">'+d.getDate()+'</div></div>'+
+      '<div class="bk-col-body">'+(list.length?list.map(function(t){
+        return '<button class="bk-slot" onclick="chooseSlot(\''+day+'\',\''+t+'\')">'+t+'</button>';
+      }).join(''):'<div class="bk-none">'+(inWindow(day)?'空きなし':'')+'</div>')+'</div></div>';
+  }
+  return '<div class="bk-weekview">'+
+    '<div class="bk-weekbar">'+
+      '<button class="bk-today-btn" onclick="goToday()">今日</button>'+
+      '<button class="bk-icon-btn" onclick="moveWeek(-1)" '+(prevOk?'':'disabled')+' aria-label="前の週">'+IC.left+'</button>'+
+      '<button class="bk-icon-btn" onclick="moveWeek(1)" '+(nextOk?'':'disabled')+' aria-label="次の週">'+IC.right+'</button>'+
+      '<span class="bk-range">'+rangeLabel+'</span></div>'+
+    (S.error?'<div class="bk-banner bk-bad">'+esc(S.error)+'</div>':'')+
+    '<div class="bk-week">'+cols+'</div>'+
+    (!any&&!S.error?'<div class="bk-empty">この週は予約できる時間がありません。<br><button class="bk-link-btn" onclick="jumpNext()">次に空いている日へ移動</button></div>':'')+
+  '</div>';
+}
+function dayListHTML(){
+  var day=S.selDay;var list=day?slotsOf(day):[];
+  return '<div class="bk-daylist">'+
+    '<div class="bk-mini bk-mini-main">'+miniHTML()+'</div>'+
+    (S.error?'<div class="bk-banner bk-bad" style="margin-top:12px">'+esc(S.error)+'</div>':'')+
+    (day&&list.length
+      ?'<div class="bk-daylist-head">'+longDay(day)+'</div><div class="bk-daylist-grid">'+list.map(function(t){
+          return '<button class="bk-slot" onclick="chooseSlot(\''+day+'\',\''+t+'\')">'+t+'</button>';}).join('')+'</div>'
+      :(!S.error?'<div class="bk-empty">'+(day?'この日は予約できる時間がありません。':'日付を選んでください。')+
+        '<br><button class="bk-link-btn" onclick="jumpNext()">次に空いている日へ移動</button></div>':''))+
+  '</div>';
+}
+function pickerHTML(head){
+  return '<section class="bk-main">'+head+
+    '<div class="bk-tz">(GMT+09:00) 日本標準時 - 東京</div>'+
+    weekHTML()+dayListHTML()+'</section>';
+}
+
+function render(){
+  var main=document.getElementById('bkMain');
+  if(MODE==='manage'&&!S.picking){main.innerHTML=manageHTML();return;}
+  var head=MODE==='manage'
+    ?'<button class="bk-link-btn" style="margin:-8px 0 8px -12px" onclick="stopPicking()">← 予約の確認に戻る</button><h2 class="bk-h2">新しい日時を選択</h2>'
+    :'<h2 class="bk-h2">予約の時間を選択</h2>';
+  main.innerHTML='<div class="bk-wrap"><div class="bk-card">'+sideHTML()+pickerHTML(head)+'</div>'+
+    '<div class="bk-foot">OPS日調アプリ 予約スケジュール</div></div>';
+}
+
+/* ---------- 操作 ---------- */
+async function showWeekOf(day){
+  S.weekStart=sunday(parseYmd(day));
+  S.month=new Date(S.weekStart.getFullYear(),S.weekStart.getMonth(),1);
+  var dd=parseYmd(day);
+  if(dd.getMonth()!==S.month.getMonth())S.month=new Date(dd.getFullYear(),dd.getMonth(),1);
+  render();
+  await ensureRange(ymd(S.weekStart),7);
+  await ensureRange(ymd(sunday(S.month)),42);
+  render();
+}
+async function moveWeek(n){S.selDay=null;await showWeekOf(ymd(addDays(S.weekStart,7*n)));}
+async function moveMonth(n){
+  S.month=new Date(S.month.getFullYear(),S.month.getMonth()+n,1);
+  render();
+  await ensureRange(ymd(sunday(S.month)),42);
+  // スマホでは月を変えたら、その月の最初の空き日を選んでおく
+  if(!S.selDay||S.selDay.slice(0,7)!==ymd(S.month).slice(0,7)){
+    var first=null;for(var k=0;k<31;k++){var dd=ymd(addDays(S.month,k));if(dd.slice(0,7)!==ymd(S.month).slice(0,7))break;if(slotsOf(dd).length){first=dd;break;}}
+    S.selDay=first;
+  }
+  render();
+}
+async function pickDay(day){S.selDay=day;await showWeekOf(day);}
+async function goToday(){S.selDay=null;await showWeekOf(todayYmd()<S.info.window.from?S.info.window.from:todayYmd());}
+async function jumpNext(){
+  var from=S.selDay&&window.matchMedia('(max-width:860px)').matches?ymd(addDays(parseYmd(S.selDay),1)):ymd(addDays(S.weekStart,7));
+  if(from<S.info.window.from)from=S.info.window.from;
+  var next=await findNext(from);
+  if(!next){toast('この先に予約できる時間はありません');return;}
+  S.selDay=next;await showWeekOf(next);
+}
+
+/* ---------- 予約フォーム ---------- */
+var F={day:null,time:null,codeSent:false};
+function chooseSlot(day,time){
+  F.day=day;F.time=time;
+  if(MODE==='manage')return openRescheduleConfirm();
+  openForm();
+}
+function openDialog(html){document.getElementById('bkDialog').innerHTML=html;document.getElementById('bkScrim').classList.add('bk-open');}
+function closeDialog(){if(S.busy)return;document.getElementById('bkScrim').classList.remove('bk-open');}
+function slotSummary(day,time,title){
+  return '<div class="bk-summary">'+
+    '<div class="bk-meta">'+IC.cal+'<div><b>'+esc(title||S.info.title)+'</b></div></div>'+
+    '<div class="bk-meta">'+IC.clock+'<div>'+longDay(day)+'<br>'+time+'～'+addMin(time,S.info.duration)+'</div></div>'+
+    locationMeta(S.info.location)+'</div>';
+}
+function field(id,label,req,html){
+  return '<div class="bk-field"><label for="'+id+'">'+esc(label)+(req?'<span class="bk-req">*</span>':'')+'</label>'+html+'</div>';
+}
+function openForm(){
+  var i=S.info;
+  var q=(i.questions||[]).map(function(x){
+    return field('bkq_'+x.id,x.label,x.required,'<textarea id="bkq_'+x.id+'" maxlength="1000"></textarea>');
+  }).join('');
+  openDialog(
+    '<div class="bk-dialog-head"><h3>予約</h3><button class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
+    '<div class="bk-dialog-body">'+slotSummary(F.day,F.time)+
+      '<div class="bk-banner bk-bad" id="bkFormErr" style="display:none"></div>'+
+      '<div class="bk-row2">'+
+        field('bkLast','姓',true,'<input id="bkLast" autocomplete="family-name" maxlength="40">')+
+        field('bkFirst','名',true,'<input id="bkFirst" autocomplete="given-name" maxlength="40">')+
+      '</div>'+
+      field('bkEmail','メールアドレス',true,
+        i.verifyEmail
+          ?'<div class="bk-inline"><input id="bkEmail" type="email" autocomplete="email" maxlength="254"><button class="bk-btn bk-line" id="bkSendCode" onclick="sendCode()">コードを送信</button></div>'
+          :'<input id="bkEmail" type="email" autocomplete="email" maxlength="254">')+
+      (i.verifyEmail?'<div id="bkCodeBox" style="display:none">'+field('bkCode','確認コード（メールに届いた6桁）',true,'<input id="bkCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code">')+'</div>':'')+
+      (i.phone!=='off'?field('bkPhone','電話番号',i.phone==='required','<input id="bkPhone" type="tel" autocomplete="tel" maxlength="30">'):'')+
+      q+
+      '<p class="bk-tz" style="margin:4px 0 0">予約すると、このメールアドレスにGoogleカレンダーの招待が届きます。</p>'+
+    '</div>'+
+    '<div class="bk-dialog-foot"><button class="bk-btn bk-ghost" onclick="closeDialog()">キャンセル</button>'+
+      '<button class="bk-btn bk-pri" id="bkSubmit" onclick="submitBooking()">予約</button></div>');
+  F.codeSent=false;
+  setTimeout(function(){var el=document.getElementById('bkLast');if(el)el.focus();},50);
+}
+function formErr(msg){var e=document.getElementById('bkFormErr');if(!e)return;e.textContent=msg;e.style.display=msg?'block':'none';if(msg)e.scrollIntoView({block:'nearest'});}
+function val(id){var el=document.getElementById(id);return el?el.value.trim():'';}
+function readForm(){
+  var i=S.info;
+  var g={last_name:val('bkLast'),first_name:val('bkFirst'),email:val('bkEmail'),phone:val('bkPhone'),answers:{}};
+  if(!g.last_name||!g.first_name)return {error:'姓と名を入力してください'};
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email))return {error:'メールアドレスを正しく入力してください'};
+  if(i.phone==='required'&&!g.phone)return {error:'電話番号を入力してください'};
+  for(var k=0;k<(i.questions||[]).length;k++){
+    var q=i.questions[k];var v=val('bkq_'+q.id);
+    if(q.required&&!v)return {error:'「'+q.label+'」に回答してください'};
+    g.answers[q.id]=v;
+  }
+  if(i.verifyEmail){
+    g.code=val('bkCode');
+    if(!F.codeSent)return {error:'「コードを送信」を押して、届いた確認コードを入力してください'};
+    if(!/^\d{6}$/.test(g.code))return {error:'メールに届いた6桁の確認コードを入力してください'};
+  }
+  return {guest:g};
+}
+async function sendCode(){
+  var email=val('bkEmail');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){formErr('メールアドレスを正しく入力してください');return;}
+  var b=document.getElementById('bkSendCode');b.disabled=true;
+  var r=await api('/api/book/'+TOKEN+'/verify',{method:'POST',body:{email:email}});
+  b.disabled=false;
+  if(!r.ok){formErr(r.data.error||'確認コードを送れませんでした');return;}
+  formErr('');F.codeSent=true;b.textContent='再送信';
+  document.getElementById('bkCodeBox').style.display='block';
+  document.getElementById('bkCode').focus();
+  toast(email+' に確認コードを送りました');
+}
+async function submitBooking(){
+  var f=readForm();
+  if(f.error){formErr(f.error);return;}
+  var btn=document.getElementById('bkSubmit');
+  btn.disabled=true;btn.textContent='予約しています…';S.busy=true;
+  var r=await api('/api/book/'+TOKEN,{method:'POST',body:Object.assign({start:slotIso(F.day,F.time)},f.guest)});
+  S.busy=false;
+  if(!r.ok){
+    btn.disabled=false;btn.textContent='予約';
+    formErr(r.data.error||'予約できませんでした');
+    if(r.data.taken){
+      // 埋まった枠を一覧から消すため、読み直す
+      resetSlots();await ensureRange(ymd(S.weekStart),7);await ensureRange(ymd(sunday(S.month)),42);render();
+    }
+    return;
+  }
+  closeDialog();
+  showDone(r.data.booking);
+}
+
+/* ---------- 予約の控え ---------- */
+function bookingDetails(b){
+  return '<div class="bk-summary">'+
+    '<div class="bk-meta">'+IC.cal+'<div><b>'+esc(b.title)+'</b></div></div>'+
+    '<div class="bk-meta">'+IC.clock+'<div>'+esc(b.label)+'</div></div>'+
+    (b.staff?'<div class="bk-meta">'+IC.person+'<div>担当：'+esc(b.staff)+'</div></div>':'')+
+    (b.location.type==='meet'
+      ?'<div class="bk-meta">'+IC.video+'<div>'+(b.meet_url?'<a href="'+esc(b.meet_url)+'" target="_blank" rel="noopener">'+esc(b.meet_url)+'</a>':'Google Meet')+'</div></div>'
+      :locationMeta(b.location))+
+  '</div>';
+}
+function showDone(b){
+  document.getElementById('bkMain').innerHTML='<div class="bk-done">'+
+    '<div class="bk-done-mark">'+IC.check+'</div>'+
+    '<h2>予約しました</h2>'+
+    '<p class="bk-lead">'+esc(b.email)+' にGoogleカレンダーの招待をお送りしました。</p>'+
+    bookingDetails(b)+
+    '<p style="margin:16px 0 0;font-size:13px;color:var(--bk-sub)">日時の変更やキャンセルは、次のページからできます（招待メールにも記載しています）。</p>'+
+    '<div class="bk-manage-link">'+esc(b.manage_url)+'</div>'+
+    '<div class="bk-actions"><a class="bk-btn bk-pri" style="text-decoration:none" href="'+esc(b.manage_url)+'">予約を確認・変更する</a></div>'+
+  '</div>';
+  window.scrollTo(0,0);
+}
+
+/* ---------- 変更・キャンセル ---------- */
+function manageHTML(){
+  var m=S.manage;var b=m.booking;
+  var status=b.cancelled
+    ?'<div class="bk-done-mark bk-x">'+IC.x+'</div><h2>この予約はキャンセルされました</h2><p class="bk-lead">あらためて予約するときは、担当者から届いた予約ページをお使いください。</p>'
+    :b.past
+      ?'<div class="bk-done-mark">'+IC.check+'</div><h2>この予約は終了しました</h2><p class="bk-lead">開始時刻を過ぎた予約は、変更・キャンセルできません。</p>'
+      :'<div class="bk-done-mark">'+IC.check+'</div><h2>予約が確定しています</h2><p class="bk-lead">'+esc(b.name)+' 様（'+esc(b.email)+'）</p>';
+  var actions='';
+  if(m.changeable){
+    actions='<div class="bk-actions">'+
+      (m.reschedulable?'<button class="bk-btn bk-pri" onclick="startPicking()">日時を変更</button>':'')+
+      '<button class="bk-btn bk-danger" onclick="openCancelConfirm()">予約をキャンセル</button></div>'+
+      (m.reschedulable?'':'<p style="font-size:13px;color:var(--bk-sub);margin-top:10px">現在、この予約の日時はこのページから変更できません。キャンセルして担当者にご連絡ください。</p>');
+  }
+  return '<div class="bk-done">'+status+bookingDetails(b)+actions+'</div><div class="bk-foot">OPS日調アプリ 予約スケジュール</div>';
+}
+async function startPicking(){
+  S.picking=true;resetSlots();S.selDay=null;
+  var start=todayYmd()<S.info.window.from?S.info.window.from:todayYmd();
+  await showWeekOf(start);
+  // 予約ページと同じく、最初に空いている日を選んでおく
+  var first=await findNext(start);
+  if(first){S.selDay=first;await showWeekOf(first);}
+}
+function stopPicking(){S.picking=false;render();window.scrollTo(0,0);}
+function openRescheduleConfirm(){
+  var b=S.manage.booking;
+  openDialog('<div class="bk-dialog-head"><h3>日時を変更</h3><button class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
+    '<div class="bk-dialog-body">'+
+      '<div class="bk-banner bk-bad" id="bkFormErr" style="display:none"></div>'+
+      '<p style="margin:0 0 6px;color:var(--bk-sub);font-size:12px">変更前</p>'+
+      '<div class="bk-summary" style="text-decoration:line-through;color:var(--bk-sub)">'+esc(b.label)+'</div>'+
+      '<p style="margin:0 0 6px;color:var(--bk-sub);font-size:12px">変更後</p>'+
+      slotSummary(F.day,F.time,b.title)+
+      '<p class="bk-tz" style="margin:0">変更すると、Googleカレンダーから更新のお知らせが届きます。</p>'+
+    '</div>'+
+    '<div class="bk-dialog-foot"><button class="bk-btn bk-ghost" onclick="closeDialog()">戻る</button>'+
+      '<button class="bk-btn bk-pri" id="bkSubmit" onclick="submitReschedule()">この日時に変更</button></div>');
+}
+async function submitReschedule(){
+  var btn=document.getElementById('bkSubmit');btn.disabled=true;btn.textContent='変更しています…';S.busy=true;
+  var r=await api('/api/book/manage/'+TOKEN,{method:'PATCH',body:{start:slotIso(F.day,F.time)}});
+  S.busy=false;
+  if(!r.ok){
+    btn.disabled=false;btn.textContent='この日時に変更';formErr(r.data.error||'変更できませんでした');
+    if(r.data.taken){resetSlots();await ensureRange(ymd(S.weekStart),7);await ensureRange(ymd(sunday(S.month)),42);render();}
+    return;
+  }
+  closeDialog();
+  S.manage.booking=r.data.booking;S.picking=false;render();window.scrollTo(0,0);
+  toast('日時を変更しました');
+}
+function openCancelConfirm(){
+  var b=S.manage.booking;
+  openDialog('<div class="bk-dialog-head"><h3>予約をキャンセルしますか？</h3><button class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
+    '<div class="bk-dialog-body">'+
+      '<div class="bk-banner bk-bad" id="bkFormErr" style="display:none"></div>'+
+      '<div class="bk-summary">'+esc(b.title)+'<br>'+esc(b.label)+'</div>'+
+      '<p style="margin:0;color:var(--bk-sub);font-size:13px">キャンセルすると元に戻せません。担当者とあなたに、Googleカレンダーから取り消しのお知らせが届きます。</p>'+
+    '</div>'+
+    '<div class="bk-dialog-foot"><button class="bk-btn bk-ghost" onclick="closeDialog()">戻る</button>'+
+      '<button class="bk-btn bk-pri" style="background:var(--bk-bad)" id="bkSubmit" onclick="submitCancel()">キャンセルする</button></div>');
+}
+async function submitCancel(){
+  var btn=document.getElementById('bkSubmit');btn.disabled=true;btn.textContent='キャンセルしています…';S.busy=true;
+  var r=await api('/api/book/manage/'+TOKEN,{method:'DELETE'});
+  S.busy=false;
+  if(!r.ok){btn.disabled=false;btn.textContent='キャンセルする';formErr(r.data.error||'キャンセルできませんでした');return;}
+  closeDialog();
+  S.manage.booking=r.data.booking;S.manage.changeable=false;S.manage.reschedulable=false;render();
+  toast('予約をキャンセルしました');
+}
+
+/* ---------- 起動 ---------- */
+function showClosed(title,msg){
+  document.getElementById('bkMain').innerHTML='<div class="bk-closed">'+(title?'<p>'+esc(title)+'</p>':'')+'<h2>'+esc(msg)+'</h2></div>';
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeDialog();});
+(async function boot(){
+  if(MODE==='manage'){
+    var r=await api('/api/book/manage/'+TOKEN);
+    if(!r.ok){showClosed('',r.data.error||'読み込めませんでした');return;}
+    S.manage=r.data;S.info=r.data.page;
+    document.title=r.data.booking.title+' の予約 | OPS日調アプリ';
+    render();return;
+  }
+  var r2=await api('/api/book/'+TOKEN);
+  if(!r2.ok){showClosed('',r2.data.error||'読み込めませんでした');return;}
+  S.info=r2.data;
+  document.title=S.info.title+' | 予約';
+  if(S.info.closed){showClosed(S.info.title,'現在、予約を受け付けていません');return;}
+  var start=todayYmd()<S.info.window.from?S.info.window.from:todayYmd();
+  S.weekStart=sunday(parseYmd(start));S.month=new Date(S.weekStart.getFullYear(),S.weekStart.getMonth(),1);
+  render();
+  await ensureRange(ymd(S.weekStart),7);
+  await ensureRange(ymd(sunday(S.month)),42);
+  // スマホ向けに、最初の空き日を選んでおく（PCでも印として出る）
+  var first=await findNext(start);
+  if(first){
+    S.selDay=first;
+    // 今週に1つも無ければ、最初に空いている週を開く（Googleと同じ）
+    if(first>=ymd(addDays(S.weekStart,7))){await showWeekOf(first);return;}
+  }
+  render();
+})();
+</script>
+</body>
+</html>

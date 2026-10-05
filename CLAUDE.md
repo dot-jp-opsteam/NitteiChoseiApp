@@ -23,9 +23,11 @@
 | `apply.html` | インターン生の面談申請（**ログイン不要**・別実装・ES5風） |
 | `free.html` | 日程調整（**ログイン不要**・空き時間だけを集める。`apply.html` から派生） |
 | `attendance.html` | 公開の出欠回答ページ（**ログイン不要**・`/style.css` を読む） |
+| `book.html` | 予約スケジュールの予約ページ `/b/<合言葉>` と変更・キャンセル `/b/manage/<合言葉>`（**ログイン不要**・`style.css` は読まない・クラスは `bk-`） |
 | `server/server.js` | Express API 本体 |
 | `server/` の他 | `slots.js` 空き枠 / `google.js` カレンダー / `stream.js` SSE / `mail.js` / `ical.js` / `auth.js` / `dblock.js` |
 | `demo/` | 左メニュー・ホームのホバーで流れる「相手の回答画面」の動画（mp4＋webm）。**手で編集せず** `node tools/record-demos.mjs` で作る |
+| `server/booking.js` / `booking-routes.js` | 予約スケジュールの枠の計算（純粋関数）と API 一式（`/api/booking-pages` `/api/book/*`） |
 | `tools/` | テストと道具（下記） |
 | `_specs/` | 設計書。**新機能の前にここを見る** |
 
@@ -50,6 +52,7 @@
 | **4781** | **出欠確認** | 集計・回答・確定・共有URL・ミニカレンダー |
 | 5173 | 日程調整を出す | 「日程を決める」フォーム（`openRequestForm` / `submitRequest`） |
 | 5086 | BOOT | 起動処理・自動ログイン |
+| — | 予約スケジュール | 一覧・編集シート（`viewBooking` / `openBookingEditor` / `bkSave`）。CSSは `bkp-` |
 
 出欠まわりでよく触る関数：
 `openAttendDetail` 集計シート / `openAttendOption` 日程ごとの回答状況 /
@@ -82,6 +85,9 @@ node tools/test-stream.mjs     # SSE（27件）
 node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
 # 確認用ページ（tools/make-test-page.mjs）は今後作らない・走らせない（2026-10-05 の指示）
 node tools/record-demos.mjs    # demo/ の動画を撮り直す（要 Playwright と ffmpeg・約1分・8124番を使う）
+node tools/test-booking.mjs    # 予約スケジュールの枠の計算（31件）
+node tools/test-booking-e2e.mjs # 予約の通し（56件）。偽のGoogleを立てて8125番で起動
+node tools/test-booking-e2e.mjs --serve  # 画面確認用に立てたままにする（URLが出る）
 ```
 
 **e2eでは公開ページの回数制限を切ってある**（`PUBLIC_WRITE_PER_MIN=0`）。

@@ -1656,6 +1656,7 @@ const NAV={
   staff:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
+    {id:'booking',label:'予約スケジュール',ic:'alarm'},
     {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
     {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
   ],
@@ -1663,6 +1664,7 @@ const NAV={
   branch_admin:[
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
+    {id:'booking',label:'予約スケジュール',ic:'alarm'},
     {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
     {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
     {id:'users',label:'ユーザー',ic:'users'},
@@ -1819,6 +1821,7 @@ function go(tab,saveHistory=true){
   if(tab!=='home'&&calFull){calFull=false;document.documentElement.setAttribute('data-calfull','0');}
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
   if(tab==='interviews'&&IVHUB==='free')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く
+  if(tab==='booking')loadBookingPages();
   document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   if(saveHistory)history.pushState({tab},'',location.href);
   window.scrollTo(0,0);
@@ -1832,7 +1835,7 @@ window.addEventListener('popstate',e=>{
 /* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
    そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
 const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',
-  avset:'a2',branches:'a4',users:'a3'};
+  avset:'a2',branches:'a4',users:'a3',booking:'a2'};
 /* ホーム以外の画面の右上に置く「ホームへ戻る」。
    スマホでは左メニューが隠れていて、行った先から戻れなくなるため */
 function homeBackBtn(){
@@ -1847,6 +1850,7 @@ function viewFor(t){
   if(t==='my')return viewMyInterviews();
   if(t==='interviews')return viewStaffInterviews();
   if(t==='requests')return viewRequests();
+  if(t==='booking')return viewBooking();
   if(t==='avset')return viewAvailSet();
   if(t==='branches')return viewBranches();
   if(t==='users')return viewUsers();
@@ -2335,7 +2339,7 @@ const IV_ZONES=[
 function setIvSort(v){IVSORT=v;render();}
 function ivRow(iv,zone){
   const s=STATUS[iv.status];const intern=ivIntern(iv);const nm=ivInternName(iv);
-  const label=zone.key==='done'?'実施済み':s.t;
+  const label=iv.cancelled?'キャンセル':zone.key==='done'?'実施済み':s.t;
   return `<div class="row" onclick="openInterview('${iv.id}')">
       <span class="av ${accOf(intern?.id||iv.id)}">${esc(initials(nm))}</span>
       <span class="rmain">
@@ -2560,6 +2564,18 @@ function openInterview(id){
         <button class="btn bad block sm" onclick="failInterview('${id}')">この申請を不成立にする</button>
         <p class="fine" style="margin-top:6px">どの候補でも都合が合わないときに使います。あとから申請中に戻せます。</p>
       </div>`;
+  }else if(ivIsBooking(iv)&&iv.status==='fixed'){
+    /* 予約スケジュールから入った予約。確定は予約者がした操作なので、ここでは中身とキャンセルだけ */
+    actions=`<div class="hint">${ic('check')}<span>予約スケジュールから予約されました</span></div>
+      ${ivBookingHTML(iv)}
+      <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventId?'Googleカレンダーに登録し、予約した人を招待しました':'Googleカレンダーには登録されていません'}</span></div>
+      <div class="danger-zone">
+        <button class="btn bad block sm" onclick="cancelBookingIv('${id}')">予約をキャンセル</button>
+        <p class="fine" style="margin-top:6px">予約した人にGoogleカレンダーから取り消しのお知らせが届きます。</p>
+      </div>`;
+  }else if(ivIsBooking(iv)){
+    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>この予約は${{guest:'予約した人が',staff:'',google:'Googleカレンダーで'}[iv.cancelled_by]||''}キャンセルされました。</span></div>
+      ${ivBookingHTML(iv)}`;
   }else if(iv.status==='fixed'){
     actions=`<div class="hint">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
       <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
@@ -4614,6 +4630,363 @@ function requestList(list,kind){
         :`<span class="tile-arrow">${ic('chevron')}</span>`}</div>`;
   }).join('');
   return `<div class="card"><div class="rowlist">${rows}</div></div>`;
+}
+
+/* =========================================================
+   予約スケジュール（Googleカレンダーの「予約スケジュール」と同じ）
+   ---------------------------------------------------------
+   スタッフが受付時間を決めて公開すると、1本ごとに予約ページのURL（/b/<合言葉>）ができる。
+   インターン生は空いている枠を1つ選ぶだけで予約が確定する（book.html）。
+   Googleカレンダーの予定がある時間は、サーバーが freeBusy で調べて枠から外す。
+   予約は面談一覧に「確定済み」として入り、キャンセルもそこからできる。
+   設計：_specs/2026-10-05-予約スケジュール-design.md
+   ========================================================= */
+let BKP=null;            // 一覧 {pages, googleConnected, mailEnabled, defaults, choices}
+let BKE=null;            // 編集中 {id, c:設定}
+let BKCALS=null;         // 空きの確認に使えるカレンダー（自分のGoogleアカウント）
+let BKCOPY=null;         // 「ほかの曜日にコピー」を開いている曜日
+let BKOPEN=new Set(['basic','weekly']); // 編集シートで開いている区画
+const BK_DOWJ=['日','月','火','水','木','金','土'];
+const BK_DOW_ORDER=[1,2,3,4,5,6,0];
+const BK_REMIND_LABEL={10:'10分前',30:'30分前',60:'1時間前',180:'3時間前',1440:'前日（24時間前）',2880:'2日前',10080:'1週間前'};
+const BK_BUFFERS=[0,5,10,15,20,30,45,60,90,120];
+
+async function loadBookingPages(){
+  try{ BKP=await fsJSON('/api/booking-pages'); }
+  catch(e){ toast(e.message); BKP=BKP||{pages:[],googleConnected:false}; }
+  if(currentTab==='booking')renderQuiet();
+}
+
+/* 一覧の2段目に出す受付の曜日。「月・火・水・木・金」のように並べる */
+function bkWeeklySummary(c){
+  if(c.repeat==='none')return '特定の日のみ';
+  const on=BK_DOW_ORDER.filter(d=>(c.weekly[d]||[]).length);
+  return on.length?on.map(d=>BK_DOWJ[d]).join('・'):'受付曜日なし';
+}
+function bkCard(p){
+  const c=p.config;
+  return `<div class="card bkp-card"><div class="cb">
+    <div class="bkp-top">
+      <span class="bkp-color" style="background:${esc(c.color)}"></span>
+      <div class="bkp-main">
+        <div class="bkp-title">${esc(c.title)}</div>
+        <div class="bkp-sub">${c.duration}分・${esc(bkWeeklySummary(c))}・今後の予約 ${p.upcoming}件</div>
+      </div>
+      <span class="pill ${p.active?'st-fixed':'st-none'}">${p.active?'公開中':'停止中'}</span>
+    </div>
+    <div class="btn-row bkp-actions">
+      <a class="btn sm" href="${esc(p.url)}" target="_blank" rel="noopener">${ic('external')}予約ページを開く</a>
+      <button class="btn sm" onclick="bkCopy('${p.id}','url')">${ic('copy')}URLをコピー</button>
+      <button class="btn sm" onclick="bkCopy('${p.id}','embed')">${ic('link')}埋め込みコード</button>
+      <button class="btn sm" onclick="openBookingEditor('${p.id}')">${ic('edit')}編集</button>
+      <button class="btn sm" onclick="bkToggleActive('${p.id}')">${p.active?'停止する':'公開する'}</button>
+      <button class="btn sm iconly bad" onclick="bkDeletePage('${p.id}')" aria-label="削除" title="削除">${ic('trash')}</button>
+    </div>
+  </div></div>`;
+}
+function viewBooking(){
+  const head=`<h1 class="page">予約スケジュール</h1>
+    <p class="page-sub">受付時間を公開して、インターン生に面談を予約してもらいます。
+    Googleカレンダーに予定がある時間は、自動で予約できなくなります。</p>`;
+  if(!BKP)return head+`<div class="empty">読み込んでいます…</div>`;
+  const create=BKP.googleConnected
+    ?`<button class="btn pri" onclick="openBookingEditor()">${ic('plus')}予約スケジュールを作成</button>`
+    :`<div class="hint mock">${ic('alert')}<span>予約スケジュールを使うには、Googleカレンダーとの連携が必要です。
+        左メニューの「カレンダー連携」から連携してください。
+        予約が入るとあなたのGoogleカレンダーに予定が作られ、予約した人に招待が届きます。</span></div>`;
+  const list=BKP.pages.length
+    ?BKP.pages.map(bkCard).join('')
+    :`<div class="empty"><div class="ei">${ic('clock')}</div><p>予約スケジュールはまだありません。</p></div>`;
+  return `${head}<div class="bkp-toolbar">${create}</div>${list}`;
+}
+
+function bkFind(id){return (BKP&&BKP.pages||[]).find(p=>p.id===id);}
+function bkEmbedCode(url){return `<iframe src="${url}" style="border:0" width="100%" height="720" frameborder="0"></iframe>`;}
+async function bkCopy(id,what){
+  const p=bkFind(id);if(!p)return;
+  const text=what==='embed'?bkEmbedCode(p.url):p.url;
+  try{ await navigator.clipboard.writeText(text); toast(what==='embed'?'埋め込みコードをコピーしました':'URLをコピーしました'); }
+  catch(e){
+    // 権限が下りない環境では、選べる形で見せて手でコピーしてもらう
+    openSheet(`<h3>${what==='embed'?'埋め込みコード':'予約ページのURL'}</h3>
+      <textarea class="bkp-copybox" readonly onclick="this.select()">${esc(text)}</textarea>
+      <p class="fine">選択してコピーしてください。</p>`);
+  }
+}
+async function bkToggleActive(id){
+  const p=bkFind(id);if(!p)return;
+  try{
+    const r=await fsJSON('/api/booking-pages/'+encodeURIComponent(id),{method:'PUT',body:JSON.stringify({active:!p.active})});
+    Object.assign(p,r.page);renderQuiet();
+    toast(r.page.active?'予約の受付を再開しました':'予約の受付を止めました');
+  }catch(e){toast(e.message);}
+}
+async function bkDeletePage(id){
+  const p=bkFind(id);if(!p)return;
+  if(!await confirmSheet('予約スケジュールを削除',
+    `「${p.config.title}」を削除します。予約ページのURLは使えなくなります。すでに入っている予約は面談一覧に残ります。元に戻せません。`,'削除する'))return;
+  try{
+    await fsJSON('/api/booking-pages/'+encodeURIComponent(id),{method:'DELETE'});
+    BKP.pages=BKP.pages.filter(x=>x.id!==id);renderQuiet();toast('削除しました');
+  }catch(e){toast(e.message);}
+}
+
+/* ---------- 編集シート ---------- */
+function openBookingEditor(id){
+  const p=id?bkFind(id):null;
+  const base=p?p.config:(BKP&&BKP.defaults)||{};
+  BKE={id:p?p.id:null,c:JSON.parse(JSON.stringify(base))};
+  BKCOPY=null;
+  BKOPEN=new Set(p?['basic']:['basic','weekly']);
+  openSheet(bkEditorHTML());
+  if(!BKCALS)bkLoadCalendars();
+}
+async function bkLoadCalendars(){
+  try{ BKCALS=(await fsJSON('/api/booking-pages/calendars')).calendars||[]; }
+  catch(e){ BKCALS=[]; }
+  if(BKE)bkRedraw();
+}
+/* 編集シートを組み立て直す。入力はその場で BKE に入れているので、作り直しても消えない */
+function bkRedraw(){refreshSheet(()=>openSheet(bkEditorHTML()));}
+function bkToggleSec(k){if(BKOPEN.has(k))BKOPEN.delete(k);else BKOPEN.add(k);bkRedraw();}
+function bkSec(k,title,sub,body){
+  const open=BKOPEN.has(k);
+  return `<div class="bkp-sec ${open?'open':''}">
+    <button class="bkp-sech" onclick="bkToggleSec('${k}')" aria-expanded="${open}">
+      <span class="bkp-sect">${title}</span><span class="bkp-secs">${sub||''}</span><span class="bkp-chev">${ic('chevron')}</span></button>
+    ${open?`<div class="bkp-secb">${body}</div>`:''}</div>`;
+}
+function bkList(kind,key){
+  const c=BKE.c;
+  if(kind==='w'){c.weekly[key]=c.weekly[key]||[];return c.weekly[key];}
+  c.overrides[key]=c.overrides[key]||[];return c.overrides[key];
+}
+function bkRangesHTML(kind,key){
+  const list=bkList(kind,key);
+  if(!list.length)return `<span class="bkp-off">予約不可</span>`;
+  return list.map((r,i)=>`<div class="bkp-range">
+      <input type="time" step="300" value="${esc(r.s)}" onchange="bkSetRange('${kind}','${key}',${i},'s',this.value)" aria-label="開始">
+      <span>〜</span>
+      <input type="time" step="300" value="${esc(r.e==='24:00'?'23:59':r.e)}" onchange="bkSetRange('${kind}','${key}',${i},'e',this.value)" aria-label="終了">
+      <button class="btn sm iconly" onclick="bkDelRange('${kind}','${key}',${i})" aria-label="この時間帯を削除" title="この時間帯を削除">×</button>
+    </div>`).join('');
+}
+/* 23:59 は「その日の終わりまで」として 24:00 で持つ（時刻の入力欄は24:00を入れられないため） */
+function bkSetRange(kind,key,i,f,v){const r=bkList(kind,key)[i];if(r)r[f]=(f==='e'&&v==='23:59')?'24:00':v;}
+function bkDelRange(kind,key,i){bkList(kind,key).splice(i,1);bkRedraw();}
+function bkAddRange(kind,key){
+  const list=bkList(kind,key);
+  if(!list.length){list.push({s:'09:00',e:'17:00'});bkRedraw();return;}
+  const last=list[list.length-1];
+  const toM=t=>{const p=String(t).split(':').map(Number);return p[0]*60+p[1];};
+  const s=toM(last.e);if(s>=24*60-30){toast('これより後に時間帯を足せません');return;}
+  const e=Math.min(s+60,24*60);
+  const f=m=>m>=1440?'24:00':String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  list.push({s:f(s),e:f(e)});bkRedraw();
+}
+function bkOpenCopy(d){BKCOPY=BKCOPY===d?null:d;bkRedraw();}
+function bkApplyCopy(d){
+  const src=bkList('w',d);
+  document.querySelectorAll('input[name="bkCopyTo"]:checked').forEach(el=>{
+    BKE.c.weekly[el.value]=JSON.parse(JSON.stringify(src));
+  });
+  BKCOPY=null;bkRedraw();toast('コピーしました');
+}
+function bkWeeklyHTML(){
+  const c=BKE.c;
+  const rows=BK_DOW_ORDER.map(d=>`<div class="bkp-dayrow">
+      <span class="bkp-dow">${BK_DOWJ[d]}</span>
+      <div class="bkp-ranges">${bkRangesHTML('w',d)}</div>
+      <div class="bkp-dayact">
+        <button class="btn sm iconly" onclick="bkAddRange('w',${d})" aria-label="${BK_DOWJ[d]}曜日に時間帯を追加" title="時間帯を追加">${ic('plus')}</button>
+        <button class="btn sm iconly" onclick="bkOpenCopy(${d})" aria-label="ほかの曜日にコピー" title="ほかの曜日にコピー">${ic('copy')}</button>
+      </div>
+    </div>
+    ${BKCOPY===d?`<div class="bkp-copyto"><span class="bkp-copylab">${BK_DOWJ[d]}曜日の時間をコピーする先：</span>
+      ${BK_DOW_ORDER.filter(x=>x!==d).map(x=>`<label class="bkp-chk"><input type="checkbox" name="bkCopyTo" value="${x}">${BK_DOWJ[x]}</label>`).join('')}
+      <button class="btn sm pri" onclick="bkApplyCopy(${d})">適用</button></div>`:''}`).join('');
+  return `<label class="fl" style="margin-top:0">繰り返し</label>
+    <select onchange="BKE.c.repeat=this.value;bkRedraw()">
+      <option value="weekly" ${c.repeat!=='none'?'selected':''}>毎週繰り返す</option>
+      <option value="none" ${c.repeat==='none'?'selected':''}>繰り返さない（特定の日だけ受け付ける）</option></select>
+    ${c.repeat==='none'
+      ?`<p class="fine">「特定の日の空き状況」で受け付ける日を追加してください。</p>`
+      :`<div class="bkp-week">${rows}</div>`}`;
+}
+function bkOverridesHTML(){
+  const c=BKE.c;
+  const keys=Object.keys(c.overrides).sort();
+  return `<p class="fine" style="margin-top:0">特定の日だけ受付時間を変えたり、休みにしたりできます。時間帯をすべて消すと、その日は休みになります。</p>
+    ${keys.map(k=>{
+      const d=new Date(k+'T00:00:00');
+      return `<div class="bkp-dayrow">
+        <span class="bkp-dow bkp-date">${d.getMonth()+1}/${d.getDate()}(${BK_DOWJ[d.getDay()]})</span>
+        <div class="bkp-ranges">${bkRangesHTML('o',k)}</div>
+        <div class="bkp-dayact">
+          <button class="btn sm iconly" onclick="bkAddRange('o','${k}')" aria-label="時間帯を追加" title="時間帯を追加">${ic('plus')}</button>
+          <button class="btn sm iconly" onclick="bkDelOverride('${k}')" aria-label="この日の調整を削除" title="この日の調整を削除">${ic('trash')}</button>
+        </div></div>`;}).join('')}
+    <div class="bkp-ovadd"><input type="date" id="bkOvDate"><button class="btn sm" onclick="bkAddOverride()">${ic('plus')}日付を追加</button></div>`;
+}
+function bkAddOverride(){
+  const v=document.getElementById('bkOvDate').value;
+  if(!v){toast('日付を選んでください');return;}
+  if(BKE.c.overrides[v]){toast('その日はもう追加してあります');return;}
+  // その曜日の受付時間を下敷きにする（Googleと同じ）。繰り返さない設定なら9〜17時
+  const dow=new Date(v+'T00:00:00').getDay();
+  BKE.c.overrides[v]=BKE.c.repeat==='none'?[{s:'09:00',e:'17:00'}]:JSON.parse(JSON.stringify(BKE.c.weekly[dow]||[]));
+  bkRedraw();
+}
+function bkDelOverride(k){delete BKE.c.overrides[k];bkRedraw();}
+function bkCalendarsHTML(){
+  if(!BKCALS)return `<p class="fine" style="margin-top:0">読み込んでいます…</p>`;
+  if(!BKCALS.length)return `<p class="fine" style="margin-top:0">カレンダーの一覧を読めませんでした。メインのカレンダーで空きを確認します。</p>`;
+  const sel=new Set(BKE.c.calendars||['primary']);
+  return `<p class="fine" style="margin-top:0">チェックしたカレンダーに予定がある時間は、予約できなくなります。</p>
+    ${BKCALS.map(cal=>{const id=cal.primary?'primary':cal.id;
+      return `<label class="bkp-chk bkp-chkrow"><input type="checkbox" data-cal="${esc(id)}" ${sel.has(id)?'checked':''} onchange="bkToggleCal(this.dataset.cal,this.checked)">${esc(cal.name)}${cal.primary?'（メイン）':''}</label>`;}).join('')}`;
+}
+function bkToggleCal(id,on){
+  const s=new Set(BKE.c.calendars||['primary']);
+  if(on)s.add(id);else s.delete(id);
+  BKE.c.calendars=[...s];
+}
+function bkQuestionsHTML(){
+  const qs=BKE.c.questions;
+  return qs.map((q,i)=>`<div class="bkp-q">
+      <input value="${esc(q.label)}" maxlength="200" placeholder="質問（例：大学名）" oninput="BKE.c.questions[${i}].label=this.value">
+      <label class="bkp-chk"><input type="checkbox" ${q.required?'checked':''} onchange="BKE.c.questions[${i}].required=this.checked">必須</label>
+      <button class="btn sm iconly" onclick="BKE.c.questions.splice(${i},1);bkRedraw()" aria-label="質問を削除" title="質問を削除">×</button>
+    </div>`).join('')+
+    (qs.length<10?`<button class="btn sm" onclick="bkAddQuestion()">${ic('plus')}質問を追加</button>`:'');
+}
+function bkAddQuestion(){
+  const used=new Set(BKE.c.questions.map(q=>q.id));
+  let n=1;while(used.has('q'+n))n++;
+  BKE.c.questions.push({id:'q'+n,label:'',required:false});bkRedraw();
+}
+function bkDurLabel(m){return m<60?m+'分':(m%60?Math.floor(m/60)+'時間'+m%60+'分':m/60+'時間');}
+function bkEditorHTML(){
+  const c=BKE.c;const ch=(BKP&&BKP.choices)||{durations:[15,30,45,60,90,120],colors:[],reminders:[]};
+  const mail=!!(BKP&&BKP.mailEnabled);
+  const basic=`<label class="fl" style="margin-top:0">タイトル<span class="req">*</span></label>
+    <input id="bkTitle" class="field-underline" maxlength="80" placeholder="例）30分面談" value="${esc(c.title)}" oninput="BKE.c.title=this.value">
+    <label class="fl">色</label>
+    <div class="bkp-colors">${ch.colors.map(col=>`<button class="bkp-swatch ${c.color===col?'on':''}" style="background:${col}" onclick="BKE.c.color='${col}';bkRedraw()" aria-label="色 ${col}"></button>`).join('')}</div>
+    <label class="fl">予約時間</label>
+    <select onchange="BKE.c.duration=Number(this.value);bkRedraw()">${ch.durations.map(m=>`<option value="${m}" ${c.duration===m?'selected':''}>${bkDurLabel(m)}</option>`).join('')}</select>`;
+  const win=`<label class="fl" style="margin-top:0">何日先まで予約できるか</label>
+    <div class="bkp-inline"><input type="number" min="1" max="${ch.maxDays||365}" value="${c.maxDays}" oninput="BKE.c.maxDays=Number(this.value)"><span>日先まで</span></div>
+    <label class="fl">受け付ける期間<span class="fl-sub">空欄なら期間を区切りません</span></label>
+    <div class="bkp-inline"><input type="date" value="${esc(c.startDate||'')}" onchange="BKE.c.startDate=this.value||null"><span>〜</span>
+      <input type="date" value="${esc(c.endDate||'')}" onchange="BKE.c.endDate=this.value||null"></div>
+    <label class="fl">締め切り<span class="fl-sub">予約の何時間前まで受け付けるか</span></label>
+    <div class="bkp-inline"><input type="number" min="0" max="720" value="${c.minNoticeHours}" oninput="BKE.c.minNoticeHours=Number(this.value)"><span>時間前まで</span></div>`;
+  const booked=`<label class="fl" style="margin-top:0">前後の余白<span class="fl-sub">この予約スケジュールで入った予約の前後を空けます</span></label>
+    <select onchange="BKE.c.bufferMin=Number(this.value)">${BK_BUFFERS.map(m=>`<option value="${m}" ${c.bufferMin===m?'selected':''}>${m?m+'分':'なし'}</option>`).join('')}</select>
+    <label class="fl">1日の上限<span class="fl-sub">0にすると上限なし</span></label>
+    <div class="bkp-inline"><input type="number" min="0" max="50" value="${c.maxPerDay}" oninput="BKE.c.maxPerDay=Number(this.value)"><span>件まで</span></div>`;
+  const locs=[['meet','Google Meet'],['place','対面'],['phone','電話'],['none','指定しない']];
+  const pageSec=`<label class="fl" style="margin-top:0">場所・会議</label>
+    <div class="seg">${locs.map(([v,l])=>`<label><input type="radio" name="bkLoc" value="${v}" ${c.location.type===v?'checked':''} onchange="BKE.c.location.type='${v}';bkRedraw()"><span class="segb">${l}</span></label>`).join('')}</div>
+    ${c.location.type==='meet'?`<p class="fine">予約が入るたびにGoogle Meetのリンクを作り、招待に載せます。</p>`:''}
+    ${c.location.type==='place'||c.location.type==='phone'?`<input style="margin-top:8px" maxlength="300" value="${esc(c.location.text)}" placeholder="${c.location.type==='place'?'例）東京支部 3階 会議室':'例）当日こちらからお電話します'}" oninput="BKE.c.location.text=this.value">`:''}
+    <label class="fl">説明</label>
+    <textarea class="textarea-compact" maxlength="2000" placeholder="予約ページに表示する説明" oninput="BKE.c.description=this.value">${esc(c.description)}</textarea>`;
+  const formSec=`<p class="fine" style="margin-top:0">姓・名・メールアドレスは必ず聞きます。</p>
+    <label class="fl">電話番号</label>
+    <select onchange="BKE.c.phone=this.value">${[['off','聞かない'],['optional','任意で聞く'],['required','必須で聞く']].map(([v,l])=>`<option value="${v}" ${c.phone===v?'selected':''}>${l}</option>`).join('')}</select>
+    <label class="fl">追加の質問</label>
+    ${bkQuestionsHTML()}
+    <label class="fl">メールアドレスの確認</label>
+    ${mail
+      ?`<label class="bkp-chk bkp-chkrow"><input type="checkbox" ${c.verifyEmail?'checked':''} onchange="BKE.c.verifyEmail=this.checked">予約の前に、メールに届く確認コードを入力してもらう</label>`
+      :`<p class="fine" style="margin-top:0">アプリのメール送信が未設定のため使えません。</p>`}`;
+  const remindSec=mail
+    ?`<p class="fine" style="margin-top:0">予約した人に、予約の前にメールでお知らせします。</p>
+      ${(ch.reminders||[]).slice().sort((a,b)=>b-a).map(m=>`<label class="bkp-chk bkp-chkrow"><input type="checkbox" ${c.reminders.includes(m)?'checked':''} onchange="bkToggleReminder(${m},this.checked)">${BK_REMIND_LABEL[m]||m+'分前'}</label>`).join('')}`
+    :`<p class="fine" style="margin-top:0">アプリのメール送信が未設定のため、リマインダーは送れません。確認・変更・取り消しのお知らせはGoogleカレンダーから届きます。</p>`;
+  const ovN=Object.keys(c.overrides).length;
+  const page=BKE.id?bkFind(BKE.id):null;
+  return `<h3>${BKE.id?'予約スケジュールを編集':'予約スケジュールを作成'}</h3>
+    ${bkSec('basic','タイトル・予約時間',bkDurLabel(c.duration),basic)}
+    ${bkSec('weekly','一般的な空き状況',esc(bkWeeklySummary(c)),bkWeeklyHTML())}
+    ${bkSec('window','予約期間',`${c.maxDays}日先まで・${c.minNoticeHours}時間前まで`,win)}
+    ${bkSec('overrides','特定の日の空き状況',ovN?ovN+'日':'なし',bkOverridesHTML())}
+    ${bkSec('booked','予約済みの予定の設定',`余白${c.bufferMin?c.bufferMin+'分':'なし'}・${c.maxPerDay?'1日'+c.maxPerDay+'件まで':'上限なし'}`,booked)}
+    ${bkSec('cals','カレンダーの空き状況を確認',`${(c.calendars||[]).length}個`,bkCalendarsHTML())}
+    ${bkSec('page','予約ページ',{meet:'Google Meet',place:'対面',phone:'電話',none:'場所なし'}[c.location.type],pageSec)}
+    ${bkSec('form','予約フォーム',c.questions.length?`質問${c.questions.length}件`:'',formSec)}
+    ${bkSec('remind','予約の確認とリマインダー',mail&&c.reminders.length?c.reminders.map(m=>BK_REMIND_LABEL[m]).join('・'):'',remindSec)}
+    <div class="field-err" id="bkErr"></div>
+    <div class="btn-row" style="margin-top:18px">
+      ${page?`<a class="btn" href="${esc(page.url)}" target="_blank" rel="noopener">${ic('external')}予約ページを開く</a>`:''}
+      <button class="btn pri" style="flex:1" id="bkSaveBtn" onclick="bkSave()">保存</button>
+    </div>`;
+}
+function bkToggleReminder(m,on){
+  const s=new Set(BKE.c.reminders);if(on)s.add(m);else s.delete(m);BKE.c.reminders=[...s].sort((a,b)=>b-a);
+}
+/* 保存前の確かめ。サーバーでも整え直すが、黙って捨てられると戸惑うので先に知らせる */
+function bkCheck(c){
+  if(!String(c.title||'').trim())return 'タイトルを入力してください';
+  const toM=t=>{const p=String(t||'').split(':').map(Number);return p[0]*60+p[1];};
+  const bad=list=>(list||[]).some(r=>!r.s||!r.e||toM(r.s)>=toM(r.e));
+  if(Object.values(c.weekly).some(bad)||Object.values(c.overrides).some(bad))return '時間帯の終わりは、始まりより後にしてください';
+  if(!(c.maxDays>=1))return '「何日先まで」は1以上にしてください';
+  if(c.startDate&&c.endDate&&c.startDate>c.endDate)return '受け付ける期間の終わりは、始まりより後にしてください';
+  if(c.questions.some(q=>!String(q.label||'').trim()))return '空の質問があります。入力するか削除してください';
+  if(!(c.calendars||[]).length)return '空きの確認に使うカレンダーを1つ以上選んでください';
+  return '';
+}
+async function bkSave(){
+  const err=document.getElementById('bkErr');const btn=document.getElementById('bkSaveBtn');
+  err.classList.remove('show');
+  const msg=bkCheck(BKE.c);
+  if(msg){err.textContent=msg;err.classList.add('show');return;}
+  btn.disabled=true;
+  try{
+    const isNew=!BKE.id;
+    const r=await fsJSON(isNew?'/api/booking-pages':'/api/booking-pages/'+encodeURIComponent(BKE.id),
+      {method:isNew?'POST':'PUT',body:JSON.stringify({config:BKE.c})});
+    if(isNew)BKP.pages.push(r.page);else Object.assign(bkFind(BKE.id),r.page);
+    BKE=null;
+    renderQuiet();
+    if(isNew)bkShowCreated(r.page);else{closeSheet();toast('保存しました');}
+  }catch(e){err.textContent=e.message;err.classList.add('show');btn.disabled=false;}
+}
+function bkShowCreated(p){
+  openSheet(`<div class="okdone"><div class="okmark">${ic('check')}</div><h3>予約スケジュールを作成しました</h3></div>
+    <p class="fine" style="margin-top:0">このURLをインターン生に送ってください。空いている時間を選ぶだけで予約が確定します。</p>
+    <input class="fs-url" readonly value="${esc(p.url)}" onclick="this.select()">
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn pri" style="flex:1" onclick="bkCopy('${p.id}','url')">${ic('copy')}URLをコピー</button>
+      <a class="btn" href="${esc(p.url)}" target="_blank" rel="noopener">${ic('external')}開く</a></div>`);
+}
+
+/* ---------- 面談一覧から見る予約 ---------- */
+function ivIsBooking(iv){return !!iv&&iv.source==='booking';}
+function ivBookingHTML(iv){
+  const loc={meet:'Google Meet',place:'対面',phone:'電話',none:'指定なし'}[iv.location_type]||'';
+  const end=new Date(new Date(iv.confirmed_datetime).getTime()+(Number(iv.duration_min)||30)*60000);
+  return `<dl class="kv" style="margin-top:8px">
+      <dt>予約スケジュール</dt><dd>${esc(iv.booking_title||'')}</dd>
+      <dt>日時</dt><dd>${fmtDT(iv.confirmed_datetime)}〜${hm(end.toISOString())}</dd>
+      <dt>メールアドレス</dt><dd>${esc(iv.guest_email||'')}</dd>
+      ${iv.guest_phone?`<dt>電話番号</dt><dd>${esc(iv.guest_phone)}</dd>`:''}
+      ${(iv.answers||[]).map(a=>`<dt>${esc(a.label)}</dt><dd style="white-space:pre-wrap">${esc(a.value)}</dd>`).join('')}
+      <dt>場所</dt><dd>${esc(loc)}${iv.meet_url?`<br><a href="${esc(iv.meet_url)}" target="_blank" rel="noopener">${esc(iv.meet_url)}</a>`:iv.location_text?`<br>${esc(iv.location_text)}`:''}</dd>
+    </dl>`;
+}
+async function cancelBookingIv(id){
+  const iv=(DB.interviews||[]).find(x=>x.id===id);if(!iv)return;
+  if(!await confirmSheet('予約をキャンセル',
+    `${ivInternName(iv)}さんの予約（${fmtDT(iv.confirmed_datetime)}）をキャンセルします。Googleカレンダーの予定を削除し、予約した人に取り消しのお知らせが届きます。元に戻せません。`,
+    'キャンセルする'))return;
+  try{
+    const r=await fsJSON('/api/interviews/'+encodeURIComponent(id)+'/cancel-booking',{method:'POST'});
+    applyInterview(r.interview);closeSheet();renderQuiet();toast('予約をキャンセルしました');
+  }catch(e){toast(e.message);}
 }
 
 /* =========================================================

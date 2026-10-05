@@ -2993,6 +2993,20 @@ app.get('/api/apply/:token', limitPublicRead, async (req, res) => {
   }
 });
 
+/* 確定済み面談が埋めている30分枠の開始時刻。
+   申請から確定した面談は30分だが、予約スケジュールから入った予約は
+   60分・90分などもあるので、その長さぶんの枠を全部「埋まり」として返す */
+function takenStartsOf(ivs) {
+  const out = [];
+  for (const iv of ivs) {
+    const s = new Date(iv.confirmed_datetime).getTime();
+    if (!Number.isFinite(s)) continue;
+    const dur = Number(iv.duration_min) || 30;
+    for (let t = 0; t < dur; t += 30) out.push(s + t * 60 * 1000);
+  }
+  return out;
+}
+
 /* 指定スタッフが選んでいる担当可能な相手か確かめたうえで、材料を集める。
    スタッフ選択・枠取得・申請の3か所で同じ確認が要るのでまとめてある */
 async function applyContextFor(token, staffId) {
@@ -3014,8 +3028,7 @@ async function applyContextFor(token, staffId) {
     sql: `SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'`,
     args: [staff.id],
   });
-  const takenMs = ivs.rows.map(rowToInterview)
-    .map((iv) => new Date(iv.confirmed_datetime).getTime());
+  const takenMs = takenStartsOf(ivs.rows.map(rowToInterview));
   return { branch, staff, availability, takenMs };
 }
 
@@ -3129,8 +3142,7 @@ async function freeslotContext(token) {
     sql: `SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'`,
     args: [staff.id],
   });
-  const takenMs = ivs.rows.map(rowToInterview)
-    .map((iv) => new Date(iv.confirmed_datetime).getTime());
+  const takenMs = takenStartsOf(ivs.rows.map(rowToInterview));
   return { row, staff, branch, availability, takenMs };
 }
 
@@ -3219,6 +3231,14 @@ app.post('/api/free/:token', limitPublicWrite, async (req, res) => {
   }
 });
 
+/* 予約スケジュール（Googleカレンダーの予約スケジュールと同じ動き）。
+   中身は booking-routes.js。ここでは材料を渡してつなぐだけ */
+const bookingApi = require('./booking-routes')({
+  app, client, requireAuth, google, GOOGLE_ENABLED,
+  getTokenRow, accessTokenFor, saveInterview, getInterview, rowToInterview,
+  insertNotification, push, mail, limitPublicRead, limitPublicWrite, removeExternalGoogleBlock,
+});
+
 /* 旧・ログインした状態からの面談申請。
    インターン生のログインを廃止したため、この入口は誰も通れなくなった。
    古い画面が残っている端末に、行き先を案内できるように残してある */
@@ -3246,6 +3266,11 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
     if (!old) return res.status(404).json({ error: '面談が見つかりません' });
     if (actor.role !== 'admin' && old.staff_id !== actor.id) {
       return res.status(403).json({ error: '自分が担当する面談だけ変更できます' });
+    }
+    /* 予約スケジュールから入った予約は、予約者にGoogleの取消メールを届ける必要があるので
+       専用の口（/api/interviews/:id/cancel-booking）でだけ取り消す */
+    if (old.source === 'booking') {
+      return res.status(400).json({ error: '予約は「予約をキャンセル」から取り消してください' });
     }
     const next = {
       ...old, status,
@@ -3692,6 +3717,9 @@ app.post('/api/webhooks/google-calendar', async (req, res) => {
     const { items: allItems, nextSyncToken } = await google.listChangedEvents(accessToken, tokenRow.calendar_id, tokenRow.sync_token);
     if (nextSyncToken) await updateSyncToken(tokenRow.staff_id, nextSyncToken);
 
+    // Googleカレンダー上で予約の予定が消されたら、予約もキャンセルにする
+    await bookingApi.handleGoogleChanges(tokenRow.staff_id, allItems);
+
     /* このアプリ自身が面談確定で書き込んだイベントは、外部予定として
        取り込まない。含めてしまうと、確定済みの面談が「面談一覧」と
        「この日は受けられない時間」の両方に別々に現れ、同じ予定を
@@ -3797,6 +3825,8 @@ const PUBLIC_FILES = {
   '/apply.html': 'apply.html',
   // 日程調整ページ（空き時間を集める）。apply.html と同じくログイン処理を通さない
   '/free.html': 'free.html',
+  // 予約スケジュールの予約ページ（/b/<合言葉>）と、予約の変更・キャンセル（/b/manage/<合言葉>）
+  '/book.html': 'book.html',
   '/attendance.html': 'attendance.html',
   /* 左メニューにカーソルを乗せると流れる、回答画面のデモ動画。
      tools/record-demos.mjs が demo/ に書き出す */
@@ -3826,6 +3856,18 @@ app.get('*', (req, res) => {
   if (/^\/f\/[A-Za-z0-9_-]+\/?$/.test(p)) {
     return res.sendFile(path.join(PUBLIC_ROOT, 'free.html'));
   }
+  /* 予約ページ。Googleの予約スケジュールと同じく、ほかのサイトに埋め込めるようにする
+     （設定画面の「埋め込みコード」）。押させて困る操作は「予約する」だけで、
+     名前とメールアドレスを自分で入れないと進めないので、埋め込みを許しても害は小さい。
+     変更・キャンセルのページは合鍵入りなので、埋め込みは許さないまま */
+  if (/^\/b\/manage\/[a-f0-9]+\/?$/.test(p)) {
+    return res.sendFile(path.join(PUBLIC_ROOT, 'book.html'));
+  }
+  if (/^\/b\/[a-f0-9]+\/?$/.test(p)) {
+    res.removeHeader('X-Frame-Options');
+    res.set('Content-Security-Policy', 'frame-ancestors *');
+    return res.sendFile(path.join(PUBLIC_ROOT, 'book.html'));
+  }
   const file = PUBLIC_FILES[p];
   if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');
   res.sendFile(path.join(PUBLIC_ROOT, file));
@@ -3835,6 +3877,7 @@ initDB()
   // 依頼・出欠・通知が store に残っていれば、一度だけ専用テーブルへ移す
   .then(() => migrateStoreToTables())
   .then(() => purgeTaskRequests())
+  .then(() => bookingApi.init())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`OPS日調アプリ サーバー起動: http://localhost:${PORT}`);
@@ -3853,6 +3896,8 @@ initDB()
       setInterval(purgeOldRequestTrash, 24 * 60 * 60 * 1000);
       purgeExpiredSessions();
       setInterval(purgeExpiredSessions, 24 * 60 * 60 * 1000);
+      // 予約のリマインダーメール。keepalive が5分おきに起こしているので、同じ間隔で見回る
+      setInterval(() => bookingApi.sendDueReminders(), 5 * 60 * 1000);
     });
   })
   .catch((e) => {

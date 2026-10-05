@@ -1924,3 +1924,53 @@
   .demotip .dt-cap span{display:block;margin-top:2px;font-size:12px;line-height:1.5;color:var(--sub)}
   .demotip video{display:block;width:100%;aspect-ratio:16/10;margin-top:8px;
     border-radius:10px;background:var(--panel2);object-fit:cover}
+
+  /* ---------- 予約スケジュール ----------
+     一覧のカードと編集シート。公開の予約ページ（book.html）はこのファイルを読まない */
+  .bkp-toolbar{margin-bottom:14px}
+  .bkp-card .cb{display:flex;flex-direction:column;gap:12px}
+  .bkp-top{display:flex;align-items:center;gap:12px}
+  .bkp-color{flex:0 0 6px;align-self:stretch;min-height:38px;border-radius:3px}
+  .bkp-main{flex:1 1 auto;min-width:0}
+  .bkp-title{font-weight:800;font-size:15px;color:var(--ink);word-break:break-word}
+  .bkp-sub{font-size:12px;color:var(--sub);margin-top:2px}
+  .bkp-actions .btn{text-decoration:none}
+  .bkp-copybox{min-height:90px;font-size:12px;font-family:ui-monospace,Consolas,monospace}
+  /* 編集シートの区画。Googleの編集パネルと同じく、見出しを押して開く */
+  .bkp-sec{border-top:1px solid var(--line2)}
+  .bkp-sec:last-of-type{border-bottom:1px solid var(--line2)}
+  .bkp-sech{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;width:100%;
+    padding:13px 2px;cursor:pointer}
+  .bkp-sech:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
+  .bkp-sect{font-weight:700;font-size:14px;color:var(--ink)}
+  .bkp-secs{flex:1 1 auto;text-align:right;font-size:12px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bkp-chev{display:grid;place-items:center;color:var(--mut);transition:transform .15s}
+  .bkp-sec.open .bkp-chev{transform:rotate(90deg)}
+  .bkp-secb{padding:2px 2px 16px}
+  /* 曜日ごとの受付時間 */
+  .bkp-week{margin-top:10px}
+  .bkp-dayrow{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line2)}
+  .bkp-dow{flex:0 0 26px;font-weight:800;color:var(--ink);padding-top:9px}
+  .bkp-dow.bkp-date{flex-basis:74px;font-size:13px}
+  .bkp-ranges{flex:1 1 auto;display:flex;flex-direction:column;gap:6px;min-width:0}
+  .bkp-range{display:flex;align-items:center;gap:6px}
+  .bkp-range input[type="time"]{width:auto;flex:1 1 0;min-width:0;padding:8px 8px;font-size:14px}
+  .bkp-off{color:var(--mut);font-size:13px;padding-top:9px}
+  .bkp-dayact{display:flex;gap:4px;flex:none}
+  .bkp-copyto{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 12px;margin:4px 0 6px;
+    background:var(--panel2);border-radius:10px}
+  .bkp-copylab{font-size:12px;color:var(--sub);flex-basis:100%}
+  .bkp-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap;flex:none}
+  .bkp-chk input{width:auto;margin:0;accent-color:var(--brand)}
+  .bkp-chkrow{display:flex;padding:6px 0}
+  .bkp-inline{display:flex;align-items:center;gap:8px}
+  .bkp-inline input{flex:1 1 0;min-width:0}
+  .bkp-inline span{flex:none;color:var(--sub);font-size:13px}
+  .bkp-ovadd{display:flex;gap:8px;margin-top:10px}
+  .bkp-ovadd input{flex:1 1 auto}
+  .bkp-ovadd .btn{flex:none;white-space:nowrap}
+  .bkp-q{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .bkp-q input:not([type="checkbox"]){flex:1 1 auto}
+  .bkp-colors{display:flex;flex-wrap:wrap;gap:8px}
+  .bkp-swatch{width:28px;height:28px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
+  .bkp-swatch.on{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--ink)}

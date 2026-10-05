@@ -37,6 +37,8 @@ services:
         - apply.html
         # アカウント無しの公開出欠回答ページ
         - attendance.html
+        # 予約スケジュールの予約ページ（2026-10-05 追加。ダッシュボードへの登録も要る）
+        - book.html
         # 祝日の計算（index.html と apply.html の両方が読む）
         - holidays.js
         # プッシュ通知の受け取り役（Service Worker）

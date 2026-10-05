@@ -15,8 +15,10 @@ const TOKEN_ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY; // 64桁hex（32b
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL; // 例: https://ops-nittyou-app.onrender.com
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const CAL_API = 'https://www.googleapis.com/calendar/v3';
+/* 宛先は試験のときだけ差し替えられる（tools/test-booking-e2e.mjs が偽のGoogleを立てる）。
+   本番では環境変数を置かないので、いつも本物のGoogleへ行く */
+const TOKEN_URL = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
+const CAL_API = process.env.GOOGLE_CAL_API || 'https://www.googleapis.com/calendar/v3';
 const SCOPE = 'https://www.googleapis.com/auth/calendar';
 const LOGIN_SCOPE = 'openid email profile';
 
@@ -315,8 +317,17 @@ async function listEventsInRange(accessToken, calendarId, timeMin, timeMax) {
     .filter((e) => e.start);
 }
 
-async function createEvent(accessToken, calendarId, event) {
-  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events`, {
+/* sendUpdates：'all' にすると、ゲストへGoogleが招待・変更・取消のメールを送る。
+   conferenceDataVersion：1 にすると、conferenceData.createRequest でMeetを作れる */
+function eventQuery(opts) {
+  const q = new URLSearchParams();
+  if (opts && opts.sendUpdates) q.set('sendUpdates', opts.sendUpdates);
+  if (opts && opts.conferenceDataVersion) q.set('conferenceDataVersion', String(opts.conferenceDataVersion));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+async function createEvent(accessToken, calendarId, event, opts) {
+  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events${eventQuery(opts)}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(event),
@@ -324,8 +335,8 @@ async function createEvent(accessToken, calendarId, event) {
   if (!res.ok) throw new Error(`events.insert failed: ${await res.text()}`);
   return res.json();
 }
-async function updateEvent(accessToken, calendarId, eventId, event) {
-  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+async function updateEvent(accessToken, calendarId, eventId, event, opts) {
+  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}${eventQuery(opts)}`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(event),
@@ -333,12 +344,45 @@ async function updateEvent(accessToken, calendarId, eventId, event) {
   if (!res.ok) throw new Error(`events.patch failed: ${await res.text()}`);
   return res.json();
 }
-async function deleteEvent(accessToken, calendarId, eventId) {
-  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+async function deleteEvent(accessToken, calendarId, eventId, opts) {
+  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}${eventQuery(opts)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok && res.status !== 410 && res.status !== 404) throw new Error(`events.delete failed: ${await res.text()}`);
+}
+
+/* 予定の「埋まっている時間」だけを聞く（予約スケジュール用）。
+   中身（件名など）は返ってこないので、予約ページに予定の中身が漏れる心配がない。
+   「空き時間」にしてある予定・辞退した予定はGoogleが最初から除いて返す。
+   1つでも読めないカレンダーがあれば、空きを判断できないので失敗として扱う
+   （空いていると思い込んで予約を入れるより、受け付けないほうが安全） */
+async function freeBusy(accessToken, calendarIds, timeMin, timeMax) {
+  const res = await fetch(`${CAL_API}/freeBusy`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      timeMin, timeMax, timeZone: 'Asia/Tokyo',
+      items: calendarIds.map((id) => ({ id })),
+    }),
+  });
+  if (!res.ok) throw new Error(`freeBusy failed: ${await res.text()}`);
+  const data = await res.json();
+  const out = [];
+  for (const id of calendarIds) {
+    const cals = data.calendars || {};
+    let cal = cals[id];
+    /* 'primary' で聞いたのに、実際のIDで返ってくる場合に備える。
+       こちらが聞いていないキーが1つだけあれば、それがメインのカレンダー */
+    if (!cal && id === 'primary') {
+      const rest = Object.keys(cals).filter((k) => !calendarIds.includes(k));
+      if (rest.length === 1) cal = cals[rest[0]];
+    }
+    if (!cal) throw new Error(`freeBusy: ${id} が返ってきませんでした`);
+    if (cal.errors && cal.errors.length) throw new Error(`freeBusy: ${id} を読めませんでした（${cal.errors.map((e) => e.reason).join(',')}）`);
+    (cal.busy || []).forEach((b) => out.push([new Date(b.start).getTime(), new Date(b.end).getTime()]));
+  }
+  return out;
 }
 
 module.exports = {
@@ -348,5 +392,5 @@ module.exports = {
   signPayload, verifyPayload,
   startWatch, stopWatch, listChangedEvents,
   listCalendars, listEventsInRange,
-  createEvent, updateEvent, deleteEvent,
+  createEvent, updateEvent, deleteEvent, freeBusy,
 };
