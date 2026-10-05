@@ -687,6 +687,10 @@ async function testAttendance() {
       check(`デモ動画 ${k}.${ext} は途中から読める`, rr.status, 206);
     }
   }
+  /* 動画は横長（16:10）。縦長は見づらいとの指示。録画の大きさ（tools/record-demos.mjs の W,H）と比を合わせる */
+  check('デモ動画の表示は横長で、ある程度の大きさがある',
+    styleSource.includes('.demotip{position:fixed;z-index:90;width:440px;')
+      && styleSource.includes('.demotip video{display:block;width:100%;aspect-ratio:16/10;'), true);
   check('デモ動画の置き場以外は配信されない', (await fetch(BASE + '/demo/nothing.mp4')).status, 404);
   /* アイコンだけだと何のボタンか伝わらなかったので、文字ラベル付きの
      固定ボタンにしてある。「送った日程調整」の文言そのものを検査する */

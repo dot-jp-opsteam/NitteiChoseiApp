@@ -35,7 +35,7 @@ const OUT_DIR = path.join(ROOT, 'demo');
 const { createClient } = createRequire(path.join(ROOT, 'server', 'package.json'))('@libsql/client');
 const PORT = 8124;
 const BASE = `http://localhost:${PORT}`;
-const W = 420, H = 560; // 録画の大きさ（スマホの幅ぐらい）
+const W = 640, H = 400; // 録画の大きさ。横長（16:10）。表示側（style.css の .demotip video）の比と合わせる
 
 function loadPlaywright() {
   const req = createRequire(import.meta.url);
@@ -117,22 +117,28 @@ async function makeUrls() {
 // 録画にはマウスの矢印が写らないので、ふつうのカーソルと同じ白い矢印（黒ふち）を描く。
 // 先端がマウスの位置。小さく縮めて見るので、実物より少し大きめにしてある
 const CURSOR_JS = () => {
-  // 出欠画面の共有URLは画面側で location から作るので、localhost が写らないよう本番の名前に見せ替える
-  setInterval(() => {
-    const e = document.getElementById('attUrl');
-    if (e && e.value && e.value.indexOf(location.origin) === 0) {
-      e.value = e.value.replace(location.origin, 'https://ops-nittyou-app.onrender.com');
-    }
-  }, 50);
-  const ARROW = '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="34" viewBox="0 0 12 19">'
+  // 出欠画面の共有URLは画面側で location から作るので、localhost が写らないよう本番の名前に見せ替える。
+  // 欄が画面に足された瞬間に書き換える（描かれてからだと、最初の一瞬だけ localhost が写る）
+  const fixUrl = () => {
+    document.querySelectorAll('input[id="attUrl"]').forEach((e) => {
+      if (e.value && e.value.indexOf(location.origin) === 0) {
+        e.value = e.value.replace(location.origin, 'https://ops-nittyou-app.onrender.com');
+      }
+    });
+  };
+  new MutationObserver(fixUrl).observe(document, { childList: true, subtree: true });
+  setInterval(fixUrl, 50);
+  const ARROW = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="37" viewBox="0 0 12 19">'
     + '<path d="M1 1V15.2L4.5 12.1L7 17.8L9.2 16.8L6.8 11.2H11.2Z" fill="#fff" stroke="#000" stroke-width="1" stroke-linejoin="round"/></svg>';
   const mk = () => {
     const d = document.createElement('div');
-    d.style.cssText = 'position:fixed;z-index:2147483647;width:22px;height:34px;pointer-events:none;'
+    d.style.cssText = 'position:fixed;z-index:2147483647;width:24px;height:37px;pointer-events:none;'
       + 'left:-60px;top:-60px;background:url("data:image/svg+xml,' + encodeURIComponent(ARROW) + '") no-repeat;'
       + 'filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))';
     document.documentElement.appendChild(d);
-    document.addEventListener('mousemove', (e) => { d.style.left = e.clientX + 'px'; d.style.top = e.clientY + 'px'; }, true);
+    // mousemove ではなく pointermove で追う。画面側のドラッグ処理は pointerdown を止めるため、
+    // ドラッグ中は mousemove が出ず、カーソルが動かないまま選択だけが伸びてしまう
+    document.addEventListener('pointermove', (e) => { d.style.left = e.clientX + 'px'; d.style.top = e.clientY + 'px'; }, true);
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mk); else mk();
 };
@@ -187,7 +193,8 @@ async function pickSlots(page) {
   const colB = xs.find((x) => x !== colA && cols[x].length >= 1);
   const cellsA = cols[colA];
   const last = Math.min(cellsA.length - 1, 5);          // 最大6マス（3時間ぶん）なぞる
-  await scrollTo(page, cells.nth(cellsA[0].i));
+  // なぞる範囲の真ん中を画面の中央に持ってくる（横長で縦が短いので、上下の端が切れないように）
+  await scrollTo(page, cells.nth(cellsA[Math.floor(last / 2)].i));
   const from = await centerOf(cells.nth(cellsA[0].i));
   const to = await centerOf(cells.nth(cellsA[last].i));
   await dragSlots(page, from, to);
@@ -196,13 +203,40 @@ async function pickSlots(page) {
   await sleep(500);
 }
 
-/* 動画の頭出し。ページを開いて名前を入れ終えるまでは動画に入れない。
-   録画はページを作った瞬間から始まっているので、そこからの経過時間で切る */
-const T0 = new WeakMap();
+/* 送信が終わって完了の表示が出るまで待ち、それを少し見せて終わる。
+   固定の待ち時間だと、サーバーが遅いときに「送信中…」のまま動画が終わってしまう */
+async function finish(page, text) {
+  await page.getByText(text).first().waitFor({ timeout: 15000 });
+  // 録画ファイルは終わりの2秒ほどが欠けることがあるので、完了の表示を長めに見せておく
+  await wait(4000);
+}
+
+/* 動画の頭出し。ページを開いて名前などを入れ終えたところから撮り始める。
+
+   Playwright 標準の録画（recordVideo）は使わない。録画ファイルの時間が実際の時間と
+   ±2秒ほどずれ、頭出しも終わりも当てにならなかった（完了の表示が映る前に動画が
+   終わることがあった）。代わりに、ブラウザが画面の変化ごとに送ってくるコマ
+   （CDP の screencast）を、コマに付いた時刻どおりの長さで並べる。
+   screenshot を繰り返す方法は、重い画面で1秒9コマまで落ちてカクついたのでやめた */
+const CAPTURE = new WeakMap();
 async function start(page) {
   await page.evaluate(() => window.scrollTo(0, 0));
   await sleep(600);
-  T0.set(page, (Date.now() - T0.get(page.context())) / 1000);
+  const cdp = await page.context().newCDPSession(page);
+  const frames = [];
+  cdp.on('Page.screencastFrame', (ev) => {
+    frames.push({ t: ev.metadata.timestamp * 1000, buf: Buffer.from(ev.data, 'base64') });
+    cdp.send('Page.screencastFrameAck', { sessionId: ev.sessionId }).catch(() => {});
+  });
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 85, maxWidth: W, maxHeight: H, everyNthFrame: 1 });
+  CAPTURE.set(page, {
+    frames,
+    async stop() {
+      const endT = Date.now();
+      await cdp.send('Page.stopScreencast').catch(() => {});
+      this.endT = endT;
+    },
+  });
 }
 
 /* ---------- 3つの場面 ---------- */
@@ -210,17 +244,15 @@ const SCENES = {
   // 面談申請リンク：学生が名前・担当・希望日時を送る
   async apply(page, url) {
     await page.goto(url); await sleep(1500);
-    await page.locator('#applyname').fill('山田 太郎'); // 入力の様子は見せない
+    await page.locator('#applyname').fill('山田 太郎');           // 名前と担当スタッフの選択は
+    await page.locator('select').first().selectOption({ index: 1 }); // 見せない（最初から入れておく）
+    await page.locator('td.bt-c.ok').first().waitFor({ timeout: 10000 }); // 空き枠が出るまで待つ
     await start(page);
-    const staffSelect = page.locator('select').first();
-    await scrollTo(page, staffSelect);
-    await glide(page, await centerOf(staffSelect));
-    await staffSelect.selectOption({ index: 1 }); await sleep(900);
     await pickSlots(page);
     await click(page, page.locator('#applybtn'));   // 内容を確認する
     await sleep(1500);
-    await click(page, page.locator('#applybtn'));   // この内容で送る
-    await sleep(2500);
+    await click(page, page.locator('#applybtn'));   // この内容で申請する
+    await finish(page, '申請しました');
   },
   // 空き時間を聞く：相手が空いている時間をカレンダーで選ぶ
   async free(page, url) {
@@ -231,7 +263,7 @@ const SCENES = {
     await click(page, page.locator('#applybtn'));
     await sleep(1500);
     await click(page, page.locator('#applybtn'));
-    await sleep(2500);
+    await finish(page, '送信しました');
   },
   // 候補日を送る：候補ごとに ○ △ × で答える
   async attend(page, url) {
@@ -243,17 +275,29 @@ const SCENES = {
     }
     await sleep(500);
     await click(page, page.locator('#attBtn'));
-    await sleep(2500);
+    await finish(page, '回答を送りました');
   },
 };
 
-function encode(src, destBase, from) {
-  // 頭出し（start）より前は、読み込み中や名前の入力なので切る。音は無い
-  const head = ['-y', '-loglevel', 'error', '-ss', String(Math.max(0, from)), '-i', src, '-an', '-vf', `fps=20,scale=${W}:-2`];
-  execFileSync('ffmpeg', [...head, '-c:v', 'libx264', '-preset', 'slow', '-crf', '30',
+function encode(frames, endT, destBase) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-demo-frames-'));
+  const list = [];
+  frames.forEach((f, i) => {
+    const name = `${String(i).padStart(5, '0')}.jpg`;
+    fs.writeFileSync(path.join(dir, name), f.buf);
+    // 次のコマが届くまでの時間だけ、そのコマを見せる（最後のコマは撮り終えるまで）
+    const sec = Math.max(0.001, ((i + 1 < frames.length ? frames[i + 1].t : endT) - f.t) / 1000);
+    list.push(`file '${name}'\nduration ${sec.toFixed(3)}`);
+  });
+  list.push(`file '${String(frames.length - 1).padStart(5, '0')}.jpg'`); // concat の決まり：最後は重ねて書く
+  fs.writeFileSync(path.join(dir, 'list.txt'), list.join('\n') + '\n');
+  const head = ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'list.txt'),
+    '-an', '-vf', `fps=20,scale=${W}:-2`];
+  execFileSync('ffmpeg', [...head, '-c:v', 'libx264', '-preset', 'slow', '-crf', '28',
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart', destBase + '.mp4']);
-  execFileSync('ffmpeg', [...head, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '38',
+  execFileSync('ffmpeg', [...head, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '36',
     '-row-mt', '1', destBase + '.webm']);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 /* ---------- 実行 ---------- */
@@ -265,7 +309,6 @@ try {
 } catch { /* 誰も使っていない。ここから先へ進む */ }
 await seedDB();
 const server = startServer();
-const tmpVideos = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-demo-video-'));
 let browser;
 try {
   await waitForServer();
@@ -276,22 +319,21 @@ try {
   for (const [name, scene] of Object.entries(SCENES)) {
     const ctx = await browser.newContext({
       viewport: { width: W, height: H }, locale: 'ja-JP', timezoneId: 'Asia/Tokyo',
-      recordVideo: { dir: tmpVideos, size: { width: W, height: H } },
     });
     await ctx.addInitScript(CURSOR_JS);
-    T0.set(ctx, Date.now());
     const page = await ctx.newPage();
     page.on('pageerror', (e) => console.warn(`  ${name}: ページのエラー ${e.message}`));
     await scene(page, urls[name]);
-    const video = page.video();
+    const cap = CAPTURE.get(page);
+    await cap.stop();
     await ctx.close();
     const base = path.join(OUT_DIR, name);
-    encode(await video.path(), base, T0.get(page) ?? 0.6);
+    encode(cap.frames, cap.endT, base);
+    console.log(`  ${name}: ${cap.frames.length}コマ（約${(cap.frames.length / ((cap.endT - cap.frames[0].t) / 1000)).toFixed(0)}コマ/秒）`);
     const kb = (ext) => (fs.statSync(`${base}.${ext}`).size / 1024).toFixed(0);
     console.log(`作成しました: demo/${name}.mp4（${kb('mp4')}KB）・demo/${name}.webm（${kb('webm')}KB）`);
   }
 } finally {
   if (browser) await browser.close();
   server.kill();
-  fs.rmSync(tmpVideos, { recursive: true, force: true });
 }
