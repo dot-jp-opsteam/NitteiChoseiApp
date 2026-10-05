@@ -972,9 +972,9 @@ function genSlots(staffId,days=14){
 }
 
 // 不可時間エディタ用：週マトリクス表データ生成（月曜始まり7日 × 30分刻み）
-// state: 'off'（受付時間外）/ 'free'（受付中）/ 'block'（不可・解除可）/ 'locked'（予定・面談あり＝操作不可）
+// state: 'off'（過ぎた時間）/ 'free'（受付中）/ 'block'（不可・解除可）/ 'locked'（予定・面談あり＝操作不可）
+const BLK_GRID_START=9*60,BLK_GRID_END=24*60;
 function genEditGrid(staffId,weekOffset){
-  const weekly=getWeekly(staffId);
   const blocks=((DB.availability[staffId]||{}).blocks||[]);
   const taken=(DB.interviews||[]).filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
     .map(i=>new Date(i.confirmed_datetime).getTime());
@@ -986,21 +986,14 @@ function genEditGrid(staffId,weekOffset){
   const first=new Date(today);first.setDate(today.getDate()+weekOffset*7);
   const days=[];
   for(let i=0;i<7;i++){const d=new Date(first);d.setDate(first.getDate()+i);days.push(d);}
-  let minM=Infinity,maxM=-Infinity;
-  days.forEach(d=>{const conf=weekly[d.getDay()];if(conf&&conf.on){
-    const [sh,sm]=conf.s.split(':').map(Number);const [eh,em]=conf.e.split(':').map(Number);
-    minM=Math.min(minM,sh*60+sm);maxM=Math.max(maxM,eh*60+em);}});
-  if(minM===Infinity){minM=9*60;maxM=19*60;}
-  const times=[];for(let t=minM;t+30<=maxM;t+=30)times.push(t);
+  /* 表の時間帯は、全員・全曜日 09:00〜24:00 に固定（2026-10-05 の指示）。
+     曜日ごとの「面談を受けられる時間」の外側や休みの曜日のマスも押せる */
+  const times=[];for(let t=BLK_GRID_START;t+30<=BLK_GRID_END;t+=30)times.push(t);
   const grid=days.map(day=>{
-    const conf=weekly[day.getDay()];
     return times.map(t=>{
       const dt=new Date(day);dt.setHours(Math.floor(t/60),t%60,0,0);
       const st=dt.getTime(),en=st+30*60000;
       const iso=dt.toISOString();
-      if(!conf||!conf.on)return{state:'off',iso};
-      const [sh,sm]=conf.s.split(':').map(Number);const [eh,em]=conf.e.split(':').map(Number);
-      if(t<sh*60+sm||t+30>eh*60+em)return{state:'off',iso};
       if(st<now)return{state:'off',iso};
       const takenHit=taken.some(x=>Math.abs(x-st)<30*60000-1);
       if(takenHit)return{state:'locked',iso,label:'面談'};
@@ -3736,10 +3729,11 @@ async function avDragEnd(){
 
 /* 「日時でまとめて追加」フォーム＋スクロール式 時間ピッカー */
 function initBlkForm(){BLKFORM={date:ymd(new Date()),start:'12:00',end:'13:00',note:''};}
-// 00:00〜23:30 を30分刻みで返す
+// 表と同じ 09:00〜24:00 を30分刻みで返す（開始は23:30まで・終了は09:30から）
 function timeOptions(which){
   let h='';
-  for(let t=0;t<24*60;t+=30){const v=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
+  const from=which==='end'?BLK_GRID_START+30:BLK_GRID_START,to=which==='end'?BLK_GRID_END:BLK_GRID_END-30;
+  for(let t=from;t<=to;t+=30){const v=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
     h+=`<button class="${BLKFORM[which]===v?'on':''}" onclick="tpSet('${which}','${v}')">${v}</button>`;}
   return h;
 }
@@ -3757,7 +3751,7 @@ function tpSet(which,v){
   BLKFORM[which]=v;
   // 開始を変えて終了以上になったら終了を+30分に自動調整
   if(which==='start'&&BLKFORM.end<=v){
-    let [hh,mm]=v.split(':').map(Number);let t=hh*60+mm+30;if(t>=24*60)t=24*60-30;
+    let [hh,mm]=v.split(':').map(Number);let t=Math.min(hh*60+mm+30,BLK_GRID_END);
     BLKFORM.end=`${pad(Math.floor(t/60))}:${pad(t%60)}`;
     const ev=document.getElementById('tpv_end');if(ev)ev.textContent=BLKFORM.end;
     const eb=document.getElementById('tpbar_end');if(eb)eb.innerHTML=timeOptions('end');
@@ -3770,7 +3764,9 @@ async function addBlock(){
   const {date,start:s,end:e}=BLKFORM;const note=(BLKFORM.note||'').trim();
   const err=document.getElementById('blkErr');err.classList.remove('show');
   if(!date||!s||!e){err.textContent='日付・開始・終了を入力してください';err.classList.add('show');return;}
-  const start=new Date(`${date}T${s}`),end=new Date(`${date}T${e}`);
+  /* 終了 24:00 は「翌日 00:00」として作る（"T24:00" はブラウザによって読めない） */
+  const atHM=(hhmm)=>{const [hh,mm]=hhmm.split(':').map(Number);const d=new Date(`${date}T00:00`);d.setHours(hh,mm,0,0);return d;};
+  const start=atHM(s),end=atHM(e);
   if(end<=start){err.textContent='終了は開始より後にしてください';err.classList.add('show');return;}
   if(end<new Date()){err.textContent='過去の時間は登録できません';err.classList.add('show');return;}
   const ok=await applyBlockChanges({
