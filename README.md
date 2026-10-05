@@ -30,7 +30,7 @@
 | サーバー | `server/`（Express） |
 | データベース | Turso（libSQL） |
 | 入口ページ | `docs/`（GitHub Pagesで公開。中身はアプリへ転送するだけ） |
-| 設計書 | `_specs/` と `日調アプリ設計書ver3.txt` |
+| 設計書 | `_specs/` |
 
 ## 開発者向け
 
