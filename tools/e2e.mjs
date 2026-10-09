@@ -1843,9 +1843,11 @@ async function run() {
       check('会員登録の導線が無い', appHtml.includes('メールアドレスで会員登録する'), false);
       check('パスワードを忘れたの導線が無い', appHtml.includes("switchLoginView('forgot')"), false);
       check('パスワード変更の設定項目が無い', appHtml.includes('openPasswordChange()'), false);
-      check('初回ログインから /staff へ進む',
-        appHtml.includes('>初回ログイン</button>')
-        && appHtml.includes('onclick="location.href=\'/staff\'">初回ログイン'), true);
+      /* 2026-10-09：「はじめて使う方／初回ログイン」の欄は外した。
+         登録の済んでいない人も「Googleでログイン」から入れば、サーバーが登録画面へ送る
+         （その流れは tools/test-login.mjs が確かめる） */
+      check('ログイン画面に「初回ログイン」の欄が無い',
+        appHtml.includes('>初回ログイン</button>') || appHtml.includes('class="signup-box"'), false);
       check('担当一覧のタブが無い', appHtml.includes("id:'myinterns'"), false);
       check('依頼の説明からインターン生が消えている',
         appHtml.includes('のスタッフ・インターン生に、連絡や出欠確認を出せます'), false);

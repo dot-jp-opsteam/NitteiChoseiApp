@@ -1187,7 +1187,8 @@ function alertSheet(title,message){
 /* =========================================================
    LOGIN
    - ログインはGoogleアカウントの1本のみ。パスワードは扱わない
-   - 初めて使う人は「初回ログイン」→ /staff で氏名と所属支部を登録する
+   - 初めて使う人も「Googleでログイン」から入る。登録が済んでいなければ
+     サーバーが /staff の登録画面へ送り、氏名と所属支部を登録する（「初回ログイン」の欄は 2026-10-09 に外した）
    ========================================================= */
 // 'login' | 'profile' | 'staff-start' | 'staff-form'
 let LOGIN_VIEW='login';
@@ -1270,7 +1271,9 @@ function renderLogin(){
       <p class="fine" style="margin-top:10px;text-align:center">登録するとすぐに利用できます。</p>`;
   }else{
     /* ふだんのログイン画面。押す場所はGoogleの1つだけにしてある。
-       その下に「初回ログイン」を置き、まだアカウントの無い人を /staff へ送る */
+       以前は下に「はじめて使う方／初回ログイン」の欄を置いて /staff へ送っていたが、
+       スタッフ登録の済んでいない @dot-jp.or.jp の人は、このボタンから入れば
+       サーバーが登録の画面へ送るようになったので、欄ごと外した（2026-10-09） */
     body.innerHTML=`
       <div class="login-panel">
         <h3 class="col-title">ログイン</h3>
@@ -1284,13 +1287,7 @@ function renderLogin(){
           <p class="fine social-note">パスワードはありません。ドットジェイピーから配布された
             <b>@${esc(STAFF_EMAIL_DOMAIN)}</b> のGoogleアカウントでそのまま入れます。</p>`
         :`<div class="hint mock">${ic('alert')}<span>ただいまログインを受け付けられません。管理者にお問い合わせください。</span></div>`}
-      </div>
-      ${GOOGLE_LOGIN_AVAILABLE?`
-      <div class="signup-box">
-        <p class="signup-title">はじめて使う方</p>
-        <button class="btn signup block" onclick="location.href='/staff'">初回ログイン</button>
-        <p class="fine" style="margin-top:8px">氏名と所属支部を一度だけ登録します。次回からは上の「Googleでログイン」だけです。</p>
-      </div>`:''}`;
+      </div>`;
   }
   bindReveal(document.getElementById('login'));
 }
