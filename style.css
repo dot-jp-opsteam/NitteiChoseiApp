@@ -1462,6 +1462,28 @@
     border-radius:999px;background:var(--brand-soft);color:var(--brand-ink);font-size:12px;font-weight:700}
   .ivh-sec .ail-card{margin:0 auto 14px}
 
+  /* ---------- 使い方（説明書） ----------
+     見出しと移動ボタンは「面談一覧・時間」の .ivh-h / .ivh-jump を使い回す */
+  .gd-toc{margin-bottom:6px}
+  .gd-sec{margin-top:18px;scroll-margin-top:16px}
+  .gd-sec p{margin:0 0 10px;line-height:1.8;font-weight:600}
+  .gd-steps,.gd-list{margin:0 0 12px;padding-left:1.5em;line-height:1.8;font-weight:600}
+  .gd-steps li,.gd-list li{margin:4px 0}
+  .gd-steps li::marker{color:var(--brand);font-weight:800}
+  .gd-table{overflow-x:auto;margin:6px 0 10px}
+  .gd-table table{border-collapse:collapse;width:100%;min-width:480px;font-size:13px}
+  .gd-table th,.gd-table td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;line-height:1.6}
+  .gd-table thead th{background:var(--panel2);font-weight:800;font-size:12px;color:var(--sub)}
+  .gd-table tbody th{white-space:nowrap;font-weight:800;color:var(--ink)}
+  .gd-video{margin:6px 0 12px}
+  .gd-video video{display:block;width:100%;max-width:560px;border-radius:12px;border:1px solid var(--line);background:var(--panel2)}
+  .gd-video figcaption{margin-top:6px;font-size:12px;font-weight:600;color:var(--sub)}
+  .gd-open{display:inline-flex;align-items:center;gap:6px}
+  .gd-open svg{width:16px;height:16px}
+  .gd-faq dt{margin-top:12px;font-weight:800;color:var(--ink)}
+  .gd-faq dt:first-child{margin-top:0}
+  .gd-faq dd{margin:4px 0 0;line-height:1.8;font-weight:600;color:var(--sub)}
+
   /* ---------- 面談申請リンクの入口（スタッフのホーム・面談一覧） ----------
      .cta の色の縁をそのまま使う。中にボタンが2つ（説明を開く・コピー）あるので外枠は div。
      文字の側は .cta-tx の見た目のまま、ボタンの既定の枠と地を消す */

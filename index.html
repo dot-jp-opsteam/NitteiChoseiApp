@@ -1795,6 +1795,8 @@ function buildNav(){
       <span class="si">${ic('calendar')}</span><span class="sl">カレンダー連携</span></button>
     <button class="sb-item" onclick="openTrashList()" title="削除した日程調整を見る">
       <span class="si">${ic('trash')}</span><span class="sl">削除リスト</span></button>
+    ${ME.role!=='intern'?`<button class="sb-item" data-tab="guide" onclick="sbGo('guide')" title="このアプリの使い方（説明書）">
+      <span class="si">${ic('bulb')}</span><span class="sl">使い方</span></button>`:''}
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="${themeSwitchLabel()}">
       <span class="si">${ic(currentTheme()==='light'?'moon':'sun')}</span>
       <span class="sl">${themeSwitchLabel()}</span></button>`;
@@ -1917,7 +1919,7 @@ function go(tab,saveHistory=true){
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
   if(tab==='interviews')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く（同じ画面に並ぶので毎回）
   if(tab==='booking')loadBookingPages();
-  document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  document.querySelectorAll('#sbNav .sb-item, #sbAct .sb-item[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   if(saveHistory)history.pushState({tab},'',location.href);
   window.scrollTo(0,0);
   render();
@@ -1949,6 +1951,7 @@ function viewFor(t){
   if(t==='avset')return viewAvailSet();
   if(t==='branches')return viewBranches();
   if(t==='users')return viewUsers();
+  if(t==='guide')return viewGuide();
   return '<div class="empty">画面が見つかりません</div>';
 }
 function render(){
@@ -2443,6 +2446,111 @@ function ivRow(iv,zone){
       ${zone.del?`<button class="btn sm iconly" onclick="event.stopPropagation();deleteInterviewRow('${iv.id}')" aria-label="一覧から削除" title="一覧から削除">${ic('trash')}</button>`:''}
     </div>`;
 }
+/* =========================================================
+   使い方（説明書）
+   左メニューの「使い方」から開く。スタッフ向け（2026-10-09 の依頼）。
+   機能ごとに「何に使うか・手順・この画面を開く」をまとめ、相手側の画面は
+   demo/ の動画（DEMOS）をその場で再生して見せる。動画は勝手に流さない。
+   機能や画面の文言を変えたら、ここの説明も合わせて直すこと
+   ========================================================= */
+function viewGuide(){
+  const video=key=>{
+    const d=DEMOS[key];
+    return `<figure class="gd-video"><video controls muted playsinline preload="metadata">
+        <source src="${d.src}.mp4" type="video/mp4"><source src="${d.src}.webm" type="video/webm"></video>
+      <figcaption>相手の画面：${esc(d.note)}</figcaption></figure>`;
+  };
+  const steps=list=>`<ol class="gd-steps">${list.map(s=>`<li>${s}</li>`).join('')}</ol>`;
+  const open=(onclick,label)=>`<button type="button" class="btn gd-open" onclick="${onclick}">${label}${ic('chevron')}</button>`;
+  const secs=[
+    {id:'start',icon:'bulb',title:'このアプリでできること',body:`
+      <p>面談や打ち合わせの日程を決めるためのアプリです。相手（学生）はログインも登録も要りません。
+        目的に合わせて、次の4つの方法を使い分けます。</p>
+      <div class="gd-table"><table>
+        <thead><tr><th>方法</th><th>向いているとき</th><th>相手がすること</th></tr></thead>
+        <tbody>
+          <tr><th>面談申請リンク</th><td>学生から面談を申し込んでもらう</td><td>担当スタッフと、空いている時間を選んで申請</td></tr>
+          <tr><th>候補日を送る</th><td>こちらで候補日を決めて、都合を聞く</td><td>候補ごとに ○ △ × で答える</td></tr>
+          <tr><th>空き時間を聞く</th><td>何人かの空いている時間を集めて、重なりを探す</td><td>空いている時間を表から自由に選ぶ</td></tr>
+          <tr><th>予約スケジュール</th><td>受付時間を公開して、先着で予約してもらう</td><td>空いている枠を1つ選んで予約</td></tr>
+        </tbody></table></div>
+      <p class="fine">届いた申請や回答は、すべて「面談一覧・時間」にまとまります。</p>`},
+    {id:'apply',icon:'link',title:'面談申請リンクで面談を受ける',body:`
+      ${steps([
+        'ホームの「面談申請リンク」の<b>コピー</b>を押します。リンクは支部で共通です。',
+        'LINEなどで学生に送ります。学生は本名・担当スタッフ・空いている時間を選んで申請します。',
+        '申請が届くと通知が来ます。「面談一覧・時間」の「面談」に<b>申請中</b>として並びます。',
+        '申請を開き、希望の中から開始時刻を決めて<b>これで確定</b>を押します。希望に無い日時なら「候補以外の日時で確定する」、合わなければ「不成立にする」。',
+        'Googleカレンダーと連携していれば、確定した面談が自分のカレンダーに入ります。'])}
+      ${video('apply')}
+      ${open('copyInternInviteLinkQuick()','リンクをコピーする')}`},
+    {id:'attend',icon:'calendar-check',title:'候補日を送る（出欠を聞く）',body:`
+      ${steps([
+        '左メニューの「候補日を送る」を押し、件名と候補の日時を入れます。',
+        '送る相手を選ぶか、共有用のURLを作って送ります。',
+        '相手は候補ごとに ○ △ × で答えます。集計は「面談一覧・時間」の「日程調整」で見られます。',
+        'いちばん都合の良い候補を選んで日程を確定します。'])}
+      ${video('attend')}
+      ${open('openRequestForm()','候補日を送る')}`},
+    {id:'free',icon:'clock',title:'空き時間を聞く',body:`
+      ${steps([
+        '左メニューの「空き時間を聞く」を押し、件名を入れて<b>URLを作る</b>を押します。',
+        'できたURLを相手に送ります。何人でも答えられ、同じ名前で送り直すと上書きされます。',
+        '「面談一覧・時間」の「空き時間」で開くと、全員がそろう時間・いちばん重なる時間が出ます。'])}
+      ${video('free')}
+      ${open('openFreeslotForm()','空き時間を聞く')}`},
+    {id:'booking',icon:'alarm',title:'予約スケジュール',body:`
+      ${steps([
+        '先に左メニューの「カレンダー連携」でGoogleカレンダーとつなぎます（予約にはこれが必要です）。',
+        '「予約スケジュール」で、面談の長さ・曜日ごとの受付時間などを決めて公開します。',
+        'できたURLを配ると、相手は空いている枠を1つ選んで予約します。Googleカレンダーに予定がある時間は自動で選べなくなります。'])}
+      ${open("sbGo('booking')",'予約スケジュールを開く')}`},
+    {id:'grid',icon:'calendar',title:'時間の表の読み方',body:`
+      <p>時間を選ぶ表は、Googleカレンダーと同じ作りです。<b>時刻はマスの境目の線の横</b>に書いてあり、
+        <b>マス1つが30分</b>です。</p>
+      <ul class="gd-list">
+        <li>21:00〜22:00 なら、21:00 の線と 22:00 の線のあいだの<b>2マス</b>を選びます。</li>
+        <li>いちばん下のマスは 23:30〜24:00 です。</li>
+        <li>マスを押すと1つ、押したまま上下になぞると同じ日の中でまとめて選べます。</li>
+      </ul>
+      <p class="fine">学生が選ぶ面談申請・空き時間の表も、スタッフの「受けられない時間」の表も同じ読み方です。</p>`},
+    {id:'avset',icon:'alarm',title:'受けられない時間を外す',body:`
+      ${steps([
+        '面談を受けられる時間は、全員・全曜日 9:00〜24:00 です。',
+        'ホームの「受けられる時間」を開き、受けられないマスを押して × にします。もう一度押すと戻ります。',
+        '長い時間や特定の日は、下の「日時でまとめて追加」からも入れられます。',
+        '× にした時間は、学生の申請画面や空き時間のページで選べなくなります。'])}
+      <p class="fine">Googleカレンダーと連携していれば、予定がある時間は自動で選べなくなります（表では「－」）。</p>
+      ${open("sbGo('avset')",'受けられない時間を開く')}`},
+    {id:'calendar',icon:'calendar',title:'カレンダー連携',body:`
+      ${steps([
+        '左メニューの「カレンダー連携」を開きます。',
+        'Googleカレンダーとつなぐと、予定がある時間が自動で × になり、確定した面談が自分のカレンダーに入ります。',
+        '予約スケジュールを使うには、この連携が必要です。'])}
+      ${open('openGoogleCalendarSettings()','カレンダー連携を開く')}`},
+    {id:'faq',icon:'message',title:'困ったとき',body:`
+      <dl class="gd-faq">
+        <dt>開くのに時間がかかる</dt>
+        <dd>しばらく誰も使っていないと、最初の表示に20〜60秒ほどかかります（無料のサーバーが休んでいるため）。待てば開きます。</dd>
+        <dt>日程調整をまちがえて消した</dt>
+        <dd>左メニューの「削除リスト」から元に戻せます。7日たつと完全に消えます。</dd>
+        <dt>面談申請リンクが外に漏れた</dt>
+        <dd>支部の管理者が「面談申請リンク」の画面から<b>リンクを作り直す</b>と、古いリンクは使えなくなります。学生には新しいリンクを配り直してください。</dd>
+        <dt>画面が見づらい</dt>
+        <dd>左メニューの下で、ダーク／ライトを切り替えられます。</dd>
+      </dl>`},
+  ];
+  return `<h1 class="page">使い方</h1>
+    <p class="page-sub">このアプリの説明書です。知りたいところを押すと、その説明へ移ります。</p>
+    <div class="ivh-jump gd-toc">${secs.map(s=>`<button type="button" onclick="guideScroll('${s.id}')">${s.title}</button>`).join('')}</div>
+    ${secs.map(s=>`<section class="gd-sec card" id="gd-${s.id}"><div class="cb">
+      <h2 class="ivh-h">${ic(s.icon)}<span>${s.title}</span></h2>${s.body}</div></section>`).join('')}`;
+}
+function guideScroll(id){
+  const el=document.getElementById('gd-'+id);
+  if(el)el.scrollIntoView({block:'start'});
+}
+
 /* 「面談一覧・時間」は、面談・日程調整・空き時間の回答結果を1か所で見る入口。
    以前は3つをタブで切り替えていたが、開いたらすべてが一度に見えるよう、
    縦に3つの区画として並べた（2026-10-09 の指示）。

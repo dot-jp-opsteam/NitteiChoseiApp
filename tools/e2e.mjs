@@ -662,6 +662,11 @@ async function testAttendance() {
       && appHtml.includes("${sec('free','clock','空き時間',FSLIST.length,freeslotsPanel())}")
       && !appHtml.includes('name="ivHub"')
       && appHtml.includes("if(tab==='interviews')loadFreeslots();"), true);
+  /* 2026-10-09：スタッフ向けの説明書「使い方」を左メニューに足した */
+  check('左メニューに「使い方」があり、説明書の画面が開ける',
+    appHtml.includes(`onclick="sbGo('guide')"`)
+      && appHtml.includes("if(t==='guide')return viewGuide();")
+      && appHtml.includes('<h1 class="page">使い方</h1>'), true);
   /* 2026-10-09：面談申請リンクを目立たせた。ホームと面談一覧の両方に、色の縁の入口とコピーボタン */
   check('面談申請リンクは色の縁の入口で、その場でコピーできる',
     appHtml.includes('<div class="cta ail-card" data-demo="apply">')
