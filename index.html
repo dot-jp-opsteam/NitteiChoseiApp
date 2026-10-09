@@ -1862,7 +1862,7 @@ async function openInternInviteLink(){
     <p class="fine" style="margin-top:8px">${ic('alert')}リンクが外部に漏れたときに使います。
       作り直すと<b>今のリンクは使えなくなる</b>ので、学生に配り直してください。</p>`:''}`);
 }
-/* 面談申請リンクの入口。ホームと「面談一覧・時間」の両方に置く。
+/* 面談申請リンクの入口。ホームに置く（「面談一覧・時間」には置かない。2026-10-09 の指示）。
    左側（文字）を押すとリンクの説明シートが開き、右の「コピー」でその場でコピーできる */
 function internInviteCard(){
   return `<div class="cta ail-card" data-demo="apply">
@@ -2580,7 +2580,7 @@ function viewStaffInterviews(){
   return `<h1 class="page">面談一覧・時間</h1>
     <p class="page-sub">面談・日程調整・空き時間の回答を、ここでまとめて見られます。</p>
     <div class="ivh-jump">${jump('iv','面談',applied)}${jump('req','日程調整',pending)}${jump('free','空き時間',FSLIST.length)}</div>
-    ${sec('iv','list','面談',applied,internInviteCard()+interviewsPanel())}
+    ${sec('iv','list','面談',applied,interviewsPanel())}
     ${sec('req','calendar-check','日程調整',pending,requestsPanel())}
     ${sec('free','clock','空き時間',FSLIST.length,freeslotsPanel())}`;
 }

@@ -657,7 +657,7 @@ async function testAttendance() {
   /* 2026-10-09：タブで切り替えるのをやめ、開いたら3つが縦に並んで一度に見えるようにした */
   check('「面談一覧・時間」に面談・日程調整・空き時間の回答がまとまっている（タブなしで一度に見える）',
     appHtml.includes('<h1 class="page">面談一覧・時間</h1>')
-      && appHtml.includes("${sec('iv','list','面談',applied,internInviteCard()+interviewsPanel())}")
+      && appHtml.includes("${sec('iv','list','面談',applied,interviewsPanel())}")
       && appHtml.includes("${sec('req','calendar-check','日程調整',pending,requestsPanel())}")
       && appHtml.includes("${sec('free','clock','空き時間',FSLIST.length,freeslotsPanel())}")
       && !appHtml.includes('name="ivHub"')
@@ -667,11 +667,13 @@ async function testAttendance() {
     appHtml.includes(`onclick="sbGo('guide')"`)
       && appHtml.includes("if(t==='guide')return viewGuide();")
       && appHtml.includes('<h1 class="page">使い方</h1>'), true);
-  /* 2026-10-09：面談申請リンクを目立たせた。ホームと面談一覧の両方に、色の縁の入口とコピーボタン */
-  check('面談申請リンクは色の縁の入口で、その場でコピーできる',
+  /* 2026-10-09：面談申請リンクを目立たせた。ホームに、色の縁の入口とコピーボタン。
+     同じ日に「面談一覧・時間」にも置いたが、置かないでほしいとの指示で外した */
+  check('面談申請リンクは色の縁の入口で、その場でコピーできる（ホームだけ）',
     appHtml.includes('<div class="cta ail-card" data-demo="apply">')
       && appHtml.includes('onclick="copyInternInviteLinkQuick()"')
       && appHtml.includes('const linkBtn=internInviteCard();')
+      && (appHtml.match(/[^ ]internInviteCard\(\)/g) || []).length === 1
       && fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8').includes('.ail-card .ail-copy'), true);
   /* カレンダー連携の入口は左メニューだけ。ホームの入口タイルにもプロフィールにも置かない */
   check('カレンダー連携の入口は左メニューだけにある',

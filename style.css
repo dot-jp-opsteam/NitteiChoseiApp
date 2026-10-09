@@ -1183,7 +1183,10 @@
      マス1つは「その時刻から30分」なので、時刻はマスの上の線に合わせる。
      見出しの中身を上に寄せ、文字の高さの半分だけ持ち上げて線にまたがせる。
      いちばん下には、マスの無い行（.bt-endrow）を足して終わりの時刻（24:00）を出す */
-  .bt-t.bt-line{vertical-align:top;padding:0 8px;font-size:12px}
+  /* 時刻の列には横線を引かない。線が数字の上を通ると読みにくい（2026-10-09 に「重なるのが嫌」と指摘）。
+     Googleカレンダーと同じく、横線は右側のマスの中だけにあり、時刻はその線の高さの横に並ぶ */
+  .bt-t.bt-line{vertical-align:top;padding:0 8px;font-size:12px;border-top:0;border-bottom:0}
+  .booktable thead .bt-corner{border-bottom-color:transparent}
   .bt-t.bt-line .bt-tl{display:block;line-height:14px;transform:translateY(-7px)}
   .booktable tbody tr:first-child .bt-t.bt-line .bt-tl{transform:translateY(-3px)}
   .booktable .bt-endrow th,.booktable .bt-endrow td{height:12px;border:0;background:transparent}
@@ -1460,7 +1463,6 @@
   .ivh-h svg{width:20px;height:20px;color:var(--brand)}
   .ivh-n{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 7px;
     border-radius:999px;background:var(--brand-soft);color:var(--brand-ink);font-size:12px;font-weight:700}
-  .ivh-sec .ail-card{margin:0 auto 14px}
 
   /* ---------- 使い方（説明書） ----------
      見出しと移動ボタンは「面談一覧・時間」の .ivh-h / .ivh-jump を使い回す */
