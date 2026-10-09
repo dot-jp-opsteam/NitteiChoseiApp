@@ -371,6 +371,7 @@ async function initDB() {
     'ALTER TABLE users ADD COLUMN avatar_url TEXT',   // Googleでログイン用
     'ALTER TABLE users ADD COLUMN staff_id TEXT',     // インターン生の担当スタッフ
     'ALTER TABLE google_tokens ADD COLUMN calendar_name TEXT', // 全体予定表の表示名
+    'ALTER TABLE freeslot_responses ADD COLUMN choice_mode TEXT', // 選んだマスの読み方（下の CHOICE_MODE）
   ]) {
     try {
       await client.execute(ddl);
@@ -2129,7 +2130,7 @@ app.get('/api/freeslots/:id', requireAuth, async (req, res) => {
     const row = rs.rows[0];
     if (!row) return res.status(404).json({ error: '見つかりませんでした' });
     const ps = await client.execute({
-      sql: `SELECT name, choices, all_day, note, created_at FROM freeslot_responses
+      sql: `SELECT name, choices, all_day, note, created_at, choice_mode FROM freeslot_responses
             WHERE request_id = ? ORDER BY created_at`,
       args: [row.id],
     });
@@ -2141,6 +2142,7 @@ app.get('/api/freeslots/:id', requireAuth, async (req, res) => {
       responses: ps.rows.map((r) => ({
         name: r.name, choices: parse(r.choices), all_day: parse(r.all_day),
         note: r.note || '', created_at: r.created_at,
+        ...(r.choice_mode === CHOICE_MODE ? { choice_mode: CHOICE_MODE } : {}),
       })),
     });
   } catch (e) {
@@ -3045,10 +3047,17 @@ app.get('/api/apply/:token/slots', limitPublicRead, async (req, res) => {
   }
 });
 
+/* 選んだマスの読み方。2026-10-09 から、申請・日程調整の表は Googleカレンダーと同じく
+   「マス1つ＝その時刻から30分」で、時刻はマスの境目の線の横に出す。
+   それより前の回答は「マス＝時刻」の読み方（21:00・21:30・22:00 で 21:00〜22:00）だったので、
+   新しい画面から届いた回答にだけ choice_mode:'slot' を付けて見分ける。
+   画面側（index.html の ivMode / fsSegments）は、これが無ければ古い読み方で表示する */
+const CHOICE_MODE = 'slot';
+
 /* 本名だけで面談を申請する。
    アカウントを作らないので、intern_id は空にして名前を data に持たせる */
 app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
-  const { name, staff_id, choices, note, all_day } = req.body || {};
+  const { name, staff_id, choices, note, all_day, choice_mode: choiceMode } = req.body || {};
   const internName = String(name || '').trim();
   if (!internName) return res.status(400).json({ error: 'お名前を入力してください' });
   if (internName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
@@ -3090,6 +3099,7 @@ app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
       status: 'applied',
       choices: list,
       all_day: allDay,
+      ...(choiceMode === CHOICE_MODE ? { choice_mode: CHOICE_MODE } : {}),
       // 旧項目にも入れておく（この変更を巻き戻しても申請が読めるようにする保険）
       choice1: list[0], choice2: list[1] || null, choice3: list[2] || null,
       confirmed_datetime: null,
@@ -3176,7 +3186,7 @@ app.get('/api/free/:token/slots', limitPublicRead, async (req, res) => {
 
 /* 学生が空いている時間を送る。同じ名前で送り直したら上書きする */
 app.post('/api/free/:token', limitPublicWrite, async (req, res) => {
-  const { name, choices, note, all_day } = req.body || {};
+  const { name, choices, note, all_day, choice_mode: choiceMode } = req.body || {};
   const studentName = String(name || '').trim();
   if (!studentName) return res.status(400).json({ error: 'お名前を入力してください' });
   if (studentName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
@@ -3202,14 +3212,16 @@ app.post('/api/free/:token', limitPublicWrite, async (req, res) => {
     }
 
     await client.execute({
-      sql: `INSERT INTO freeslot_responses (id, request_id, name, choices, all_day, note, created_at)
-            VALUES (?,?,?,?,?,?,?)
+      sql: `INSERT INTO freeslot_responses (id, request_id, name, choices, all_day, note, created_at, choice_mode)
+            VALUES (?,?,?,?,?,?,?,?)
             ON CONFLICT(request_id, name) DO UPDATE SET
               choices = excluded.choices, all_day = excluded.all_day,
-              note = excluded.note, created_at = excluded.created_at`,
+              note = excluded.note, created_at = excluded.created_at,
+              choice_mode = excluded.choice_mode`,
       args: ['fr_' + crypto.randomBytes(6).toString('hex'), ctx.row.id, studentName,
         JSON.stringify(list), JSON.stringify(allDay),
-        String(note || '').trim().slice(0, 500), new Date().toISOString()],
+        String(note || '').trim().slice(0, 500), new Date().toISOString(),
+        choiceMode === CHOICE_MODE ? CHOICE_MODE : null],
     });
 
     await insertNotification({

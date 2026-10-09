@@ -1179,6 +1179,15 @@
   .bt-corner{background:var(--panel2);position:sticky;left:0;z-index:2}
   .bt-t{background:var(--panel2);font-weight:700;color:var(--sub);white-space:nowrap;padding:6px 8px;
     position:sticky;left:0;z-index:1;font-size:11px}
+  /* 時刻をマスの境目の線の横に出す（Googleカレンダーと同じ。2026-10-09）。
+     マス1つは「その時刻から30分」なので、時刻はマスの上の線に合わせる。
+     見出しの中身を上に寄せ、文字の高さの半分だけ持ち上げて線にまたがせる。
+     いちばん下には、マスの無い行（.bt-endrow）を足して終わりの時刻（24:00）を出す */
+  .bt-t.bt-line{vertical-align:top;padding:0 8px;font-size:12px}
+  .bt-t.bt-line .bt-tl{display:block;line-height:14px;transform:translateY(-7px)}
+  .booktable tbody tr:first-child .bt-t.bt-line .bt-tl{transform:translateY(-3px)}
+  .booktable .bt-endrow th,.booktable .bt-endrow td{height:12px;border:0;background:transparent}
+  .booktable .bt-endrow .bt-t{background:var(--panel2)}
   .bt-c{width:13%;height:30px;cursor:not-allowed;color:var(--disabled);font-size:12px}
   .bt-c.off{background:var(--panel2)}
   .bt-c.ok{cursor:pointer;color:var(--ok);font-weight:800;background:var(--panel);transition:.1s}

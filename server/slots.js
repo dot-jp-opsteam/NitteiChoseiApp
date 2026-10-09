@@ -12,8 +12,10 @@ const SLOT_MINUTES = 30;
    曜日ごとの「面談を受けられる時間」（weekly）はもう使わない。選べないのは
    「受けられない時間」・Googleの予定・確定した面談・過ぎた時刻だけ。
    スタッフの「受けられない時間」の表（index.html の genEditGrid）と同じ幅にしてある。
-   表の行は「時刻」で、21:00・21:30・22:00 を選んだら 21:00〜22:00 の意味になる。
-   だから終わりを表す 24:00 の行（翌日 0:00）まで出す */
+   表のマス1つは「その時刻から30分」。時刻はマスの境目の線の横に出す（Googleカレンダーと同じ。
+   2026-10-09 から）。21:00〜22:00 なら 21:00 と 21:30 の2マス、最後のマスは 23:30〜24:00。
+   2026-10-06〜10-09 は「マス＝時刻」の読み方で、24:00 のマスがあった。その頃の回答は
+   choice_mode が無いので、画面側（index.html）は古い読み方のまま表示する */
 const GRID_START = '09:00';
 const GRID_END = '24:00';
 const GRID_START_M = 9 * 60;
@@ -79,7 +81,7 @@ function generateSlots(availability, takenMs, opts = {}) {
     day.setDate(day.getDate() + off);
 
     const slots = [];
-    for (let t = GRID_START_M; t <= GRID_END_M; t += SLOT_MINUTES) {
+    for (let t = GRID_START_M; t + SLOT_MINUTES <= GRID_END_M; t += SLOT_MINUTES) {
       const dt = new Date(day);
       dt.setHours(Math.floor(t / 60), t % 60, 0, 0);
       const st = dt.getTime();
@@ -150,9 +152,9 @@ function generateWeekGrid(availability, takenMs, weekOffset, opts = {}) {
     days.push(d);
   }
 
-  /* 表の縦幅はいつも同じ（9:00〜24:00）。行は「時刻」なので 24:00 の行まで出す */
+  /* 表の縦幅はいつも同じ（9:00〜24:00）。マスは 9:00〜23:30 から始まる30分の30個 */
   const times = [];
-  for (let t = GRID_START_M; t <= GRID_END_M; t += SLOT_MINUTES) times.push(t);
+  for (let t = GRID_START_M; t + SLOT_MINUTES <= GRID_END_M; t += SLOT_MINUTES) times.push(t);
 
   const grid = days.map((day) => {
     return times.map((t) => {

@@ -173,16 +173,20 @@ function applyGroups(){
   return runs.sort(function(a,b){return at(a)-at(b);});
 }
 
-/* 区間の終わりに出す時刻。
-   枠が2つ以上あるときは最後の枠の開始時刻、1つだけのときは開始＋30分。
-
-   表の1行は「その時刻から30分の枠」だが、申請する人は行の見出しを読んで
-   「17:00から18:00まで空けた」と受け取る。その読み方に合わせている。
-   ここに出るのは空いている時間の終わりであって、面談が終わる時刻ではない
-   （設計書 _specs/2026-08-06-面談まわりの改善-design.md の 1.4）*/
+/* 区間の終わりに出す時刻＝最後のマスの終わり（開始＋30分）。
+   2026-10-09 から、表はGoogleカレンダーと同じく時刻をマスの境目の線の横に出し、
+   マス1つを「その時刻から30分」として読む。21:00 と 21:30 のマスで 21:00〜22:00。
+   それより前は「マス＝時刻」（21:00・21:30・22:00 で 21:00〜22:00）だった。
+   送るときに choice_mode:'slot' を付けるので、スタッフ側は新旧を見分けて表示できる
+   （設計書 _specs/2026-08-06-面談まわりの改善-design.md の 1.4 は旧い読み方）*/
+/* 表のいちばん下の線の時刻（最後のマスの終わり）。'23:30' → '24:00' */
+function gridEndLabel(g){
+  var t=String(g.times[g.times.length-1]||'').split(':');
+  var m=Number(t[0])*60+Number(t[1])+30;
+  return pad(Math.floor(m/60))+':'+pad(m%60);
+}
 function runEnd(run){
   var last=run[run.length-1];
-  if(run.length>1)return new Date(last);
   return new Date(new Date(last).getTime()+SLOT_MS);
 }
 /* 続いた枠を「9:00〜11:00」にまとめ、離れていれば ＆ でつなぐ */
@@ -486,7 +490,7 @@ function weekBlock(groups){
 
   return '<div class="divider"></div>'+pager
     +'<label class="fl"><span id="slotlabel">日時を選ぶ（'+groups.length+'件選択中）</span>'
-      +'<span class="fl-sub">タップで1つ、押したまま上下になぞるとまとめて選べます</span></label>'
+      +'<span class="fl-sub">タップで1つ、押したまま上下になぞるとまとめて選べます。マス1つは30分（21:00〜22:00 なら2マス）</span></label>'
     +body+selSummaryBlock(groups);
 }
 
@@ -542,8 +546,11 @@ function gridTable(){
         +' title="タップ、または長押ししてから同じ日の中で上下になぞって選択">'
         +(n?'<span class="bt-num">'+n+'</span>':'○')+'</td>';
     }).join('');
-    return '<tr><th class="bt-t">'+esc(label)+'</th>'+cells+'</tr>';
-  }).join('');
+    return '<tr><th class="bt-t bt-line"><span class="bt-tl">'+esc(label)+'</span></th>'+cells+'</tr>';
+  }).join('')
+    /* いちばん下の線の時刻。マスは無く、線の横に終わりの時刻だけを出す */
+    +'<tr class="bt-endrow"><th class="bt-t bt-line"><span class="bt-tl">'+esc(gridEndLabel(g))+'</span></th>'
+    +'<td class="bt-endc" colspan="'+g.grid.length+'"></td></tr>';
 
   return '<div class="booktable-wrap"><table class="booktable apbook">'
     +'<thead><tr><th class="bt-corner"></th>'+headCells+'</tr>'
@@ -973,7 +980,7 @@ function submitApply(){
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name:sum.name,staff_id:APPLY.staff,choices:choices,
-      all_day:allDay,note:sum.note}),
+      all_day:allDay,note:sum.note,choice_mode:'slot'}),
   }).then(function(data){
     APPLY.sending=false;
     /* 控えは送った時点の内容で固める。あとから画面を触っても変わらないようにするため。

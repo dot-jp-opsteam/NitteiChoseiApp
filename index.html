@@ -772,14 +772,22 @@ function ivGroups(iv){
     runs.push({allDay:false,key,slots:[iso]});
   }
   const at=r=>Math.min(...r.slots.map(x=>first.get(x)));
+  const mode=ivMode(iv);
+  runs.forEach(r=>{r.mode=mode;});
   return runs.sort((a,b)=>at(a)-at(b));
 }
-/* 区間の終わりに出す時刻。理由と規則は apply.html の runEnd と同じ
-   （設計書 _specs/2026-08-06-面談まわりの改善-design.md の 1.4）。
-   申請画面とスタッフ画面で違う数え方をすると、同じ希望が別の時間に見えてしまう */
-function runEnd(run){
+/* 希望のマスの読み方。2026-10-09 から申請画面の表はGoogleカレンダーと同じく
+   「マス1つ＝その時刻から30分」になり、届く申請に choice_mode:'slot' が付く。
+   それより前の申請は「マス＝時刻」の読み方なので、印が無ければそちらで表示する */
+function ivMode(iv){return iv&&iv.choice_mode==='slot'?'slot':'point';}
+/* 区間の終わりに出す時刻。申請画面（apply.html の runEnd）と同じ数え方にする。
+   申請画面とスタッフ画面で違う数え方をすると、同じ希望が別の時間に見えてしまう。
+     'slot'（2026-10-09 から）… いつも最後のマスの終わり（開始＋30分）
+     'point'（それより前）……… 2つ以上なら最後のマスの時刻、1つだけなら開始＋30分
+       （設計書 _specs/2026-08-06-面談まわりの改善-design.md の 1.4） */
+function runEnd(run,mode){
   const last=run[run.length-1];
-  if(run.length>1)return new Date(last);
+  if(mode!=='slot'&&run.length>1)return new Date(last);
   return new Date(new Date(last).getTime()+SLOT_MS);
 }
 /* まとまりの見出し。「8/6(木) 9:00〜11:00＆14:00〜22:30」。
@@ -793,7 +801,7 @@ function fmtGroupRange(g){
     if(prev&&new Date(iso)-new Date(prev)===SLOT_MS)run.push(iso);
     else runs.push([iso]);
   });
-  const times=runs.map(r=>`${hm24(r[0])}〜${hm24(runEnd(r))}`).join('＆');
+  const times=runs.map(r=>`${hm24(r[0])}〜${hm24(runEnd(r,g.mode))}`).join('＆');
   return `${fmtDate(slotDayStart(g.slots[0]))} ${times}`;
 }
 /* 申請画面の表のいちばん下は 24:00 の行（中身は翌日 0:00）。希望に 0:00 は出てこないので、
@@ -986,48 +994,39 @@ function genSlots(staffId,days=14){
 // state: 'off'（過ぎた時間）/ 'free'（受付中）/ 'block'（不可・解除可）/ 'locked'（予定・面談あり＝操作不可）
 const BLK_GRID_START=9*60,BLK_GRID_END=24*60;
 
-/* ===== 受けられない時間：保存データ ⇔ 表の×（時刻） =====
-   表のマスは「時刻」。学生の申請画面と同じく、続けて×を付けたら「最初の×〜最後の×」、
-   ×が1つだけなら「その時刻から30分」とみなす。保存は次の2種類：
-     kind:'slot'  … ×1つぶん。start〜start+30分。表には start の1マスだけ×で出る
-     kind:'range' … 続いた×。start〜end。表には start から end まで（end も含む）×で出る
-   kind の無いもの（日時でまとめて追加）は range と同じに読む。
-   以前の作り（1マス＝30分の slot を並べて保存）も、続いた slot をつないで読めば同じ意味になる。
+/* ===== 受けられない時間：保存データ ⇔ 表の× =====
+   2026-10-09 から、表はGoogleカレンダーと同じく時刻をマスの境目の線の横に出し、
+   マス1つを「その時刻から30分」として読む（学生の申請画面と同じ）。
+   21:00〜22:00 を外すなら 21:00 と 21:30 の2マスに×。
+   保存した不可時間は、どの作りのもの（slot / range / 日時でまとめて追加）でも
+   start〜end を「本当に受けられない時間」として読み、マスの30分と重なれば×にする。
+   2026-10-06〜10-09 の「マス＝時刻」の作りで保存した分も、start〜end はその意味で
+   保存してあるので、この読み方でそのまま正しく出る。
    tools/test-fmt.mjs から切り出して動かすので、文字列に波括弧を入れないこと */
 function blkIntervals(blocks){
-  const H=30*60000;
   const out=[];
-  const slots=[];
   (blocks||[]).forEach(b=>{
     if(b.kind==='external-google')return;
-    const s=new Date(b.start).getTime(),e=new Date(b.end).getTime();
-    if(b.kind==='slot')slots.push({s:s,e:e});
-    else out.push({s:s,e:e,incl:true});
+    out.push({s:new Date(b.start).getTime(),e:new Date(b.end).getTime()});
   });
-  slots.sort((a,b)=>a.s-b.s);
-  let cur=null;
-  slots.forEach(x=>{
-    if(cur&&x.s<=cur.e){cur.e=Math.max(cur.e,x.e);return;}
-    if(cur)out.push({s:cur.s,e:cur.e,incl:cur.e-cur.s>H});
-    cur={s:x.s,e:x.e};
-  });
-  if(cur)out.push({s:cur.s,e:cur.e,incl:cur.e-cur.s>H});
   return out;
 }
-/* 時刻 t のマスが×かどうか */
+/* t から始まる30分のマスが×かどうか */
 function blkHit(intervals,t){
-  return intervals.some(v=>v.s<=t&&(t<v.e||(v.incl&&t===v.e)));
+  const H=30*60000;
+  return intervals.some(v=>v.s<t+H&&v.e>t);
 }
 /* 1日ぶん（表の1列）の×の並びから、保存し直す内容を作る。
-   cells は上から順に {t:時刻(ms), st:'x'|'lock'|'ok'|'past'}。
+   cells は上から順に {t:マスの始まり(ms), st:'x'|'lock'|'ok'|'past'}。
    その列に見えている自分の不可時間はいったん全部外し、×の並びから作り直す。
+   続いた×は「最初のマスの始まり〜最後のマスの終わり」で1件にする。
    列の外（9時より前など）にはみ出していた分は、はみ出した部分だけ残す。
    面談・Googleの予定（lock）をはさんだ×どうしは、ひと続きとして扱う */
 function blkColumnPlan(cells,blocks,newId){
   const H=30*60000;
   const live=cells.filter(c=>c.st!=='past');
   if(!live.length)return{added:[],removedIds:[]};
-  const from=live[0].t,last=live[live.length-1].t,to=last+H;
+  const from=live[0].t,to=live[live.length-1].t+H;
   const isoOf=ms=>new Date(ms).toISOString();
   const added=[],removedIds=[];
   let i=0;
@@ -1037,26 +1036,16 @@ function blkColumnPlan(cells,blocks,newId){
     while(j+1<live.length&&(live[j+1].st==='x'||live[j+1].st==='lock')&&live[j+1].t-live[j].t===H){
       j++;if(live[j].st==='x')end=j;
     }
-    const s=live[i].t;
-    added.push(end===i
-      ?{id:newId(),start:isoOf(s),end:isoOf(s+H),note:'面談不可',kind:'slot'}
-      :{id:newId(),start:isoOf(s),end:isoOf(live[end].t),note:'面談不可',kind:'range'});
+    added.push({id:newId(),start:isoOf(live[i].t),end:isoOf(live[end].t+H),note:'面談不可',kind:'slot'});
     i=end+1;
   }
-  const xFrom=live[0].st==='x';
   (blocks||[]).forEach(b=>{
     if(b.kind==='external-google')return;
     const s=new Date(b.start).getTime(),e=new Date(b.end).getTime();
-    const incl=b.kind!=='slot';
-    if(!(s<=last&&(e>from||(incl&&e===from))))return;
+    if(!(s<to&&e>from))return;
     removedIds.push(b.id);
-    if(s<from){
-      /* はみ出した前の部分。終わりを列の先頭の時刻にすると、そのマスが×で出てしまうので、
-         先頭が×でないときは30分手前で切る */
-      const pe=xFrom?from:from-H;
-      if(pe>s)added.push({id:newId(),start:isoOf(s),end:isoOf(pe),note:b.note||'',kind:'range'});
-    }
-    if(e>to)added.push({id:newId(),start:isoOf(to),end:isoOf(e),note:b.note||'',kind:incl?'range':'slot'});
+    if(s<from)added.push({id:newId(),start:isoOf(s),end:isoOf(from),note:b.note||'',kind:'slot'});
+    if(e>to)added.push({id:newId(),start:isoOf(to),end:isoOf(e),note:b.note||'',kind:'slot'});
   });
   return{added,removedIds};
 }
@@ -1075,9 +1064,8 @@ function genEditGrid(staffId,weekOffset){
   for(let i=0;i<7;i++){const d=new Date(first);d.setDate(first.getDate()+i);days.push(d);}
   /* 表の時間帯は、全員・全曜日 09:00〜24:00 に固定（2026-10-05 の指示）。
      曜日ごとの「面談を受けられる時間」の外側や休みの曜日のマスも押せる。
-     各行は「時刻」を表す（学生の申請画面と同じ考え方）。21:00・21:30・22:00 に×なら
-     21:00〜22:00 が受けられない。だから 24:00 の行まで出す */
-  const times=[];for(let t=BLK_GRID_START;t<=BLK_GRID_END;t+=30)times.push(t);
+     マス1つは「その時刻から30分」で、9:00〜23:30 から始まる30個。時刻は線の横に出す */
+  const times=[];for(let t=BLK_GRID_START;t+30<=BLK_GRID_END;t+=30)times.push(t);
   const google=blocks.filter(b=>b.kind==='external-google');
   const own=blkIntervals(blocks);
   const grid=days.map(day=>{
@@ -3583,8 +3571,10 @@ function viewAvailSet(){
       if(c.state==='block')return `<td class="bt-c block" data-iso="${c.iso}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップまたはドラッグで解除">×</td>`;
       return `<td class="bt-c ok" data-iso="${c.iso}" onpointerdown="avPointerDown(event,'${c.iso}')" title="タップ、または同じ日の中で上下になぞって不可にする">○</td>`;
     }).join('');
-    return `<tr><th class="bt-t">${label}</th>${cells}</tr>`;
-  }).join('');
+    return `<tr><th class="bt-t bt-line"><span class="bt-tl">${label}</span></th>${cells}</tr>`;
+  }).join('')
+    /* 時刻はマスの境目の線の横に出す（Googleカレンダーと同じ）。いちばん下の線の 24:00 だけの行 */
+    +`<tr class="bt-endrow"><th class="bt-t bt-line"><span class="bt-tl">${pad(Math.floor(BLK_GRID_END/60))}:${pad(BLK_GRID_END%60)}</span></th><td class="bt-endc" colspan="${days.length}"></td></tr>`;
 
   const table=times.length?`<div class="booktable-wrap">
     <table class="booktable"><thead><tr><th class="bt-corner"></th>${headCells}</tr></thead>
@@ -3633,7 +3623,7 @@ function viewAvailSet(){
         <span class="wm">${monthLabel}</span>
         <button class="pg" onclick="avSetWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
-      <label class="fl"><span>時間をタップ（受けられない <span id="avBlockedCnt">${blockedCnt}</span>枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）。21:00〜22:00 を外すなら 21:00・21:30・22:00 の3マスに×</span></label>
+      <label class="fl"><span>時間をタップ（受けられない <span id="avBlockedCnt">${blockedCnt}</span>枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）。マス1つは30分。21:00〜22:00 を外すなら 21:00 と 21:30 の2マスに×</span></label>
       ${table}
       <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
         <span><span class="legend-dot" style="background:var(--panel);border:1px solid var(--line)"></span>受けられる（タップで外す）</span>
@@ -5201,7 +5191,7 @@ async function copyFreeslotUrl(){
 function fsTally(responses){
   const map={};
   (responses||[]).forEach(function(r){
-    fsSegments(r.choices).forEach(function(iso){
+    fsSegments(r.choices,r.choice_mode).forEach(function(iso){
       if(!map[iso])map[iso]=[];
       map[iso].push(r.name);
     });
@@ -5217,7 +5207,9 @@ const FS_SLOT_MS=30*60*1000;
    集計はこの区切りの単位で重ねるので、人によって終わりが違っても正しくかぶりが出る。
    ※ tools/test-fmt.mjs が波括弧を数えて切り出すので、
      この関数の中に波括弧を含む文字列や正規表現を書かないこと */
-function fsSegments(choices){
+function fsSegments(choices,mode){
+  /* 2026-10-09 からの回答（choice_mode:'slot'）は、選んだマスがそのまま30分の区切り */
+  if(mode==='slot')return (choices||[]).slice().sort(function(a,b){return new Date(a)-new Date(b);});
   const isos=(choices||[]).slice().sort(function(a,b){return new Date(a)-new Date(b);});
   const out=[];
   isos.forEach(function(iso,i){
@@ -5264,8 +5256,8 @@ function fsBest(ranges){
 }
 /* 1人分の空き時間を帯にまとめる。顔ぶれの比較はしない。
    「終日OK」の日も、ほかの日と同じく時間の帯で出す */
-function fsOwnRanges(choices){
-  const isos=fsSegments(choices);
+function fsOwnRanges(choices,mode){
+  const isos=fsSegments(choices,mode);
   const out=[];
   isos.forEach(function(iso){
     const end=new Date(new Date(iso).getTime()+FS_SLOT_MS).toISOString();
@@ -5322,7 +5314,7 @@ function fsPeopleHTML(responses){
   if(!list.length)return '';
   return `<h4 class="fs-h4">人ごと</h4>`+list.map(r=>{
     const days={};
-    fsOwnRanges(r.choices).forEach(x=>{
+    fsOwnRanges(r.choices,r.choice_mode).forEach(x=>{
       const k=x.start.slice(0,10);
       if(!days[k])days[k]=[];
       days[k].push(`${fsHM(x.start)}〜${fsHM(x.end)}`);

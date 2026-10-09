@@ -53,21 +53,23 @@ console.log('\n[ 申請画面 apply.html の fmtRanges ]');
 {
   const A = load('apply.html', ['pad', 'hm', 'runEnd', 'fmtRanges'],
     'var SLOT_MS=30*60*1000;');
-  check('枠1つ → 開始＋30分',
+  /* 2026-10-09 から、表は時刻をマスの境目の線の横に出し、マス1つ＝その時刻から30分。
+     終わりはいつも最後のマスの終わり（以前の「マス＝時刻」の読み方ではない） */
+  check('マス1つ → 開始＋30分',
     A.fmtRanges([iso(17, 0)]), '17:00〜17:30');
-  check('枠2つ → 最後の枠の開始時刻',
-    A.fmtRanges([iso(17, 0), iso(17, 30)]), '17:00〜17:30');
-  check('枠3つ（17:00/17:30/18:00）→ 17:00〜18:00',
-    A.fmtRanges([iso(17, 0), iso(17, 30), iso(18, 0)]), '17:00〜18:00');
-  check('枠4つ（20:00〜21:30）→ 20:00〜21:30',
-    A.fmtRanges([iso(20, 0), iso(20, 30), iso(21, 0), iso(21, 30)]), '20:00〜21:30');
+  check('マス2つ（17:00/17:30）→ 17:00〜18:00',
+    A.fmtRanges([iso(17, 0), iso(17, 30)]), '17:00〜18:00');
+  check('マス3つ（17:00/17:30/18:00）→ 17:00〜18:30',
+    A.fmtRanges([iso(17, 0), iso(17, 30), iso(18, 0)]), '17:00〜18:30');
   check('離れた区間は ＆ でつなぐ',
-    A.fmtRanges([iso(10, 0), iso(10, 30), iso(13, 0)]), '10:00〜10:30＆13:00〜13:30');
+    A.fmtRanges([iso(10, 0), iso(10, 30), iso(13, 0)]), '10:00〜11:00＆13:00〜13:30');
   check('順番がばらばらでも時刻順に直す',
-    A.fmtRanges([iso(18, 0), iso(17, 0), iso(17, 30)]), '17:00〜18:00');
-  // 表のいちばん下の 24:00 の行（中身は翌日 0:00）
-  check('23:00・23:30・24:00 → 23:00〜24:00',
-    A.fmtRanges([iso(23, 0), iso(23, 30), iso(0, 0, 8)]), '23:00〜24:00');
+    A.fmtRanges([iso(18, 0), iso(17, 0), iso(17, 30)]), '17:00〜18:30');
+  // いちばん下のマスは 23:30〜24:00。24:00 のマスは無いので 24:00〜0:30 にはならない
+  check('最後のマス（23:30）→ 23:30〜24:00',
+    A.fmtRanges([iso(23, 30)]), '23:30〜24:00');
+  check('23:00・23:30 → 23:00〜24:00',
+    A.fmtRanges([iso(23, 0), iso(23, 30)]), '23:00〜24:00');
 }
 
 console.log('\n[ スタッフ画面 index.html の fmtGroupRange ]');
@@ -88,6 +90,11 @@ console.log('\n[ スタッフ画面 index.html の fmtGroupRange ]');
   // 表のいちばん下の 24:00 の行（中身は翌日 0:00）は「24:00」と読む
   check('23:00・23:30・24:00 → 23:00〜24:00',
     I.fmtGroupRange({ slots: [iso(23, 0), iso(23, 30), iso(0, 0, 8)] }), '8/7(金) 23:00〜24:00');
+  /* 2026-10-09 からの申請（choice_mode:'slot'）はマス1つ＝30分。上は印の無い古い申請の読み方 */
+  check('新しい申請：17:00/17:30 → 17:00〜18:00',
+    I.fmtGroupRange({ mode: 'slot', slots: [iso(17, 0), iso(17, 30)] }), '8/7(金) 17:00〜18:00');
+  check('新しい申請：最後のマス 23:30 → 23:30〜24:00',
+    I.fmtGroupRange({ mode: 'slot', slots: [iso(23, 30)] }), '8/7(金) 23:30〜24:00');
 }
 
 /* 打ち込まれた開始時刻を、希望に含まれる30分枠に突き合わせる部分。
@@ -312,9 +319,10 @@ console.log('\n[ 日程調整画面 free.html の fmtRanges ]');
 {
   const F = load('free.html', ['pad', 'hm', 'runEnd', 'fmtRanges'],
     'var SLOT_MS=30*60*1000;');
-  check('枠1つ → 開始＋30分', F.fmtRanges([iso(17, 0)]), '17:00〜17:30');
-  check('続いた3枠 → 17:00〜18:00',
-    F.fmtRanges([iso(17, 0), iso(17, 30), iso(18, 0)]), '17:00〜18:00');
+  check('マス1つ → 開始＋30分', F.fmtRanges([iso(17, 0)]), '17:00〜17:30');
+  check('続いた2マス（17:00/17:30）→ 17:00〜18:00',
+    F.fmtRanges([iso(17, 0), iso(17, 30)]), '17:00〜18:00');
+  check('最後のマス（23:30）→ 23:30〜24:00', F.fmtRanges([iso(23, 30)]), '23:30〜24:00');
   check('離れた枠は ＆ でつなぐ',
     F.fmtRanges([iso(17, 0), iso(19, 0)]), '17:00〜17:30＆19:00〜19:30');
 }
@@ -382,6 +390,15 @@ console.log('\n[ 空き時間の帯まとめ index.html ]');
     [{ start: at(9, 0), end: at(9, 30) }, { start: at(10, 30), end: at(11, 0) }]);
   check('21:00・21:30・22:00 → 21:00〜22:00（21:00〜22:30 ではない）',
     T.fsOwnRanges([at(21, 0), at(21, 30), at(22, 0)]), [{ start: at(21, 0), end: at(22, 0) }]);
+  /* 2026-10-09 からの回答（choice_mode:'slot'）はマスがそのまま30分の区切り */
+  check('新しい回答：21:00・21:30 → 21:00〜22:00',
+    T.fsOwnRanges([at(21, 0), at(21, 30)], 'slot'), [{ start: at(21, 0), end: at(22, 0) }]);
+  check('新しい回答と古い回答が混ざっても、かぶりは正しく出る',
+    T.fsRanges(T.fsTally([
+      { name: '山田', choices: [at(21, 0), at(21, 30)], choice_mode: 'slot' },          // 21:00〜22:00
+      { name: '佐藤', choices: [at(21, 0), at(21, 30), at(22, 0)] },                     // 21:00〜22:00（古い読み方）
+    ])).map((x) => [x.start, x.end, x.names.length]),
+    [[at(21, 0), at(22, 0), 2]]);
   check('人によって終わりが違っても、かぶりは正しく出る',
     T.fsRanges(T.fsTally([
       { name: '山田', choices: [at(21, 0), at(21, 30), at(22, 0)] },
@@ -418,31 +435,31 @@ console.log('\n[ 受けられない時間の表 index.html の blkIntervals / bl
   const plan = (xs, blocks = [], extra) => B.blkColumnPlan(column(xs, extra), blocks, newId);
   const span = (b) => [b.kind, b.start, b.end];
 
+  /* 2026-10-09 から、マス1つ＝その時刻から30分。保存は「本当に受けられない時間」の start〜end */
   // 作る側
-  check('21:00・21:30・22:00 に× → 21:00〜22:00 で保存',
-    plan([21, 21.5, 22]).added.map(span), [['range', at(21, 0), at(22, 0)]]);
+  check('21:00・21:30 に× → 21:00〜22:00 で保存',
+    plan([21, 21.5]).added.map(span), [['slot', at(21, 0), at(22, 0)]]);
   check('×1つ → その時刻から30分',
     plan([21]).added.map(span), [['slot', at(21, 0), at(21, 30)]]);
   check('離れた×は別々',
     plan([10, 21, 21.5]).added.map(span),
-    [['slot', at(10, 0), at(10, 30)], ['range', at(21, 0), at(21, 30)]]);
-  check('23:30・24:00 に× → 23:30〜24:00（翌日へはみ出さない）',
-    plan([23.5, 24]).added.map(span), [['range', at(23, 30), at(24, 0)]]);
+    [['slot', at(10, 0), at(10, 30)], ['slot', at(21, 0), at(22, 0)]]);
+  check('最後のマス 23:30 に× → 23:30〜24:00',
+    plan([23.5]).added.map(span), [['slot', at(23, 30), at(24, 0)]]);
   check('予定ありのマスをはさんでもひと続き',
-    plan([21, 22], [], { 21.5: 'lock' }).added.map(span), [['range', at(21, 0), at(22, 0)]]);
+    plan([21, 22], [], { 21.5: 'lock' }).added.map(span), [['slot', at(21, 0), at(22, 30)]]);
   check('過ぎた時間は保存し直さない',
     plan([12], [], { 9: 'past', 9.5: 'past' }).added.map(span), [['slot', at(12, 0), at(12, 30)]]);
 
-  // 読む側（作ったものを読み戻すと、同じマスが×になる）
-  check('range は終わりの時刻も×',
-    hitsOf([{ kind: 'range', start: at(21, 0), end: at(22, 0) }]), [21, 21.5, 22]);
-  check('slot は始まりの1マスだけ×',
+  // 読む側：start〜end と重なるマスが×
+  check('21:00〜22:00 は 21:00 と 21:30 のマス',
+    hitsOf([{ kind: 'slot', start: at(21, 0), end: at(22, 0) }]), [21, 21.5]);
+  check('30分ぶんは1マス',
     hitsOf([{ kind: 'slot', start: at(21, 0), end: at(21, 30) }]), [21]);
-  check('以前の作り（30分の slot を並べた）は、つないで読む',
-    hitsOf([{ kind: 'slot', start: at(21, 0), end: at(21, 30) },
-      { kind: 'slot', start: at(21, 30), end: at(22, 0) }]), [21, 21.5, 22]);
-  check('日時でまとめて追加（kind なし）は range と同じ',
-    hitsOf([{ start: at(13, 0), end: at(14, 0) }]), [13, 13.5, 14]);
+  check('「マス＝時刻」の頃の range（21:00〜22:00）も同じ2マス',
+    hitsOf([{ kind: 'range', start: at(21, 0), end: at(22, 0) }]), [21, 21.5]);
+  check('日時でまとめて追加（kind なし）も同じ',
+    hitsOf([{ start: at(13, 0), end: at(14, 0) }]), [13, 13.5]);
   check('Googleの予定は×に数えない',
     hitsOf([{ kind: 'external-google', start: at(13, 0), end: at(14, 0) }]), []);
 
@@ -457,11 +474,11 @@ console.log('\n[ 受けられない時間の表 index.html の blkIntervals / bl
   check('作り直すときは同じ列の古い分を外す', plan([21, 21.5], old).removedIds, ['a', 'b']);
   // 9時より前にはみ出していた分は、はみ出した部分だけ残す
   const early = [{ id: 'e', start: at(8, 0), end: at(10, 0) }];
-  check('9時より前の部分は残す（9:00 も×のまま）',
-    plan([9, 9.5, 10], early).added.map(span),
-    [['range', at(9, 0), at(10, 0)], ['range', at(8, 0), at(9, 0)]]);
-  check('9:00 の×を外したら、前の部分は 8:30 までにする',
-    plan([], early).added.map(span), [['range', at(8, 0), at(8, 30)]]);
+  check('9時より前の部分は残す',
+    plan([9, 9.5], early).added.map(span),
+    [['slot', at(9, 0), at(10, 0)], ['slot', at(8, 0), at(9, 0)]]);
+  check('9:00 の×を外しても、9時より前の部分は残る',
+    plan([], early).added.map(span), [['slot', at(8, 0), at(9, 0)]]);
 }
 
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);

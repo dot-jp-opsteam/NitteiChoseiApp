@@ -1710,11 +1710,11 @@ async function run() {
         `${next.getFullYear()}-${p(next.getMonth() + 1)}-${p(next.getDate())}`);
     }
     /* 表の高さは全員・全曜日 9:00〜24:00 で固定（2026-10-06 から。以前は 9:00〜23:00）。
-       行は「時刻」で、21:00・21:30・22:00 を選んだら 21:00〜22:00 の意味になるので、
-       終わりを表す 24:00 の行まで出す */
+       2026-10-09 から、マス1つは「その時刻から30分」で時刻は線の横に出す。
+       最後のマスは 23:30〜24:00（24:00 から始まるマスは無い。24:00 は線の横の文字だけ） */
     check('表はいつも9:00から始まる', (slotRes.json.times || [])[0], '09:00');
-    check('表は24:00の行で終わる', (slotRes.json.times || []).slice(-1)[0], '24:00');
-    check('30分刻みで31行ある', (slotRes.json.times || []).length, 31);
+    check('表の最後のマスは23:30から', (slotRes.json.times || []).slice(-1)[0], '23:30');
+    check('30分刻みで30マスある', (slotRes.json.times || []).length, 30);
     check('表の中身が日数ぶんある', (slotRes.json.grid || []).length, 7);
     check('表の1列が時間の数と一致する',
       (slotRes.json.grid || [])[0]?.length, (slotRes.json.times || []).length);
@@ -2256,7 +2256,9 @@ async function run() {
     check('同じ名前で送り直せる', resent.status, 200);
     check('同じ名前なら上書きで1人のまま', await countOf(made.json.id), 1);
 
-    const sent2 = await api(null, 'POST', `/api/free/${token}`, { name: '佐藤 花子', choices: [iso1] });
+    /* 2026-10-09 からの画面は choice_mode:'slot'（マス1つ＝30分）を付けて送る。
+       付いていない回答（それより前の画面）は古い読み方で表示するので、印を混ぜない */
+    const sent2 = await api(null, 'POST', `/api/free/${token}`, { name: '佐藤 花子', choices: [iso1], choice_mode: 'slot' });
     check('別の名前なら足される', sent2.status, 200);
     check('回答人数が2になる', await countOf(made.json.id), 2);
 
@@ -2271,6 +2273,10 @@ async function run() {
     check('上書きした本文が残っている',
       (detail.json.responses || []).find((r) => r.name === '山田 太郎')?.note, '対面希望');
     check('メールアドレスは持たない', 'email' in ((detail.json.responses || [])[0] || {}), false);
+    check('新しい画面からの回答には choice_mode が付く',
+      (detail.json.responses || []).find((r) => r.name === '佐藤 花子')?.choice_mode, 'slot');
+    check('印の無い回答には choice_mode が付かない',
+      'choice_mode' in ((detail.json.responses || []).find((r) => r.name === '山田 太郎') || {}), false);
 
     const peek = await api(TOKENS.staff3, 'GET', `/api/freeslots/${made.json.id}`);
     check('発行していない人は見られない', peek.status, 404);
