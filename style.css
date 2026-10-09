@@ -1439,6 +1439,36 @@
     .cta .cta-tx small{font-size:12px}
   }
 
+  /* ---------- 面談一覧・時間（面談・日程調整・空き時間を縦に並べる） ---------- */
+  .ivh-jump{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px}
+  .ivh-jump button{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;
+    border:1px solid var(--line);border-radius:999px;background:var(--panel);
+    color:var(--ink);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+  .ivh-jump button:hover{border-color:var(--brand)}
+  .ivh-sec{margin-top:26px;scroll-margin-top:16px}
+  .ivh-sec+.ivh-sec{padding-top:22px;border-top:1px solid var(--line)}
+  .ivh-h{display:flex;align-items:center;gap:8px;margin:0 2px 12px;font-size:18px;font-weight:800;color:var(--ink)}
+  .ivh-h svg{width:20px;height:20px;color:var(--brand)}
+  .ivh-n{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 7px;
+    border-radius:999px;background:var(--brand-soft);color:var(--brand-ink);font-size:12px;font-weight:700}
+  .ivh-sec .ail-card{margin:0 auto 14px}
+
+  /* ---------- 面談申請リンクの入口（スタッフのホーム・面談一覧） ----------
+     .cta の色の縁をそのまま使う。中にボタンが2つ（説明を開く・コピー）あるので外枠は div。
+     文字の側は .cta-tx の見た目のまま、ボタンの既定の枠と地を消す */
+  .ail-card{cursor:default}
+  .ail-card .inner{padding:16px 18px}
+  .ail-card .ail-open{display:flex;flex:1;min-width:0;padding:0;border:0;background:none;
+    color:inherit;font:inherit;text-align:left;cursor:pointer}
+  .ail-card .ail-open .cta-tx small{line-height:1.5}
+  .ail-card .ail-copy{flex:none;white-space:nowrap}
+  .ail-card .ail-copy svg{width:16px;height:16px}
+  @media (max-width:520px){
+    .ail-card .inner{flex-wrap:wrap}
+    .ail-card .ail-open{flex-basis:calc(100% - 60px)}
+    .ail-card .ail-copy{width:100%;justify-content:center}
+  }
+
   /* 控えめな横長ボタン。インターン生ホームの大きな入口（.cta）とは役割が違うので、
      光らせず線だけにして、六角形の並びの邪魔をしない見た目にする */
   .flatbtn{display:flex;align-items:center;gap:12px;width:100%;max-width:560px;margin:14px auto 2px;

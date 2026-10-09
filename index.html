@@ -1868,6 +1868,32 @@ async function openInternInviteLink(){
     <p class="fine" style="margin-top:8px">${ic('alert')}リンクが外部に漏れたときに使います。
       作り直すと<b>今のリンクは使えなくなる</b>ので、学生に配り直してください。</p>`:''}`);
 }
+/* 面談申請リンクの入口。ホームと「面談一覧・時間」の両方に置く。
+   左側（文字）を押すとリンクの説明シートが開き、右の「コピー」でその場でコピーできる */
+function internInviteCard(){
+  return `<div class="cta ail-card" data-demo="apply">
+    <div class="inner">
+      <span class="cta-ic">${ic('link')}</span>
+      <button type="button" class="ail-open" onclick="openInternInviteLink()">
+        <span class="cta-tx"><b>面談申請リンク</b>
+          <small>学生に送ると、登録なしで面談を申請できます（支部で共通）</small></span>
+      </button>
+      <button type="button" class="btn pri ail-copy" onclick="copyInternInviteLinkQuick()">${ic('copy')}コピー</button>
+    </div></div>`;
+}
+/* シートを開かずにコピーする。取り出せなかったり、コピーの権限が無い端末では
+   いつものシートを開いて、そこからコピーしてもらう */
+async function copyInternInviteLinkQuick(){
+  try{
+    const res=await api('/api/staff/intern-invite-url');
+    const data=await res.json();
+    if(!res.ok||!data.url)throw new Error('failed');
+    await navigator.clipboard.writeText(data.url);
+    toast('面談申請リンクをコピーしました');
+  }catch(e){
+    openInternInviteLink();
+  }
+}
 /* 合言葉を新しくして、古いリンクを無効にする。
    配り直しが必要になるため、押し間違いが起きないよう一度確認する */
 async function regenerateInviteLink(){
@@ -1901,7 +1927,7 @@ function go(tab,saveHistory=true){
   // ほかの画面へ移るときは全画面を解除する。解除し忘れるとサイドバーが隠れたままになる
   if(tab!=='home'&&calFull){calFull=false;document.documentElement.setAttribute('data-calfull','0');}
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
-  if(tab==='interviews'&&IVHUB==='free')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く
+  if(tab==='interviews')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く（同じ画面に並ぶので毎回）
   if(tab==='booking')loadBookingPages();
   document.querySelectorAll('#sbNav .sb-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   if(saveHistory)history.pushState({tab},'',location.href);
@@ -2066,12 +2092,9 @@ function viewHome(){
       hex('openFreeslotForm()','clock','空き時間を聞く','URLで空いている時間を集める',0,false,'free'),
       hex("go('avset')",'alarm','受けられる時間','受けられない時間を外す'),
     );
-    /* インターン生に渡す登録リンクは、左メニューだけだと見つけにくい。
-       毎日使うものではないので、六角形の上に控えめな帯として置く */
-    const linkBtn=`<button class="flatbtn" data-demo="apply" onclick="openInternInviteLink()">
-      <span class="fb-ic">${ic('link')}</span>
-      <span class="fb-tx"><b>面談申請リンク</b><small>インターン生に渡すと面談を申請できます（支部で共通）</small></span>
-      <span class="fb-go">${ic('chevron')}</span></button>`;
+    /* インターン生に渡す面談申請リンク。控えめな帯だと見落とされたので（2026-10-09 の指示）、
+       色の縁が付いた大きな入口（.cta）にして、その場でコピーできるボタンも付ける */
+    const linkBtn=internInviteCard();
     /* 「明日の面談」がいちばん時間に追われる知らせなので、締切より上に置く */
     return hi+interviewHomeReminder()+dueNotice+
       (pend?`<div class="hint">${ic('bell')}<span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
@@ -2433,27 +2456,33 @@ function ivRow(iv,zone){
     </div>`;
 }
 /* 「面談一覧・時間」は、面談・日程調整・空き時間の回答結果を1か所で見る入口。
+   以前は3つをタブで切り替えていたが、開いたらすべてが一度に見えるよう、
+   縦に3つの区画として並べた（2026-10-09 の指示）。
+   ほかの画面から「日程調整」「空き時間」を指して開くときは、その区画まで送る（showHub）。
    作る側（候補日を送る／空き時間を聞く）は左メニューとホームから直接フォームを開く */
-let IVHUB='iv'; // 'iv' | 'req' | 'free'
 function showHub(sub){
-  IVHUB=sub;
-  if(currentTab==='interviews'){
-    if(sub==='free')loadFreeslots();
-    renderQuiet();
-  }else go('interviews');
+  if(currentTab!=='interviews')go('interviews');else renderQuiet();
+  ivHubScroll(sub);
+}
+function ivHubScroll(sub){
+  requestAnimationFrame(()=>{
+    const el=document.getElementById('ivh-'+sub);
+    if(el)el.scrollIntoView({block:'start'});
+  });
 }
 function viewStaffInterviews(){
   const pending=myRequests().filter(requestNeedsAction).length;
-  const seg=`<div class="seg" style="margin-bottom:14px">
-    <label><input type="radio" name="ivHub" ${IVHUB==='iv'?'checked':''} onchange="showHub('iv')">
-      <span class="segb">面談</span></label>
-    <label><input type="radio" name="ivHub" ${IVHUB==='req'?'checked':''} onchange="showHub('req')">
-      <span class="segb">日程調整${pending?`（${pending}）`:''}</span></label>
-    <label><input type="radio" name="ivHub" ${IVHUB==='free'?'checked':''} onchange="showHub('free')">
-      <span class="segb">空き時間${FSLIST.length?`（${FSLIST.length}）`:''}</span></label>
-  </div>`;
-  return `<h1 class="page">面談一覧・時間</h1>${seg}${
-    IVHUB==='req'?requestsPanel():IVHUB==='free'?freeslotsPanel():interviewsPanel()}`;
+  const applied=(DB.interviews||[]).filter(iv=>(ME.role==='admin'||iv.staff_id===ME.id)&&iv.status==='applied').length;
+  const jump=(sub,label,n)=>`<button type="button" onclick="ivHubScroll('${sub}')">${label}${n?`<span class="ivh-n">${n}</span>`:''}</button>`;
+  const sec=(sub,icon,title,n,body)=>`<section class="ivh-sec" id="ivh-${sub}">
+      <h2 class="ivh-h">${ic(icon)}<span>${title}</span>${n?`<span class="ivh-n">${n}</span>`:''}</h2>
+      ${body}</section>`;
+  return `<h1 class="page">面談一覧・時間</h1>
+    <p class="page-sub">面談・日程調整・空き時間の回答を、ここでまとめて見られます。</p>
+    <div class="ivh-jump">${jump('iv','面談',applied)}${jump('req','日程調整',pending)}${jump('free','空き時間',FSLIST.length)}</div>
+    ${sec('iv','list','面談',applied,internInviteCard()+interviewsPanel())}
+    ${sec('req','calendar-check','日程調整',pending,requestsPanel())}
+    ${sec('free','clock','空き時間',FSLIST.length,freeslotsPanel())}`;
 }
 function interviewsPanel(){
   /* 状態（申請中→確定済み→不成立）を最優先にするのは、並べ替えを変えても同じ。
@@ -4625,6 +4654,8 @@ function toggleSentRequests(){
   if(REQTAB==='sent')REQTAB=REQBACKTAB;
   else{REQBACKTAB=REQTAB;REQTAB='sent';}
   renderQuiet();
+  // 面談一覧・時間は3つの区画が縦に並ぶので、切り替えた日程調整の区画まで送る
+  if(currentTab==='interviews')ivHubScroll('req');
 }
 
 /* 未回答の並び。まだ答えていないものは締切が早い順（締切なしは末尾）、

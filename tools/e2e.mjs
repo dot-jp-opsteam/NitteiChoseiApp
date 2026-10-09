@@ -654,12 +654,20 @@ async function testAttendance() {
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
       && appHtml.includes('<h1 class="page">日程調整</h1>')
       && !appHtml.includes('面談一覧・確定</') && !appHtml.includes("'面談一覧・確定'"), true);
-  check('「面談一覧・時間」に面談・日程調整・空き時間の回答がまとまっている',
+  /* 2026-10-09：タブで切り替えるのをやめ、開いたら3つが縦に並んで一度に見えるようにした */
+  check('「面談一覧・時間」に面談・日程調整・空き時間の回答がまとまっている（タブなしで一度に見える）',
     appHtml.includes('<h1 class="page">面談一覧・時間</h1>')
-      && appHtml.includes("onchange=\"showHub('req')\"")
-      && appHtml.includes("onchange=\"showHub('free')\"")
-      && appHtml.includes("IVHUB==='req'?requestsPanel():IVHUB==='free'?freeslotsPanel():interviewsPanel()")
-      && appHtml.includes("if(tab==='interviews'&&IVHUB==='free')loadFreeslots();"), true);
+      && appHtml.includes("${sec('iv','list','面談',applied,internInviteCard()+interviewsPanel())}")
+      && appHtml.includes("${sec('req','calendar-check','日程調整',pending,requestsPanel())}")
+      && appHtml.includes("${sec('free','clock','空き時間',FSLIST.length,freeslotsPanel())}")
+      && !appHtml.includes('name="ivHub"')
+      && appHtml.includes("if(tab==='interviews')loadFreeslots();"), true);
+  /* 2026-10-09：面談申請リンクを目立たせた。ホームと面談一覧の両方に、色の縁の入口とコピーボタン */
+  check('面談申請リンクは色の縁の入口で、その場でコピーできる',
+    appHtml.includes('<div class="cta ail-card" data-demo="apply">')
+      && appHtml.includes('onclick="copyInternInviteLinkQuick()"')
+      && appHtml.includes('const linkBtn=internInviteCard();')
+      && fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8').includes('.ail-card .ail-copy'), true);
   /* カレンダー連携の入口は左メニューだけ。ホームの入口タイルにもプロフィールにも置かない */
   check('カレンダー連携の入口は左メニューだけにある',
     (appHtml.match(/openGoogleCalendarSettings\(\)"/g) || []).length === 1
