@@ -88,6 +88,7 @@ node tools/record-demos.mjs    # demo/ の動画を撮り直す（要 Playwright
 node tools/test-booking.mjs    # 予約スケジュールの枠の計算（31件）
 node tools/test-booking-e2e.mjs # 予約の通し（56件）。偽のGoogleを立てて8125番で起動
 node tools/test-booking-e2e.mjs --serve  # 画面確認用に立てたままにする（URLが出る）
+node tools/test-login.mjs      # Googleでログインの通し（21件）。偽のGoogleを立てて8127番で起動
 ```
 
 **e2eでは公開ページの回数制限を切ってある**（`PUBLIC_WRITE_PER_MIN=0`）。

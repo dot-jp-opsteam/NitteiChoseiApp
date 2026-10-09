@@ -1814,7 +1814,9 @@ app.get('/api/bootstrap', async (req, res) => {
     const user = token ? await getUserBySessionToken(token) : null;
     const obj = await readDB();
 
-    if (!user || user.status !== 'active') {
+    /* インターン生は requireAuth に弾かれるので、ここでも未ログインとして返す。
+       通してしまうと、いったんアプリに入ってから次の通信で黙ってログイン画面に戻される */
+    if (!user || user.status !== 'active' || user.role === 'intern') {
       return res.json({ config, user: null, branches: obj?.branches || [] });
     }
     const users = await listActiveUsers();
@@ -1859,17 +1861,34 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
     // 未確認のメールアドレスを信用すると、他人のメールを騙って既存アカウントを乗っ取れてしまう
     if (!profile.emailVerified) return fail('unverified');
 
+    const isStaffDomain = profile.email.endsWith(`@${STAFF_EMAIL_DOMAIN}`);
+    // 氏名と所属支部を入力してもらうため、確認済みの情報を署名付きで持ち回す
+    const toStaffForm = (from) => {
+      const t = google.signPayload({ email: profile.email, sub: profile.sub, name: profile.name, picture: profile.picture });
+      return res.redirect(`/staff?verified=${encodeURIComponent(t)}${from ? `&from=${from}` : ''}`);
+    };
+
     if (isStaffSignup) {
       // ドットから配布されたアカウント以外はスタッフ登録できない
-      if (!profile.email.endsWith(`@${STAFF_EMAIL_DOMAIN}`)) return fail('domain');
+      if (!isStaffDomain) return fail('domain');
       const existing = (await findUserByGoogleSub(profile.sub)) || (await findUserByEmail(profile.email));
-      if (existing) return fail('already');
-      // 氏名と所属支部を入力してもらうため、確認済みの情報を署名付きで持ち回す
-      const t = google.signPayload({ email: profile.email, sub: profile.sub, name: profile.name, picture: profile.picture });
-      return res.redirect(`/staff?verified=${encodeURIComponent(t)}`);
+      /* インターン生の行は、登録を済ませずにふつうのログインから入った人にもできる（下を参照）。
+         その人がスタッフ登録をやり直せるよう、インターン生の行だけは「登録済み」と扱わない */
+      if (existing && existing.role !== 'intern') return fail('already');
+      return toStaffForm('');
     }
 
     let user = await findUserByGoogleSub(profile.sub);
+    /* スタッフ登録をしていない @dot-jp.or.jp の人が、ふつうのログインから入ってきたとき。
+       以前はインターン生の行を作ってログインさせ、直後に requireAuth で弾いていたため、
+       何の説明もなくログイン画面に戻されていた（2026-10-09 に報告）。
+       ドットのアカウントならそのままスタッフ登録の画面（氏名と支部を入れるだけ）へ送る。
+       前にインターン生の行ができてしまった人も、登録の画面でスタッフに切り替わる */
+    if (isStaffDomain && (!user || user.role === 'intern')) {
+      const byEmail = user || (await findUserByEmail(profile.email));
+      // 管理者が止めたアカウントは登録の画面へ送らず、下の inactive で止める
+      if (!byEmail || (byEmail.role === 'intern' && byEmail.status === 'active')) return toStaffForm('login');
+    }
     if (!user) {
       // 同じメールアドレスで既にパスワード登録済みなら、そのアカウントにGoogleを紐付ける
       const byEmail = await findUserByEmail(profile.email);
@@ -1897,6 +1916,9 @@ app.get('/api/auth/google/login/callback', async (req, res) => {
     }
 
     if (user.status !== 'active') return fail('inactive');
+    /* インターン生（スタッフへの切り替え待ち）は、ログインさせても requireAuth に弾かれる。
+       黙って戻すのではなく、何をすればよいかを画面に出す */
+    if (user.role === 'intern') return fail('not_staff');
 
     const token = await createSessionRow(user.id, remember);
     // トークンはURLフラグメント（#以降）で渡す。フラグメントはサーバーに送信されず
@@ -1925,8 +1947,25 @@ app.post('/api/auth/staff-signup', async (req, res) => {
     if (!(obj?.branches || []).some((b) => b.id === branch_id)) {
       return res.status(400).json({ error: '選択された支部が存在しません' });
     }
-    if ((await findUserByGoogleSub(verified.sub)) || (await findUserByEmail(verified.email))) {
+    const existing = (await findUserByGoogleSub(verified.sub)) || (await findUserByEmail(verified.email));
+    if (existing && existing.role !== 'intern') {
       return res.status(409).json({ error: 'このアカウントは既に登録されています' });
+    }
+    /* 登録を済ませずにふつうのログインから入り、インターン生の行ができていた人。
+       行を作り直さずにスタッフへ切り替える（同じメールアドレスの行を2つ作れないため） */
+    if (existing) {
+      // 管理者が止めたアカウントは、登録し直しで生き返らせない
+      if (existing.status !== 'active') {
+        return res.status(403).json({ error: 'このアカウントではログインできません。支部の管理者にお問い合わせください。' });
+      }
+      await client.execute({
+        sql: `UPDATE users SET role = 'staff', nickname = ?, branch_id = ?,
+                google_sub = COALESCE(google_sub, ?), avatar_url = COALESCE(?, avatar_url) WHERE id = ?`,
+        args: [String(full_name).trim(), branch_id, verified.sub, verified.picture || null, existing.id],
+      });
+      const upgraded = await findUserById(existing.id);
+      const token = await createSessionRow(upgraded.id, false);
+      return res.json({ ok: true, token, user: toPublicUser(upgraded) });
     }
     // 承認フローは廃止。ドット配布アカウントで本人確認済みのため、登録と同時に即アクティブにする
     const user = await insertUser({

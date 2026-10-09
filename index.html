@@ -1195,6 +1195,11 @@ let LOGIN_BRANCHES=[];  // 未認証時に支部選択で使う（/api/branches�
 /* スタッフ登録（/staff）で使う一時情報。Googleで確認できたメールアドレスと、
    それを裏付ける署名付きトークンを保持する */
 let STAFF_SIGNUP={token:null,email:'',name:''};
+/* ログイン画面に残しておく案内。消える通知（toast）だと、ログインできなかった理由を
+   読み終える前に消えてしまうため、長い案内はここに入れて画面に出したままにする */
+let LOGIN_NOTICE='';
+/* ふつうのログインから、スタッフ登録の済んでいない @dot-jp.or.jp の人が送られてきたか */
+let STAFF_FROM_LOGIN=false;
 let STAFF_EMAIL_DOMAIN='dot-jp.or.jp'; // サーバー設定で上書きされる（/api/auth/config）
 let GOOGLE_LOGIN_AVAILABLE=false; // サーバー側でGoogleの資格情報が設定済みか（/api/auth/config）
 let MAIL_SEND_AVAILABLE=false;    // サーバー側でメール送信が設定済みか（システム設定の表示に使う）
@@ -1252,6 +1257,7 @@ function renderLogin(){
     // 2画面目。Googleで確認できたメールアドレスは変更させない
     body.innerHTML=`
       <h3 style="margin:0 0 6px;font-size:17px;text-align:center">スタッフ登録</h3>
+      ${STAFF_FROM_LOGIN?`<div class="hint mock" style="margin-bottom:8px">${ic('alert')}<span>このアカウントはまだスタッフ登録が済んでいません。氏名と所属支部を入れて登録すると、そのまま使えます（一度だけです）。</span></div>`:''}
       <div class="hint" style="margin-bottom:6px">${ic('check')}<span>${esc(STAFF_SIGNUP.email)} を確認しました。</span></div>
       <label class="fl">メールアドレス</label>
       <input value="${esc(STAFF_SIGNUP.email)}" readonly style="background:var(--bg);color:var(--sub)">
@@ -1268,6 +1274,7 @@ function renderLogin(){
     body.innerHTML=`
       <div class="login-panel">
         <h3 class="col-title">ログイン</h3>
+        ${LOGIN_NOTICE?`<div class="hint mock" style="margin-bottom:12px">${ic('alert')}<span>${esc(LOGIN_NOTICE)}</span></div>`:''}
         ${GOOGLE_LOGIN_AVAILABLE?`
           <button class="btn social block" onclick="goGoogleLogin()">
             <span class="social-ico">${GOOGLE_LOGO_SVG}</span>
@@ -6425,6 +6432,9 @@ function consumeTokenFromHash(){
     state:'セッションの有効期限が切れました。もう一度お試しください。',
     unverified:'このGoogleアカウントはメールアドレスが未確認のため利用できません。',
     inactive:'このアカウントではログインできません。',
+    /* スタッフ登録の済んでいない、ドット以外のアカウント（個人のGmailなど）。
+       行はできているので、支部の管理者がユーザー管理でスタッフに変えれば入れる */
+    not_staff:'このアカウントはまだスタッフとして登録されていません。支部の管理者に、ユーザー管理で「スタッフ」に変えてもらってください。',
     failed:'Googleログインに失敗しました。時間をおいて再度お試しください。',
   };
 
@@ -6450,6 +6460,7 @@ function consumeTokenFromHash(){
     if(isStaffPage){
       const verified=params.get('verified');
       const staffErr=params.get('staff_error');
+      STAFF_FROM_LOGIN=params.get('from')==='login';
       history.replaceState(null,'','/staff');
       if(verified){
         const claims=readVerifiedToken(verified);
@@ -6489,7 +6500,9 @@ function consumeTokenFromHash(){
     params.delete('login');params.delete('login_error');
     const q=params.toString();
     history.replaceState(null,'',location.pathname+(q?`?${q}`:''));
-    if(loginErr)toast(LOGIN_ERR_MSG[loginErr]||'ログインに失敗しました');
+    // スタッフ登録待ちの案内は長いので、消える通知ではなくログイン画面に出したままにする
+    if(loginErr==='not_staff'){LOGIN_NOTICE=LOGIN_ERR_MSG.not_staff;if(!ME)renderLogin();}
+    else if(loginErr)toast(LOGIN_ERR_MSG[loginErr]||'ログインに失敗しました');
     else if(loginParam==='google')toast('Googleアカウントでログインしました');
   }
 
