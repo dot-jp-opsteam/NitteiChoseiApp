@@ -2437,13 +2437,13 @@ const IV_ZONES=[
   {key:'failed',label:'不成立',match:iv=>iv.status==='failed',del:true},
 ];
 function setIvSort(v){IVSORT=v;render();}
-function ivRow(iv,zone){
+function ivRow(iv,zone,tag=''){
   const s=STATUS[iv.status];const intern=ivIntern(iv);const nm=ivInternName(iv);
   const label=iv.cancelled?'キャンセル':zone.key==='done'?'実施済み':s.t;
   return `<div class="row" onclick="openInterview('${iv.id}')">
       <span class="av ${accOf(intern?.id||iv.id)}">${esc(initials(nm))}</span>
       <span class="rmain">
-        <span class="rt">${esc(nm)}</span>
+        <span class="rt">${tag}${esc(nm)}</span>
         <span class="rs${iv.status==='fixed'?' iv-datetime':''}">${esc(ivRowSub(iv))}</span>
       </span>
       <span class="pill ${s.c}">${label}</span>
@@ -2483,7 +2483,7 @@ function viewGuide(){
       ${steps([
         'ホームの「面談申請リンク」の<b>コピー</b>を押します。リンクは支部で共通です。',
         'LINEなどで学生に送ります。学生は本名・担当スタッフ・空いている時間を選んで申請します。',
-        '申請が届くと通知が来ます。「面談一覧・時間」の「面談」に<b>申請中</b>として並びます。',
+        '申請が届くと通知が来ます。「面談一覧・時間」のいちばん上（対応が要るもの）に、<b>申請中</b>の面談として並びます。',
         '申請を開き、希望の中から開始時刻を決めて<b>これで確定</b>を押します。希望に無い日時なら「候補以外の日時で確定する」、合わなければ「不成立にする」。',
         'Googleカレンダーと連携していれば、確定した面談が自分のカレンダーに入ります。'])}
       ${video('apply')}
@@ -2492,7 +2492,7 @@ function viewGuide(){
       ${steps([
         '左メニューの「候補日を送る」を押し、件名と候補の日時を入れます。',
         '送る相手を選ぶか、共有用のURLを作って送ります。',
-        '相手は候補ごとに ○ △ × で答えます。集計は「面談一覧・時間」の「日程調整」で見られます。',
+        '相手は候補ごとに ○ △ × で答えます。集計は「面談一覧・時間」に並ぶ日程調整の行を開くと見られます。',
         'いちばん都合の良い候補を選んで日程を確定します。'])}
       ${video('attend')}
       ${open('openRequestForm()','候補日を送る')}`},
@@ -2500,7 +2500,7 @@ function viewGuide(){
       ${steps([
         '左メニューの「空き時間を聞く」を押し、件名を入れて<b>URLを作る</b>を押します。',
         'できたURLを相手に送ります。何人でも答えられ、同じ名前で送り直すと上書きされます。',
-        '「面談一覧・時間」の「空き時間」で開くと、全員がそろう時間・いちばん重なる時間が出ます。'])}
+        '「面談一覧・時間」に並ぶ空き時間の行を開くと、全員がそろう時間・いちばん重なる時間が出ます。'])}
       ${video('free')}
       ${open('openFreeslotForm()','空き時間を聞く')}`},
     {id:'booking',icon:'alarm',title:'予約スケジュール',body:`
@@ -2556,33 +2556,75 @@ function guideScroll(id){
 }
 
 /* 「面談一覧・時間」は、面談・日程調整・空き時間の回答結果を1か所で見る入口。
-   以前は3つをタブで切り替えていたが、開いたらすべてが一度に見えるよう、
-   縦に3つの区画として並べた（2026-10-09 の指示）。
-   ほかの画面から「日程調整」「空き時間」を指して開くときは、その区画まで送る（showHub）。
-   作る側（候補日を送る／空き時間を聞く）は左メニューとホームから直接フォームを開く */
+   以前は3つをタブで切り替え、次に3つの区画を縦に並べたが、2026-10-09 の指示で
+   区画もやめて1つの一覧に混ぜた。行の頭に種類の札（面談／日程調整／空き時間）を付け、
+   上のボタンで種類を絞れる。並びは「対応が要るもの」→「これからの面談」→それ以外で、
+   それぞれの中は新しい順。
+   ほかの画面から「日程調整」「空き時間」を指して開くときは、その種類に絞って開く（showHub）。
+   作る側（候補日を送る／空き時間を聞く）は一覧の上と左メニュー・ホームから開く */
+let IVKIND='all'; // 'all' | 'iv' | 'req' | 'free'
+let IVQ='';       // 名前・件名での絞り込み
 function showHub(sub){
+  IVKIND=sub==='iv'||sub==='req'||sub==='free'?sub:'all';
   if(currentTab!=='interviews')go('interviews');else renderQuiet();
-  ivHubScroll(sub);
 }
-function ivHubScroll(sub){
-  requestAnimationFrame(()=>{
-    const el=document.getElementById('ivh-'+sub);
-    if(el)el.scrollIntoView({block:'start'});
+function setIvKind(k){IVKIND=k;renderQuiet();}
+const HUB_KIND={iv:'面談',req:'日程調整',free:'空き時間'};
+function hubTag(k){return `<span class="hub-kind hub-${k}">${HUB_KIND[k]}</span>`;}
+/* 一覧に並べる行を、種類をまたいで集める。
+   rank：0＝対応が要る（申請中の面談・未回答の日程調整・日程未確定の送った日程調整）
+         1＝これからの面談（確定・未実施）　2＝それ以外 */
+function hubItems(){
+  const out=[];
+  (DB.interviews||[]).filter(iv=>ME.role==='admin'||iv.staff_id===ME.id).forEach(iv=>{
+    const zone=IV_ZONES.find(z=>z.match(iv))||IV_ZONES[0];
+    out.push({kind:'iv',rank:iv.status==='applied'?0:zone.key==='fixed'?1:2,at:iv.created_at,
+      text:ivInternName(iv),html:ivRow(iv,zone,hubTag('iv'))});
   });
+  const seen=new Set();
+  myRequests().forEach(r=>{
+    seen.add(r.id);
+    const need=requestNeedsAction(r);
+    out.push({kind:'req',rank:need?0:2,at:r.created_at,text:r.subject||'',
+      html:requestRow(r,need?'inbox':'done',hubTag('req'))});
+  });
+  sentRequests().forEach(r=>{
+    if(seen.has(r.id))return;  // 自分にも送ったものは、受け取った側の行だけにする
+    out.push({kind:'req',rank:r.confirmed?2:0,at:r.created_at,text:(r.subject||'')+' '+(r.target_label||''),
+      html:requestRow(r,'sent',hubTag('req'))});
+  });
+  (FSLIST||[]).forEach(f=>{
+    out.push({kind:'free',rank:2,at:f.created_at,text:f.title||'',html:freeslotRow(f,hubTag('free'))});
+  });
+  return out.sort((x,y)=>x.rank-y.rank||new Date(y.at)-new Date(x.at));
 }
 function viewStaffInterviews(){
-  const pending=myRequests().filter(requestNeedsAction).length;
-  const applied=(DB.interviews||[]).filter(iv=>(ME.role==='admin'||iv.staff_id===ME.id)&&iv.status==='applied').length;
-  const jump=(sub,label,n)=>`<button type="button" onclick="ivHubScroll('${sub}')">${label}${n?`<span class="ivh-n">${n}</span>`:''}</button>`;
-  const sec=(sub,icon,title,n,body)=>`<section class="ivh-sec" id="ivh-${sub}">
-      <h2 class="ivh-h">${ic(icon)}<span>${title}</span>${n?`<span class="ivh-n">${n}</span>`:''}</h2>
-      ${body}</section>`;
+  const all=hubItems();
+  const cnt={all:all.length,iv:0,req:0,free:0};all.forEach(x=>cnt[x.kind]++);
+  const need=all.filter(x=>x.rank===0).length;
+  const q=IVQ.trim();
+  const list=all.filter(x=>(IVKIND==='all'||x.kind===IVKIND)&&(!q||x.text.includes(q)));
+  const chip=(k,label)=>`<button class="${IVKIND===k?'on':''}" onclick="setIvKind('${k}')">${label}<span style="opacity:.7"> ${cnt[k]}</span></button>`;
+  const canSend=canSendRequest();
+  // 「対応が要るもの」とそれ以外に分けて、見出しを置く
+  const urgent=list.filter(x=>x.rank===0),rest=list.filter(x=>x.rank>0);
+  const group=(label,items,n)=>items.length?`<div class="iv-zoneh">${label}<span style="opacity:.7"> ${n}</span></div>
+    <div class="rowlist">${items.map(x=>x.html).join('')}</div>`:'';
+  const rows=group('対応が要るもの',urgent,urgent.length)+group(urgent.length?'そのほか':'すべて',rest,rest.length);
   return `<h1 class="page">面談一覧・時間</h1>
-    <p class="page-sub">面談・日程調整・空き時間の回答を、ここでまとめて見られます。</p>
-    <div class="ivh-jump">${jump('iv','面談',applied)}${jump('req','日程調整',pending)}${jump('free','空き時間',FSLIST.length)}</div>
-    ${sec('iv','list','面談',applied,interviewsPanel())}
-    ${sec('req','calendar-check','日程調整',pending,requestsPanel())}
-    ${sec('free','clock','空き時間',FSLIST.length,freeslotsPanel())}`;
+    <p class="page-sub">面談・日程調整・空き時間の回答を、ここで1つの一覧にまとめて見られます。${need?`対応が要るものが <b>${need}件</b> あります。`:''}</p>
+    ${canSend?`<div class="btn-row" style="margin:12px 0 4px">
+      <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('calendar')}候補日を送る</button>
+      <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を聞く</button>
+    </div>`:''}
+    <div class="chipfilter" style="margin-top:12px">${chip('all','すべて')}${chip('iv','面談')}${chip('req','日程調整')}${chip('free','空き時間')}</div>
+    <div class="filterbar">
+      <input placeholder="名前・件名で検索" value="${esc(IVQ)}" oninput="IVQ=this.value" onchange="renderQuiet()"
+        onkeydown="if(event.key==='Enter')renderQuiet()">
+      ${q||IVKIND!=='all'?`<button class="btn sm" onclick="IVQ='';IVKIND='all';renderQuiet()">クリア</button>`:''}
+    </div>
+    ${list.length?`<div class="card">${rows}</div>`
+      :`<div class="empty"><div class="ei">${ic('list')}</div><p>${all.length?'条件に一致するものがありません。':'まだ面談・日程調整・空き時間はありません。'}</p></div>`}`;
 }
 function interviewsPanel(){
   /* 状態（申請中→確定済み→不成立）を最優先にするのは、並べ替えを変えても同じ。
@@ -4756,8 +4798,6 @@ function toggleSentRequests(){
   if(REQTAB==='sent')REQTAB=REQBACKTAB;
   else{REQBACKTAB=REQTAB;REQTAB='sent';}
   renderQuiet();
-  // 面談一覧・時間は3つの区画が縦に並ぶので、切り替えた日程調整の区画まで送る
-  if(currentTab==='interviews')ivHubScroll('req');
 }
 
 /* 未回答の並び。まだ答えていないものは締切が早い順（締切なしは末尾）、
@@ -4816,7 +4856,12 @@ function requestList(list,kind){
     return `<div class="empty" style="padding:30px"><div class="ei">${ic('calendar-check')}</div>
       <p>${kind==='inbox'?'未回答の日程調整はありません。':kind==='done'?'回答済みの日程調整はありません。':'まだ日程調整を送っていません。'}</p></div>`;
   }
-  const rows=list.map(r=>{
+  return `<div class="card"><div class="rowlist">${list.map(r=>requestRow(r,kind)).join('')}</div></div>`;
+}
+/* 日程調整の1行。kind は 'inbox'（未回答）／'done'（回答済み）／'sent'（自分が送った）。
+   「面談一覧・時間」のまとめた一覧でも使うので、種類の札（tag）を名前の前に差し込める */
+function requestRow(r,kind,tag=''){
+  {
     const total=(r.recipient_ids||[]).length;
     const sender=findUser(r.sender_id);
     // 状態は「答えたか」「決まったか」で出す
@@ -4836,12 +4881,11 @@ function requestList(list,kind){
     else if(kind==='done')badge='<span class="tag ok">回答済み</span>';
     return `<div class="row" style="cursor:pointer" onclick="openRequestDetail('${r.id}')">
       <span class="av a2" style="border-radius:10px;font-size:18px">${ic('calendar-check')}</span>
-      <span class="rmain"><span class="rt">${esc(r.subject)} ${badge}</span>
+      <span class="rmain"><span class="rt">${tag}${esc(r.subject)} ${badge}</span>
       <span class="rs">${sub}${dueRequestMeta(r)}</span></span>
       ${kind==='done'?`<button class="btn sm iconly" onclick="event.stopPropagation();trashRequestRow('${r.id}')" aria-label="削除" title="削除">${ic('trash')}</button>`
         :`<span class="tile-arrow">${ic('chevron')}</span>`}</div>`;
-  }).join('');
-  return `<div class="card"><div class="rowlist">${rows}</div></div>`;
+  }
 }
 
 /* =========================================================
@@ -5241,11 +5285,15 @@ function viewFreeslotList(){
       <p>まだURLを作っていません。<br>
       上のボタンから作ると、ここに並びます。</p></div>`;
   }
-  return `<div class="card"><div class="rowlist">${FSLIST.map(f=>`
+  return `<div class="card"><div class="rowlist">${FSLIST.map(f=>freeslotRow(f)).join('')}</div></div>`;
+}
+/* 空き時間（日程調整URL）の1行。まとめた一覧でも使うので、種類の札（tag）を差し込める */
+function freeslotRow(f,tag=''){
+  return `
     <div class="row fs-row" onclick="openFreeslotDetail('${esc(f.id)}')">
-      <div class="rowmain"><div class="rowtitle">${esc(f.title)}</div>
+      <div class="rowmain"><div class="rowtitle">${tag}${esc(f.title)}</div>
         <div class="rowsub fs-meta">${esc(String(f.created_at).slice(0,10))}・${f.count}人が回答</div></div>
-      <span class="tile-arrow">${ic('chevron')}</span></div>`).join('')}</div></div>`;
+      <span class="tile-arrow">${ic('chevron')}</span></div>`;
 }
 
 function openFreeslotForm(){
@@ -5281,7 +5329,7 @@ function showFreeslotUrl(f){
     <input class="fs-url" id="fsUrl" readonly value="${esc(f.url)}">
     <button class="btn pri block" style="margin-top:16px" onclick="copyFreeslotUrl()">URLをコピー</button>
     <p class="fine" style="margin-top:10px">このURLを学生に送ってください。
-    届いた分は「面談一覧・時間」の「空き時間」から見られます。</p>`);
+    届いた分は「面談一覧・時間」の一覧から見られます。</p>`);
 }
 async function copyFreeslotUrl(){
   const el=document.getElementById('fsUrl');

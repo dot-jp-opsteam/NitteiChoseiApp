@@ -654,13 +654,16 @@ async function testAttendance() {
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
       && appHtml.includes('<h1 class="page">日程調整</h1>')
       && !appHtml.includes('面談一覧・確定</') && !appHtml.includes("'面談一覧・確定'"), true);
-  /* 2026-10-09：タブで切り替えるのをやめ、開いたら3つが縦に並んで一度に見えるようにした */
-  check('「面談一覧・時間」に面談・日程調整・空き時間の回答がまとまっている（タブなしで一度に見える）',
+  /* 2026-10-09：タブで切り替えるのをやめ、同じ日のうちに区画もやめて、
+     面談・日程調整・空き時間を1つの一覧に混ぜた（行の頭に種類の札・上のボタンで種類を絞る） */
+  check('「面談一覧・時間」は面談・日程調整・空き時間を1つの一覧にまとめている',
     appHtml.includes('<h1 class="page">面談一覧・時間</h1>')
-      && appHtml.includes("${sec('iv','list','面談',applied,interviewsPanel())}")
-      && appHtml.includes("${sec('req','calendar-check','日程調整',pending,requestsPanel())}")
-      && appHtml.includes("${sec('free','clock','空き時間',FSLIST.length,freeslotsPanel())}")
-      && !appHtml.includes('name="ivHub"')
+      && appHtml.includes('function hubItems(){')
+      && appHtml.includes("html:ivRow(iv,zone,hubTag('iv'))")
+      && appHtml.includes("html:requestRow(r,need?'inbox':'done',hubTag('req'))")
+      && appHtml.includes("html:freeslotRow(f,hubTag('free'))")
+      && appHtml.includes("${chip('all','すべて')}${chip('iv','面談')}${chip('req','日程調整')}${chip('free','空き時間')}")
+      && !appHtml.includes('name="ivHub"') && !appHtml.includes("sec('iv','list','面談'")
       && appHtml.includes("if(tab==='interviews')loadFreeslots();"), true);
   /* 2026-10-09：スタッフ向けの説明書「使い方」を左メニューに足した */
   check('左メニューに「使い方」があり、説明書の画面が開ける',

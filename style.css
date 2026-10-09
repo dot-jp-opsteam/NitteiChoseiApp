@@ -1464,6 +1464,16 @@
   .ivh-n{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 7px;
     border-radius:999px;background:var(--brand-soft);color:var(--brand-ink);font-size:12px;font-weight:700}
 
+  /* ---------- 面談一覧・時間のまとめた一覧：行の頭の種類の札 ----------
+     色は文字と薄い地だけ。強い色の塊にすると、状態の札（申請中・未回答など）とぶつかる */
+  .hub-kind{display:inline-block;margin-right:6px;padding:1px 7px;border-radius:6px;
+    font-size:12px;font-weight:700;line-height:1.6;vertical-align:1px;white-space:nowrap}
+  .hub-kind.hub-iv{background:var(--brand-soft);color:var(--brand-ink)}
+  .hub-kind.hub-req{background:rgba(236,160,72,.16);color:#f2b36a}
+  .hub-kind.hub-free{background:rgba(106,169,240,.16);color:#8fbdf3}
+  :root[data-theme="light"] .hub-kind.hub-req{color:#b0651c}
+  :root[data-theme="light"] .hub-kind.hub-free{color:#3a72b8}
+
   /* ---------- 使い方（説明書） ----------
      見出しと移動ボタンは「面談一覧・時間」の .ivh-h / .ivh-jump を使い回す */
   .gd-toc{margin-bottom:6px}
