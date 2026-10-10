@@ -42,9 +42,39 @@ async function staffTests(){
  const two=await Promise.all([1,2].map(()=>api(TOK.b,'POST','/api/tally-boards',{config:cfg})));eq(two.map(r=>r.status).sort(),[200,409],'30表同時上限');
  return reopened.json.board;
 }
+
+const fresh=board=>({name:'山田',note:'',selected:['r1:c1'],boardRevision:board.revision,submissionKey:crypto.randomBytes(24).toString('hex'),editToken:crypto.randomBytes(24).toString('hex')});
+async function publicTests(board){
+ const url='/api/tally/'+board.token,body=fresh(board),first=await api(null,'POST',url+'/responses',body);eq(first.status,200,'公開初回');
+ const retry=await api(null,'POST',url+'/responses',body);eq(retry.json.responseId,first.json.responseId,'再送同じ回答');
+ let data=await api(null,'GET',url);eq(data.json.responses.length,1,'二重登録なし');eq(data.headers.get('cache-control'),'no-store','キャッシュなし');
+ const secretKeys=new Set(['editToken','edit_token_hash','submissionKey','submission_key','staff_id','email']);function clean(x){if(!x||typeof x!=='object')return;for(const [k,v] of Object.entries(x)){eq(secretKeys.has(k),false,'非公開キーなし '+k);clean(v);}}clean(data.json);
+ eq(JSON.stringify(data.json).includes(body.editToken),false,'生鍵なし');
+ eq((await api(null,'POST',url+'/responses',{...body,editToken:crypto.randomBytes(24).toString('hex')})).status,409,'同じ送信鍵の他鍵拒否');
+ const same=await api(null,'POST',url+'/responses',{...fresh(board),selected:[]});eq(same.status,200,'同名全不可別人');eq(same.json.responseId===first.json.responseId,false,'同名別ID');
+ const link='/api/tally/manage/'+body.editToken,own=await api(null,'GET',link);eq(own.json.response.id,first.json.responseId,'本人読込');eq(own.json.response.answered,['r1:c2','r1:c1'],'現行全マスanswered');
+ eq((await api(null,'GET','/api/tally/manage/'+'0'.repeat(48))).status,404,'未知編集鍵');eq((await api(null,'GET','/api/tally/bad')).status,404,'不正共有鍵');
+ const edited={name:'更新山田',note:'本人だけ更新',selected:['r1:c2'],boardRevision:board.revision,responseRevision:1};
+ const edits=await Promise.all([1,2].map(()=>api(null,'PUT',link,edited)));eq(edits.map(r=>r.status).sort(),[200,409],'同時編集1件成功');eq((await api(null,'GET',link)).json.response.name,'更新山田','読戻し');
+ eq((await api(null,'GET',url)).json.responses.find(r=>r.id===same.json.responseId).selected,[],'他人不変');
+ eq((await api(null,'POST',url+'/responses',{...fresh(board),selected:['unknown']})).status,400,'未知マス');eq((await api(null,'POST',url+'/responses',{...fresh(board),selected:Array(1489).fill('r1:c1')})).status,400,'過大配列');
+ const parallelBody=fresh(board),twice=await Promise.all([1,2].map(()=>api(null,'POST',url+'/responses',parallelBody)));eq(twice.map(r=>r.status),[200,200],'並列初回');eq(twice[0].json.responseId,twice[1].json.responseId,'並列同じID');
+ const newer={...board.config,columns:[...board.config.columns,{id:'c3',label:'水曜',active:true}]};
+ let save=await api(TOK.a,'PUT','/api/tally-boards/'+board.id,{config:newer,active:true,revision:board.revision});eq(save.status,200,'列追加');
+ eq((await api(null,'POST',url+'/responses',fresh(board))).json.code,'stale_board','古い表拒否');eq((await api(null,'PUT',link,{...edited,responseRevision:2})).json.code,'stale_board','古い本人表拒否');
+ data=await api(null,'GET',url);eq(data.json.responses.length,3,'古い入力保存されない');eq(data.json.responses[0].answered.includes('r1:c3'),false,'追加マス未回答');
+ board=save.json.board;save=await api(TOK.a,'PUT','/api/tally-boards/'+board.id,{config:board.config,active:false,revision:board.revision});board=save.json.board;
+ eq((await api(null,'POST',url+'/responses',fresh(board))).json.code,'closed','停止新規');eq((await api(null,'PUT',link,{...edited,boardRevision:board.revision,responseRevision:2})).json.code,'closed','停止編集');
+ eq((await api(null,'GET',url)).status,200,'停止閲覧');eq((await api(null,'POST',url+'/responses',body)).json.responseId,first.json.responseId,'停止・改版後も既存送信控え');
+ save=await api(TOK.a,'PUT','/api/tally-boards/'+board.id,{config:board.config,active:true,revision:board.revision});board=save.json.board;
+ eq((await api(null,'PUT',link,{...edited,boardRevision:board.revision,responseRevision:2})).status,200,'再開編集');
+ for(let i=3;i<99;i++){const r=await api(null,'POST',url+'/responses',fresh(board));assert.equal(r.status,200,'上限前 '+i);}
+ const last=await Promise.all([1,2].map(()=>api(null,'POST',url+'/responses',fresh(board))));eq(last.map(r=>r.status).sort(),[200,409],'同時100人上限');eq((await api(null,'GET',url)).json.responses.length,100,'100人超えない');
+ eq((await api(null,'PUT',link,{...edited,boardRevision:board.revision,responseRevision:3})).status,200,'上限でも本人編集');
+}
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ops-tally-')),dbPath=path.join(dir,'test.db');let server;
 try{await setupDB(dbPath);server=startServer(dbPath);await ready(server);const board=await staffTests();
- // PUBLIC_TESTS
+ await publicTests(board);
  if(process.argv.includes('--serve')){console.log('STAFF_TOKEN='+TOK.a+'\nSHARE_URL='+BASE+'/t/'+board.token+'\nDB='+dbPath);await new Promise(()=>{});}
  console.log('表で日程調整 E2E: '+count+'件成功');
 }catch(e){console.error(e);process.exitCode=1;}finally{if(server)await stop(server);}

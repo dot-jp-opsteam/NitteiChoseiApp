@@ -44,6 +44,36 @@ module.exports=function({app,client,requireAuth,limitPublicRead,limitPublicWrite
   if(!result.rowsAffected)fail(409,'stale_board','別の画面で表が変更されました。最新の表を確認してください。');
   return {board:staffDTO(await one(tx,'SELECT * FROM tally_boards WHERE id=?',[b.id]))};
  })));
- // PUBLIC_ROUTES
+
+ const publicBoard=async(db,token)=>{if(!hex(token,32))fail(404,'not_found','表が見つかりません。');const b=await one(db,'SELECT * FROM tally_boards WHERE token=?',[token]);if(!b)fail(404,'not_found','表が見つかりません。');return b;};
+ const managed=async(db,token)=>{if(!hex(token,48))fail(404,'not_found','編集リンクが見つかりません。');const r=await one(db,'SELECT * FROM tally_responses WHERE edit_token_hash=?',[sha(token)]);if(!r)fail(404,'not_found','編集リンクが見つかりません。');return {r,b:await one(db,'SELECT * FROM tally_boards WHERE id=?',[r.board_id])};};
+ const checkBoard=(b,revision)=>{if(!Number(b.active))fail(409,'closed','回答の受付は停止しています。');if(!Number.isInteger(revision))fail(400,'invalid','表の版を確認してください。');if(Number(b.revision)!==revision)fail(409,'stale_board','表が変更されました。最新の表を読み込んでください。');};
+ const ack=(b,r,token)=>({responseId:r.id,responseRevision:Number(r.revision),boardRevision:Number(b.revision),editUrl:base()+'/t/manage/'+token});
+ app.get('/api/tally/manage/:editToken',noStore,limitPublicRead,handler(async req=>{const {b,r}=await managed(client,req.params.editToken);return {board:boardDTO(b),response:responseDTO(r)};}));
+ app.put('/api/tally/manage/:editToken',noStore,limitPublicWrite,handler(req=>write(async tx=>{
+  const {b,r}=await managed(tx,req.params.editToken);checkBoard(b,req.body.boardRevision);
+  if(!Number.isInteger(req.body.responseRevision))fail(400,'invalid','回答の版を確認してください。');
+  if(Number(r.revision)!==req.body.responseRevision)fail(409,'stale_response','別の画面で回答が変更されました。最新の回答を確認してください。');
+  const norm=model.normalizeResponse(req.body,JSON.parse(b.data));if(!norm.ok)fail(400,norm.code,norm.error);
+  const {name,note,selected,answered}=norm.data;
+  const result=await tx.execute({sql:'UPDATE tally_responses SET name=?,note=?,data=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?',args:[name,note,JSON.stringify({selected,answered}),new Date().toISOString(),r.id,req.body.responseRevision]});
+  if(!result.rowsAffected)fail(409,'stale_response','回答が変更されました。');
+  return ack(b,await one(tx,'SELECT * FROM tally_responses WHERE id=?',[r.id]),req.params.editToken);
+ })));
+ app.get('/api/tally/:token',noStore,limitPublicRead,handler(async req=>{const b=await publicBoard(client,req.params.token);return {board:boardDTO(b),responses:await responses(client,b.id)};}));
+ app.post('/api/tally/:token/responses',noStore,limitPublicWrite,handler(req=>write(async tx=>{
+  const b=await publicBoard(tx,req.params.token),input=req.body;
+  if(!hex(input.submissionKey,48)||!hex(input.editToken,48))fail(400,'invalid','送信キーを確認してください。');
+  const existing=await one(tx,'SELECT * FROM tally_responses WHERE board_id=? AND submission_key=?',[b.id,input.submissionKey]);
+  if(existing){if(existing.edit_token_hash!==sha(input.editToken))fail(409,'invalid','送信キーが別の回答に使われています。');return ack(b,existing,input.editToken);}
+  checkBoard(b,input.boardRevision);
+  const total=await one(tx,'SELECT COUNT(*) AS n FROM tally_responses WHERE board_id=?',[b.id]);if(Number(total.n)>=100)fail(409,'limit','回答できる人数は100人までです。');
+  const norm=model.normalizeResponse(input,JSON.parse(b.data));if(!norm.ok)fail(400,norm.code,norm.error);
+  if(await one(tx,'SELECT id FROM tally_responses WHERE edit_token_hash=?',[sha(input.editToken)]))fail(409,'invalid','編集キーが使われています。');
+  const {name,note,selected,answered}=norm.data,now=new Date().toISOString(),id='tlr_'+random(16);
+  await tx.execute({sql:'INSERT INTO tally_responses(id,board_id,name,note,data,edit_token_hash,submission_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',args:[id,b.id,name,note,JSON.stringify({selected,answered}),sha(input.editToken),input.submissionKey,now,now]});
+  return ack(b,await one(tx,'SELECT * FROM tally_responses WHERE id=?',[id]),input.editToken);
+ })));
+
  return {init};
 };
