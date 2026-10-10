@@ -2132,3 +2132,5 @@
 .tly-template-settings{padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}.tly-check{display:flex;align-items:center;gap:8px;margin:10px 0;font-size:14px}.tly-check input{width:18px;height:18px;min-height:0}
 .tly-list-row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:17px 0;border-bottom:1px solid var(--line)}.tly-list-row h3{margin:0 0 4px}.tly-list-row .btn{flex-shrink:0}
 @media(max-width:600px){.tly-page{padding:16px 12px 35px}.tly-card{padding:16px;border-radius:16px}.tly-card h1{font-size:23px}.tly-axes,.tly-form-row{grid-template-columns:1fr;gap:0}.tly-person-slots{columns:1}.tly-table tbody th{min-width:95px}.tly-actions{justify-content:flex-start}}
+
+.tly-preview .tly-summary-tools,.tly-preview .tly-members,.tly-preview>.tly-muted{display:none}

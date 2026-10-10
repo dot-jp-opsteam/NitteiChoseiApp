@@ -130,6 +130,8 @@
 <!-- 祝日。年をまたいでも自動で出るよう、規則を書いた共通ファイルから読む。
      ここで holidayName() が定義される（apply.html も同じものを読んでいる） -->
 <script src="/holidays.js"></script>
+<script src="/tally-model.js"></script>
+<script src="/tally-ui.js"></script>
 
 <script>
 /* =========================================================
@@ -1730,6 +1732,7 @@ const NAV={
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
     {id:'booking',label:'予約スケジュール',ic:'alarm'},
+    {id:'tally',label:'表で日程調整',ic:'calendar'},
     {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
     {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
   ],
@@ -1738,12 +1741,14 @@ const NAV={
     {id:'home',label:'ホーム',ic:'home'},
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
     {id:'booking',label:'予約スケジュール',ic:'alarm'},
+    {id:'tally',label:'表で日程調整',ic:'calendar'},
     {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
     {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
     {id:'home',label:'ホーム',ic:'home'},
+    {id:'tally',label:'表で日程調整',ic:'calendar'},
     {id:'branches',label:'支部',ic:'building'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
@@ -1923,6 +1928,7 @@ function go(tab,saveHistory=true){
   if(tab==='users'&&isAdminLike()){loadDirectoryStatus();} // 名簿状況を非同期取得
   if(tab==='interviews')loadFreeslots(); // 空き時間の一覧は開いたときに取りに行く（同じ画面に並ぶので毎回）
   if(tab==='booking')loadBookingPages();
+  if(tab==='tally')loadTallyBoards();
   document.querySelectorAll('#sbNav .sb-item, #sbAct .sb-item[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   if(saveHistory)history.pushState({tab},'',location.href);
   window.scrollTo(0,0);
@@ -1936,7 +1942,7 @@ window.addEventListener('popstate',e=>{
 /* 画面ごとの差し色。ホームはエメラルド（アプリの基本の色）にして、
    そこから離れるほど別の色にする。ライトのときだけ見た目に出る */
 const TAB_ACC={home:'a1',my:'a3',interviews:'a3',requests:'a4',
-  avset:'a2',branches:'a4',users:'a3',booking:'a2'};
+  avset:'a2',branches:'a4',users:'a3',booking:'a2',tally:'a1'};
 /* ホーム以外の画面の右上に置く「ホームへ戻る」。
    スマホでは左メニューが隠れていて、行った先から戻れなくなるため */
 function homeBackBtn(){
@@ -1952,6 +1958,7 @@ function viewFor(t){
   if(t==='interviews')return viewStaffInterviews();
   if(t==='requests')return viewRequests();
   if(t==='booking')return viewBooking();
+  if(t==='tally')return viewTally();
   if(t==='avset')return viewAvailSet();
   if(t==='branches')return viewBranches();
   if(t==='users')return viewUsers();
@@ -2085,6 +2092,7 @@ function viewHome(){
       hex("go('interviews')",'list','面談一覧・時間','面談・日程調整・空き時間の回答',pend+unread,sentUnconfirmed>0),
       hex('openRequestForm()','calendar-check','候補日を送る','候補日を出して都合を聞く',0,false,'attend'),
       hex('openFreeslotForm()','clock','空き時間を聞く','URLで空いている時間を集める',0,false,'free'),
+      hex("go('tally')",'calendar','表で日程調整','みんなの空き時間を表で集計'),
       hex("go('avset')",'alarm','受けられる時間','受けられない時間を外す'),
     );
     /* インターン生に渡す面談申請リンク。控えめな帯だと見落とされたので（2026-10-09 の指示）、
@@ -2097,6 +2105,7 @@ function viewHome(){
   }
   // admin
   return hi+dueNotice+hexgrid([
+    hex("go('tally')",'calendar','表で日程調整','みんなの空き時間を表で集計'),
     hex("go('branches')",'building','支部管理','支部の追加・編集'),
     hex("go('users')",'users','ユーザー管理','全支部の権限を管理'),
     hex('openSharedCalendarSettings()','calendar','全体予定表',SHARED_CAL.configured?esc(SHARED_CAL.name||'設定済み'):'スタッフ全員に見せる予定'),
@@ -5336,6 +5345,47 @@ async function cancelBookingIv(id){
    ここでは、届いた回答のかぶりを表と上位リストで見せる。
    面談の確定はしない。空いている時間を知るためだけの入口
    ========================================================= */
+/* =========================================================
+   表で日程調整（既存の面談・予約とは別の、自由な表）
+   ========================================================= */
+let TLYLIST=null,TLYERR='',TLYEDIT=null,TLYDETAIL=null,TLYFILTER=null;
+async function tlyJSON(path,opts){const r=await api(path,opts),data=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(data.error||'通信に失敗しました');e.status=r.status;e.code=data.code;throw e;}return data;}
+async function loadTallyBoards(){TLYERR='';try{TLYLIST=(await tlyJSON('/api/tally-boards')).boards;}catch(e){TLYERR=e.message;}if(currentTab==='tally')renderQuiet();}
+function viewTally(){
+ const head=`<h1 class="page">表で日程調整</h1><p class="page-sub">日付・時間・授業のコマなど、みんなの都合を表に集めます。共有URLから誰でも回答できます。</p><div class="tly-actions"><button class="btn pri" onclick="openTallyEditor()">${ic('plus')}表を作成</button><button class="btn ghost" onclick="loadTallyBoards()">更新</button></div>`;
+ if(TLYERR)return head+`<div class="tly-status">${esc(TLYERR)}<br><button class="btn" onclick="loadTallyBoards()">再試行</button></div>`;
+ if(TLYLIST===null)return head+'<div class="empty">読み込んでいます…</div>';
+ if(!TLYLIST.length)return head+'<div class="empty"><p>まだ表がありません。<br>「表を作成」から始めてください。</p></div>';
+ return head+`<div class="tly-card">${TLYLIST.map(b=>`<div class="tly-list-row"><div><h3>${esc(b.config.title)}</h3><p class="tly-muted">${b.count}人回答 ・ ${b.active?'受付中':'受付停止'} ・ ${esc(b.created_at.slice(0,10))}</p></div><button class="btn" onclick="openTallyDetail('${b.id}')">集計・管理</button></div>`).join('')}</div>`;
+}
+function tlyId(prefix){return prefix+crypto.randomUUID().replaceAll('-','');}
+function tlyToday(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+async function openTallyEditor(id=null){
+ try{const b=id?(await tlyJSON('/api/tally-boards/'+id)).board:null;
+  TLYEDIT=b?{id:b.id,config:structuredClone(b.config),active:b.active,revision:b.revision}:{id:null,config:TallyModel.makeTemplate({kind:'calendar',startDate:tlyToday(),days:7,start:'09:00',end:'17:00',step:60},tlyId).config,active:true,revision:0};
+  TLYEDIT.settings={kind:TLYEDIT.config.template,startDate:tlyToday(),days:7,start:'09:00',end:'17:00',step:60,periods:5,lunch:false,weekend:false};tlyDrawEditor();
+ }catch(e){toast(e.message);}
+}
+function tlySet(key,value){TLYEDIT.config[key]=value;}
+function tlySetting(key,value){TLYEDIT.settings[key]=value;}
+function tlyTemplateSettings(){const st=TLYEDIT.settings;
+ const input=(key,label,type='number')=>`<label class="tly-field">${label}<input type="${type}" value="${esc(String(st[key]))}" onchange="tlySetting('${key}',${type==='number'?'Number(this.value)':'this.value'})"></label>`;
+ return `<div class="tly-template-settings"><label class="tly-field">テンプレート<select onchange="tlySetting('kind',this.value);tlyDrawEditor()">${[['calendar','日付 × 時間'],['timetable','曜日 × コマ'],['custom','自由な表']].map(([v,label])=>`<option value="${v}" ${st.kind===v?'selected':''}>${label}</option>`).join('')}</select></label>${st.kind==='calendar'?`<div class="tly-form-row">${input('startDate','開始日','date')}${input('days','日数（1〜31）')}${input('start','開始時刻','time')}${input('end','終了時刻','time')}</div><label class="tly-field">間隔<select onchange="tlySetting('step',Number(this.value))"><option value="60" ${st.step===60?'selected':''}>1時間</option><option value="30" ${st.step===30?'selected':''}>30分</option></select></label>`:st.kind==='timetable'?`${input('periods','コマ数（1〜10）')}<label class="tly-check"><input type="checkbox" ${st.lunch?'checked':''} onchange="tlySetting('lunch',this.checked)">昼休みを入れる</label><label class="tly-check"><input type="checkbox" ${st.weekend?'checked':''} onchange="tlySetting('weekend',this.checked)">土日を入れる</label>`:'<p class="tly-muted">縦・横の項目を自由に編集できます。</p>'}<button class="btn" onclick="tlyApplyTemplate()">テンプレートを表に適用</button><p class="tly-muted">保存前だけ使えます。下の行・列をこの設定で作り直します。</p></div>`;
+}
+function tlyApplyTemplate(){const result=TallyModel.makeTemplate(TLYEDIT.settings,tlyId);if(!result.ok)return tlyEditorError(result.error);const {title,description}=TLYEDIT.config;TLYEDIT.config={...result.config,title,description};tlyDrawEditor();}
+function tlyAxisHTML(axis,title){const items=TLYEDIT.config[axis];return `<div><h3>${title}</h3>${items.map((a,i)=>`<div class="tly-axis ${a.active?'':'tly-hidden'}"><input aria-label="${title}${i+1}の名前" maxlength="40" value="${esc(a.label)}" oninput="TLYEDIT.config.${axis}[${i}].label=this.value;tlyPreview()"><button class="btn ghost" aria-label="${title}${i+1}を上へ" onclick="tlyMove('${axis}',${i},-1)" ${i===0?'disabled':''}>↑</button><button class="btn ghost" aria-label="${title}${i+1}を下へ" onclick="tlyMove('${axis}',${i},1)" ${i===items.length-1?'disabled':''}>↓</button><button class="btn ghost" onclick="tlyHide('${axis}',${i})">${a.active?'非表示':'戻す'}</button></div>`).join('')}<button class="btn" onclick="tlyAdd('${axis}')">${title}を追加</button></div>`;}
+function tlyMove(axis,index,step){const list=TLYEDIT.config[axis],to=index+step;if(to<0||to>=list.length)return;[list[index],list[to]]=[list[to],list[index]];tlyDrawEditor();}
+function tlyHide(axis,index){TLYEDIT.config[axis][index].active=!TLYEDIT.config[axis][index].active;tlyDrawEditor();}
+function tlyAdd(axis){const list=TLYEDIT.config[axis],max=axis==='rows'?48:31;if(list.length>=max)return tlyEditorError('非表示の項目も含めて'+max+'件までです。');list.push({id:tlyId(axis==='rows'?'r_':'c_'),label:axis==='rows'?'新しい行':'新しい列',active:true});tlyDrawEditor();}
+function tlyDrawEditor(){refreshSheet(()=>openSheet(`<div id="tly-staff-editor"><h3>${TLYEDIT.id?'表を編集':'表を作成'}</h3><label class="tly-field">件名<input id="tly-title" maxlength="100" value="${esc(TLYEDIT.config.title)}" oninput="tlySet('title',this.value)"></label><label class="tly-field">説明<textarea id="tly-description" rows="3" maxlength="2000" oninput="tlySet('description',this.value)">${esc(TLYEDIT.config.description)}</textarea></label>${TLYEDIT.id?'<p class="tly-muted">行・列は非表示にしても回答を保持します。名前変更や並べ替えで回答はずれません。</p>':tlyTemplateSettings()}<div class="tly-axes">${tlyAxisHTML('rows','行')}${tlyAxisHTML('columns','列')}</div><h3>プレビュー</h3><div id="tly-preview" class="tly-preview"></div><div id="tly-editor-error" class="tly-status" role="status"></div><div class="tly-actions"><button class="btn pri" id="tly-save" onclick="saveTallyBoard()">${TLYEDIT.id?'変更を保存':'作成してURLを発行'}</button><button class="btn ghost" onclick="closeSheet()">閉じる</button></div></div>`));tlyPreview();}
+function tlyPreview(){const target=document.getElementById('tly-preview');if(target)TallyUI.renderSummary(target,TLYEDIT.config,[]);}
+function tlyEditorError(message,stale=false){const target=document.getElementById('tly-editor-error');if(!target)return;target.textContent=message;if(stale){const b=document.createElement('button');b.className='btn';b.textContent='入力を破棄して最新の表を読み込む';b.onclick=()=>openTallyEditor(TLYEDIT.id);target.append(document.createElement('br'),b);}}
+async function saveTallyBoard(){const state=TLYEDIT,norm=TallyModel.normalizeBoard(state.config);if(!norm.ok)return tlyEditorError(norm.error);const b=document.getElementById('tly-save');b.disabled=true;try{const payload=state.id?{config:state.config,active:state.active,revision:state.revision}:{config:state.config};const data=await tlyJSON('/api/tally-boards'+(state.id?'/'+state.id:''),{method:state.id?'PUT':'POST',body:JSON.stringify(payload)});loadTallyBoards();if(document.getElementById('tly-staff-editor')&&TLYEDIT===state)openTallyDetail(data.board.id);toast('表を保存しました');}catch(e){tlyEditorError(e.message,e.code==='stale_board');}finally{if(b.isConnected)b.disabled=false;}}
+async function openTallyDetail(id){try{const data=await tlyJSON('/api/tally-boards/'+id);TLYDETAIL=data;TLYFILTER=null;openSheet(`<div id="tly-staff-detail"><h3>${esc(data.board.config.title)}</h3><p class="tly-pre">${esc(data.board.config.description)}</p><div class="tly-status">${data.board.active?'回答を受付中です':'回答の受付を停止しています'}</div><a class="tly-link" href="${esc(data.board.url)}" target="_blank" rel="noreferrer">${esc(data.board.url)}</a><div class="tly-actions"><button class="btn pri" onclick="tlyCopy(TLYDETAIL.board.url)">共有URLをコピー</button><button class="btn" onclick="openTallyEditor('${id}')">表を編集</button><button class="btn" id="tly-toggle" onclick="tlyToggle()">${data.board.active?'受付を停止':'受付を再開'}</button><button class="btn ghost" onclick="openTallyDetail('${id}')">集計を更新</button></div><div id="tly-detail-summary"></div><div id="tly-cell-detail" class="tly-status"></div></div>`);TallyUI.renderSummary(document.getElementById('tly-detail-summary'),data.board.config,data.responses,{onFilter:ids=>TLYFILTER=ids,onInspect:tlyInspect});}catch(e){toast(e.message);}}
+function tlyInspect(id){const data=TLYDETAIL,result=TallyModel.tally(data.board.config,data.responses,TLYFILTER),c=result.cells[id],names=ids=>ids.map(x=>{const p=data.responses.find(p=>p.id===x),i=data.responses.indexOf(p);return p.name+' #'+(i+1);}).join('、')||'なし';document.getElementById('tly-cell-detail').textContent=TallyUI.cellLabel(data.board.config,id)+'\n○ 参加できる: '+names(c.yes)+'\n× 参加できない: '+names(c.no)+'\n未回答: '+names(c.unknown);}
+async function tlyToggle(){const b=TLYDETAIL.board,button=document.getElementById('tly-toggle');button.disabled=true;try{await tlyJSON('/api/tally-boards/'+b.id,{method:'PUT',body:JSON.stringify({config:b.config,active:!b.active,revision:b.revision})});loadTallyBoards();openTallyDetail(b.id);}catch(e){toast(e.message);button.disabled=false;}}
+async function tlyCopy(text){try{await navigator.clipboard.writeText(text);toast('URLをコピーしました');}catch(e){const a=document.querySelector('#tly-staff-detail .tly-link');if(a){const range=document.createRange();range.selectNodeContents(a);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);}toast('表示したURLを選択してコピーしてください');}}
+
 let FSLIST=[];
 let FSDETAIL=null;
 
