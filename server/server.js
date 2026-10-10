@@ -3857,6 +3857,7 @@ const PUBLIC_FILES = {
   '/style.css': 'style.css',
   '/tally-model.js': 'server/tally.js',
   '/tally-ui.js': 'tally-ui.js',
+  '/tally.html': 'tally.html',
   // 祝日の計算。index.html と apply.html の両方が読む
   '/holidays.js': 'holidays.js',
   /* アプリのアイコン。原本は icon.svg（白地・黒文字2行・エメラルドの枠）で、
@@ -3923,6 +3924,11 @@ app.get('*', (req, res) => {
     res.set('Content-Security-Policy', 'frame-ancestors *');
     return res.sendFile(path.join(PUBLIC_ROOT, 'book.html'));
   }
+  if (/^\/t\/(?:[a-f0-9]{32}|manage\/[a-f0-9]{48})\/?$/.test(p)) {
+    res.set('Referrer-Policy', 'no-referrer');
+    return res.sendFile(path.join(PUBLIC_ROOT, 'tally.html'));
+  }
+  if (p === '/tally.html') res.set('Referrer-Policy', 'no-referrer');
   const file = PUBLIC_FILES[p];
   if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');
   res.sendFile(path.join(PUBLIC_ROOT, file));

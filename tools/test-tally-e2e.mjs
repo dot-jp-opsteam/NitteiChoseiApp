@@ -45,6 +45,7 @@ async function staffTests(){
 
 const fresh=board=>({name:'山田',note:'',selected:['r1:c1'],boardRevision:board.revision,submissionKey:crypto.randomBytes(24).toString('hex'),editToken:crypto.randomBytes(24).toString('hex')});
 async function publicTests(board){
+ eq((await fetch(BASE+'/t/'+board.token)).status,200,'共有HTML');eq((await fetch(BASE+'/t/manage/'+'0'.repeat(48))).status,200,'編集HTML');
  const url='/api/tally/'+board.token,body=fresh(board),first=await api(null,'POST',url+'/responses',body);eq(first.status,200,'公開初回');
  const retry=await api(null,'POST',url+'/responses',body);eq(retry.json.responseId,first.json.responseId,'再送同じ回答');
  let data=await api(null,'GET',url);eq(data.json.responses.length,1,'二重登録なし');eq(data.headers.get('cache-control'),'no-store','キャッシュなし');
