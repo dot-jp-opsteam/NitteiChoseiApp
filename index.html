@@ -5029,7 +5029,11 @@ function bkRangesHTML(kind,key){
 }
 /* 23:59 は「その日の終わりまで」として 24:00 で持つ（時刻の入力欄は24:00を入れられないため） */
 function bkSetRange(kind,key,i,f,v){const r=bkList(kind,key)[i];if(r)r[f]=(f==='e'&&v==='23:59')?'24:00':v;}
-function bkDelRange(kind,key,i){bkList(kind,key).splice(i,1);bkRedraw();}
+function bkDelRange(kind,key,i){
+  const list=bkList(kind,key);list.splice(i,1);
+  if(kind==='o'&&BKE.c.repeat==='none'&&!list.length)delete BKE.c.overrides[key];
+  bkRedraw();
+}
 function bkAddRange(kind,key){
   const list=bkList(kind,key);
   if(!list.length){list.push({s:'09:00',e:'17:00'});bkRedraw();return;}
@@ -5048,9 +5052,83 @@ function bkApplyCopy(d){
   });
   BKCOPY=null;bkRedraw();toast('コピーしました');
 }
+/* Googleと同じ午前・午後表示。保存する値は従来どおり24時間形式。 */
+function bkTimeLabel(t){
+  if(t==='24:00')return '24:00';
+  const [h,m]=String(t).split(':').map(Number);
+  return (h<12?'午前':'午後')+(h%12||12)+':'+String(m).padStart(2,'0');
+}
+function bkSetTime(kind,key,i,f,input){
+  const r=bkList(kind,key)[i];if(!r)return;
+  const raw=input.value.trim().replace(/[０-９]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-65248)).replace(/：/g,':').replace(/\s/g,'');
+  const match=/^(午前|午後)?(\d{1,2}):(\d{2})$/.exec(raw);
+  let h=match?Number(match[2]):-1,m=match?Number(match[3]):-1;
+  const meridiem=match&&match[1];
+  if(meridiem){
+    if(h<1||h>12)h=-1;
+    else h=h%12+(meridiem==='午後'?12:0);
+  }
+  if(h<0||m<0||m>59||h>24||(h===24&&(m!==0||f!=='e'))){
+    toast('時刻を「午前9:00」または「18:00」の形式で入力してください');
+    input.value=bkTimeLabel(r[f]);return;
+  }
+  r[f]=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+  input.value=bkTimeLabel(r[f]);
+}
+function bkDateLabel(k){
+  const [y,m,d]=k.split('-').map(Number);return y+'年'+m+'月'+d+'日';
+}
+function bkDateInput(k){
+  return `<label class="bkp-gdate"><span>${bkDateLabel(k)}</span>
+    <input type="date" value="${esc(k)}" aria-label="${bkDateLabel(k)}の受付日" onclick="if(this.showPicker)this.showPicker()" onchange="bkChangeDate('${k}',this.value)"></label>`;
+}
+function bkChangeDate(k,v){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||v===k){bkRedraw();return;}
+  if(Object.prototype.hasOwnProperty.call(BKE.c.overrides,v)){toast('その日はもう追加してあります');bkRedraw();return;}
+  BKE.c.overrides[v]=BKE.c.overrides[k];delete BKE.c.overrides[k];bkRedraw();
+}
+function bkNextDate(){
+  const keys=Object.keys(BKE.c.overrides).sort();
+  const d=keys.length?new Date(keys[keys.length-1]+'T00:00:00'):new Date();
+  d.setDate(d.getDate()+1);
+  const ymd=()=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  if(BKE.c.startDate&&ymd()<BKE.c.startDate)d.setTime(new Date(BKE.c.startDate+'T00:00:00').getTime());
+  while(Object.prototype.hasOwnProperty.call(BKE.c.overrides,ymd()))d.setDate(d.getDate()+1);
+  return ymd();
+}
+function bkAddDate(v){
+  const k=v||bkNextDate();
+  if(Object.prototype.hasOwnProperty.call(BKE.c.overrides,k)){toast('その日はもう追加してあります');return;}
+  BKE.c.overrides[k]=[{s:'09:00',e:'17:00'}];bkRedraw();
+}
+function bkChangeRepeat(v){
+  BKE.c.repeat=v;
+  if(v==='none'&&!Object.keys(BKE.c.overrides).length)bkAddDate();
+  else bkRedraw();
+}
+function bkSingleDatesHTML(){
+  const c=BKE.c;
+  const rows=Object.keys(c.overrides).sort().map(k=>{
+    const list=c.overrides[k];
+    if(!list.length)return `<div class="bkp-gdaterow">${bkDateInput(k)}<span class="bkp-gclosed">予約不可</span>
+      <button type="button" class="bkp-gicon" onclick="bkAddRange('o','${k}')" aria-label="${bkDateLabel(k)}に時間帯を追加">${ic('plus')}</button>
+      <button type="button" class="bkp-gicon" onclick="bkDelOverride('${k}')" aria-label="${bkDateLabel(k)}を削除">×</button></div>`;
+    return `<div class="bkp-gdategroup">${list.map((r,i)=>`<div class="bkp-gdaterow">
+      ${i===0?bkDateInput(k):'<span class="bkp-gdatespace"></span>'}
+      <input class="bkp-gtime" type="text" list="bkTimeOptions" value="${esc(bkTimeLabel(r.s))}" aria-label="${bkDateLabel(k)}の時間帯${i+1}の開始" autocomplete="off" onfocus="this.select()" onchange="bkSetTime('o','${k}',${i},'s',this)">
+      <span class="bkp-gdash">−</span>
+      <input class="bkp-gtime" type="text" list="bkTimeOptions" value="${esc(bkTimeLabel(r.e))}" aria-label="${bkDateLabel(k)}の時間帯${i+1}の終了" autocomplete="off" onfocus="this.select()" onchange="bkSetTime('o','${k}',${i},'e',this)">
+      ${i===0?`<button type="button" class="bkp-gicon" onclick="bkAddRange('o','${k}')" aria-label="${bkDateLabel(k)}に時間帯を追加"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg></button>`:'<span></span>'}
+      <button type="button" class="bkp-gicon" onclick="bkDelRange('o','${k}',${i})" aria-label="${bkDateLabel(k)}の時間帯${i+1}を削除">×</button>
+    </div>`).join('')}</div>`;
+  }).join('');
+  const options=Array.from({length:48},(_,i)=>{const t=String(Math.floor(i/2)).padStart(2,'0')+':'+(i%2?'30':'00');return `<option value="${bkTimeLabel(t)}"></option>`;}).join('');
+  return `<div class="bkp-gdates">${rows}</div><datalist id="bkTimeOptions">${options}</datalist>
+    <button type="button" class="bkp-gadd" onclick="bkAddDate()">日付を追加</button>`;
+}
 function bkWeeklyHTML(){
   const c=BKE.c;
-  const rows=BK_DOW_ORDER.map(d=>`<div class="bkp-dayrow">
+  const rows=c.repeat==='none'?'':BK_DOW_ORDER.map(d=>`<div class="bkp-dayrow">
       <span class="bkp-dow">${BK_DOWJ[d]}</span>
       <div class="bkp-ranges">${bkRangesHTML('w',d)}</div>
       <div class="bkp-dayact">
@@ -5061,13 +5139,10 @@ function bkWeeklyHTML(){
     ${BKCOPY===d?`<div class="bkp-copyto"><span class="bkp-copylab">${BK_DOWJ[d]}曜日の時間をコピーする先：</span>
       ${BK_DOW_ORDER.filter(x=>x!==d).map(x=>`<label class="bkp-chk"><input type="checkbox" name="bkCopyTo" value="${x}">${BK_DOWJ[x]}</label>`).join('')}
       <button class="btn sm pri" onclick="bkApplyCopy(${d})">適用</button></div>`:''}`).join('');
-  return `<label class="fl" style="margin-top:0">繰り返し</label>
-    <select onchange="BKE.c.repeat=this.value;bkRedraw()">
+  return `<select class="bkp-gselect bkp-grepeat" aria-label="繰り返し" onchange="bkChangeRepeat(this.value)">
       <option value="weekly" ${c.repeat!=='none'?'selected':''}>毎週繰り返す</option>
-      <option value="none" ${c.repeat==='none'?'selected':''}>繰り返さない（特定の日だけ受け付ける）</option></select>
-    ${c.repeat==='none'
-      ?`<p class="fine">「特定の日の空き状況」で受け付ける日を追加してください。</p>`
-      :`<div class="bkp-week">${rows}</div>`}`;
+      <option value="none" ${c.repeat==='none'?'selected':''}>繰り返さない</option></select>
+    ${c.repeat==='none'?bkSingleDatesHTML():`<div class="bkp-week">${rows}</div>`}`;
 }
 function bkOverridesHTML(){
   const c=BKE.c;
@@ -5087,8 +5162,7 @@ function bkOverridesHTML(){
 function bkAddOverride(){
   const v=document.getElementById('bkOvDate').value;
   if(!v){toast('日付を選んでください');return;}
-  if(BKE.c.overrides[v]){toast('その日はもう追加してあります');return;}
-  // その曜日の受付時間を下敷きにする（Googleと同じ）。繰り返さない設定なら9〜17時
+  if(Object.prototype.hasOwnProperty.call(BKE.c.overrides,v)){toast('その日はもう追加してあります');return;}
   const dow=new Date(v+'T00:00:00').getDay();
   BKE.c.overrides[v]=BKE.c.repeat==='none'?[{s:'09:00',e:'17:00'}]:JSON.parse(JSON.stringify(BKE.c.weekly[dow]||[]));
   bkRedraw();
@@ -5129,8 +5203,17 @@ function bkEditorHTML(){
     <input id="bkTitle" class="field-underline" maxlength="80" placeholder="例）30分面談" value="${esc(c.title)}" oninput="BKE.c.title=this.value">
     <label class="fl">色</label>
     <div class="bkp-colors">${ch.colors.map(col=>`<button class="bkp-swatch ${c.color===col?'on':''}" style="background:${col}" onclick="BKE.c.color='${col}';bkRedraw()" aria-label="色 ${col}"></button>`).join('')}</div>
-    <label class="fl">予約時間</label>
-    <select onchange="BKE.c.duration=Number(this.value);bkRedraw()">${ch.durations.map(m=>`<option value="${m}" ${c.duration===m?'selected':''}>${bkDurLabel(m)}</option>`).join('')}</select>`;
+    `;
+  const availability=`<div class="bkp-gcal">
+    <section class="bkp-gsection"><span class="bkp-gsectionicon">${ic('clock')}</span><div class="bkp-gbody">
+      <h4>予約の長さ</h4><p>各予約の長さを設定してください。</p>
+      <select class="bkp-gselect bkp-gduration" aria-label="予約の長さ" onchange="BKE.c.duration=Number(this.value);bkRedraw()">${ch.durations.map(m=>`<option value="${m}" ${c.duration===m?'selected':''}>${bkDurLabel(m)}</option>`).join('')}</select>
+    </div></section>
+    <section class="bkp-gsection"><span class="bkp-gsectionicon">${ic('clock')}</span><div class="bkp-gbody">
+      <h4>空き情報</h4><p>あなたが予約に対応できる時間を設定します。</p>
+      ${bkWeeklyHTML()}
+    </div></section>
+  </div>`;
   const win=`<label class="fl" style="margin-top:0">何日先まで予約できるか</label>
     <div class="bkp-inline"><input type="number" min="1" max="${ch.maxDays||365}" value="${c.maxDays}" oninput="BKE.c.maxDays=Number(this.value)"><span>日先まで</span></div>
     <label class="fl">受け付ける期間<span class="fl-sub">空欄なら期間を区切りません</span></label>
@@ -5165,10 +5248,10 @@ function bkEditorHTML(){
   const ovN=Object.keys(c.overrides).length;
   const page=BKE.id?bkFind(BKE.id):null;
   return `<h3>${BKE.id?'予約スケジュールを編集':'予約スケジュールを作成'}</h3>
-    ${bkSec('basic','タイトル・予約時間',bkDurLabel(c.duration),basic)}
-    ${bkSec('weekly','一般的な空き状況',esc(bkWeeklySummary(c)),bkWeeklyHTML())}
+    ${bkSec('basic','タイトル・色','',basic)}
+    ${availability}
     ${bkSec('window','予約期間',`${c.maxDays}日先まで・${c.minNoticeHours}時間前まで`,win)}
-    ${bkSec('overrides','特定の日の空き状況',ovN?ovN+'日':'なし',bkOverridesHTML())}
+    ${c.repeat==='none'?'':bkSec('overrides','特定の日の空き状況',ovN?ovN+'日':'なし',bkOverridesHTML())}
     ${bkSec('booked','予約済みの予定の設定',`余白${c.bufferMin?c.bufferMin+'分':'なし'}・${c.maxPerDay?'1日'+c.maxPerDay+'件まで':'上限なし'}`,booked)}
     ${bkSec('cals','カレンダーの空き状況を確認',`${(c.calendars||[]).length}個`,bkCalendarsHTML())}
     ${bkSec('page','予約ページ',{meet:'Google Meet',place:'対面',phone:'電話',none:'場所なし'}[c.location.type],pageSec)}

@@ -85,6 +85,7 @@ node tools/test-stream.mjs     # SSE（27件）
 node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
 # 確認用ページ（tools/make-test-page.mjs）は今後作らない・走らせない（2026-10-05 の指示）
 node tools/record-demos.mjs    # demo/ の動画を撮り直す（要 Playwright と ffmpeg・約1分・8124番を使う）
+node tools/test-booking-editor.mjs # 予約編集（6件）。日付・時刻の操作と保存後の公開枠
 node tools/test-booking.mjs    # 予約スケジュールの枠の計算（31件）
 node tools/test-booking-e2e.mjs # 予約の通し（56件）。偽のGoogleを立てて8125番で起動
 node tools/test-booking-e2e.mjs --serve  # 画面確認用に立てたままにする（URLが出る）
