@@ -26,3 +26,8 @@ for(const [label,input] of [['未知マス',{name:'山田',selected:['r9:c1']}],
 test('全マス不可の回答も人数に含め最大0人にbestなし',()=>{const p={id:'p',selected:[],answered:['r1:c1','r1:c2']};const r=model.tally(cfg,[p]);assert.equal(r.total,1);assert.deepEqual(r.best,[]);assert.deepEqual(r.cells['r1:c1'].no,['p']);});
 test('同名別ID、同率best、フィルター対象なし',()=>{const people=[{id:'p1',name:'山田',selected:['r1:c1'],answered:['r1:c1','r1:c2']},{id:'p2',name:'山田',selected:['r1:c2'],answered:['r1:c1','r1:c2']}];assert.deepEqual(model.tally(cfg,people).best,['r1:c1','r1:c2']);assert.equal(model.tally(cfg,people,[]).total,0);assert.deepEqual(model.tally(cfg,people,[]).best,[]);assert.deepEqual(model.tally(cfg,people,['p2']).best,['r1:c2']);});
 test('非表示のマスは集計から外す',()=>{const x=clone(cfg);x.columns[1].active=false;assert.deepEqual(Object.keys(model.tally(x,[]).cells),['r1:c1']);});
+
+// OPStappyの新規テンプレート。保存済みの旧テンプレートは変更しない。
+test('Tappy形式は短い日付と終了時刻そのものを候補へ含める',()=>{const r=template({style:'tappy',startDate:'2026-12-31',start:'09:00',end:'11:00'});assert.deepEqual(r.config.columns.map(x=>x.label),['12/31','1/1']);assert.deepEqual(r.config.rows.map(x=>x.label),['09:00','10:00','11:00']);});
+test('Tappy時間割は英語曜日と数字のコマ、末尾に昼休み',()=>{let n=0;const r=model.makeTemplate({kind:'timetable',style:'tappy',periods:3,lunch:true,weekend:true},p=>p+(++n));assert.deepEqual(r.config.columns.map(x=>x.label),['Mon','Tue','Wed','Thu','Fri','Sat','Sun']);assert.deepEqual(r.config.rows.map(x=>x.label),['1','2','3','昼休み']);});
+test('Tappy形式でも30分・24時の上限超過を拒否して保存可能な軸だけを作る',()=>assert.equal(template({style:'tappy',start:'00:00',end:'24:00',step:30}).ok,false));

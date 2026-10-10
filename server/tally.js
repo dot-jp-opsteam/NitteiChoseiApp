@@ -22,17 +22,20 @@
   const time=s=>{if(typeof s!=='string'||!/^\d{2}:\d{2}$/.test(s))return null;const [h,m]=s.split(':').map(Number);return m<60&&h<=24&&(h<24||m===0)?h*60+m:null;};
   const fmt=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   function makeTemplate(input,idFactory){
-    const config={title:'',description:'',template:input.kind,rows:[],columns:[]};
+    const config={title:'',description:'',template:input.kind,rows:[],columns:[]},tappy=input.style==='tappy';
     const add=(axis,label)=>config[axis].push({id:idFactory(axis==='rows'?'r_':'c_'),label,active:true});
     if(input.kind==='calendar'){
       const s=time(input.start),e=time(input.end),d=new Date(input.startDate+'T00:00:00Z');
       if(typeof input.startDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)||!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==input.startDate||!Number.isInteger(input.days)||input.days<1||input.days>31||s===null||e===null||s>=e||![30,60].includes(input.step)||(e-s)%input.step!==0)return bad('日付・日数・時間を確認してください。終了まで間隔で割り切れる設定にしてください。');
-      for(let i=0;i<input.days;i++){const at=new Date(d.getTime()+i*86400000);add('columns',at.getUTCFullYear()+'/'+(at.getUTCMonth()+1)+'/'+at.getUTCDate()+'（'+'日月火水木金土'[at.getUTCDay()]+'）');}
-      for(let t=s;t<e;t+=input.step)add('rows',fmt(t)+'–'+fmt(t+input.step));
+      for(let i=0;i<input.days;i++){const at=new Date(d.getTime()+i*86400000);add('columns',tappy?(at.getUTCMonth()+1)+'/'+at.getUTCDate():at.getUTCFullYear()+'/'+(at.getUTCMonth()+1)+'/'+at.getUTCDate()+'（'+'日月火水木金土'[at.getUTCDay()]+'）');}
+      if(tappy&&(e-s)/input.step+1>48)return bad('縦の項目は48件までです。');
+      for(let t=s;t<(tappy?e+1:e);t+=input.step)add('rows',tappy?fmt(t):fmt(t)+'–'+fmt(t+input.step));
     }else if(input.kind==='timetable'){
       if(!Number.isInteger(input.periods)||input.periods<1||input.periods>10)return bad('コマ数は1〜10にしてください。');
-      for(const label of (input.weekend?['月','火','水','木','金','土','日']:['月','火','水','木','金']))add('columns',label+'曜');
-      for(let i=1;i<=input.periods;i++){add('rows',i+'限');if(input.lunch&&i===2)add('rows','昼休み');}
+      const weekdays=tappy?['Mon','Tue','Wed','Thu','Fri','Sat','Sun']:['月','火','水','木','金','土','日'];
+      for(const label of weekdays.slice(0,input.weekend?7:5))add('columns',tappy?label:label+'曜');
+      for(let i=1;i<=input.periods;i++){add('rows',tappy?String(i):i+'限');if(!tappy&&input.lunch&&i===2)add('rows','昼休み');}
+      if(tappy&&input.lunch)add('rows','昼休み');
     }else if(input.kind==='custom'){
       for(const label of ['午前','午後'])add('rows',label);for(const label of ['候補1','候補2'])add('columns',label);
     }else return bad('テンプレートを選んでください。');

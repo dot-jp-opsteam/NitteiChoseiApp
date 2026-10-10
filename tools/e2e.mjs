@@ -649,8 +649,8 @@ async function testAttendance() {
   /* スタッフの「日程調整」タブは、回答を見る「面談一覧・時間」と、作成フォームを
      直接開く「候補日を送る」「空き時間を聞く」に分けた。インターン生は受け取るだけなので「日程調整」のまま */
   /* 2026-10-05：予約スケジュールを「面談一覧・時間」の直後に足した */
-  check('スタッフの左メニューは「面談一覧・時間」「予約スケジュール」「表で日程調整」＋作成フォームを開く2つ',
-    appHtml.includes("{id:'interviews',label:'面談一覧・時間',ic:'list'},\n    {id:'booking',label:'予約スケジュール',ic:'alarm'},\n    {id:'tally',label:'表で日程調整',ic:'calendar'},\n    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},\n    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'}")
+  check('スタッフの左メニューは「面談一覧・時間」「予約スケジュール」「OPStappy」＋作成フォームを開く2つ',
+    appHtml.includes("{id:'interviews',label:'面談一覧・時間',ic:'list'},\n    {id:'booking',label:'予約スケジュール',ic:'alarm'},\n    {id:'tally',label:'OPStappy',ic:'calendar'},\n    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},\n    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'}")
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
       && appHtml.includes('<h1 class="page">日程調整</h1>')
       && !appHtml.includes('面談一覧・確定</') && !appHtml.includes("'面談一覧・確定'"), true);
