@@ -9,7 +9,7 @@ import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const {createClient}=createRequire(path.join(ROOT,'server/package.json'))('@libsql/client');
-const BASE='http://localhost:8128',TOK={a:'tly_token_a',b:'tly_token_b',admin:'tly_token_admin',branch:'tly_token_branch',intern:'tly_token_intern'};
+const BASE='http://localhost:8129',TOK={a:'tly_token_a',b:'tly_token_b',admin:'tly_token_admin',branch:'tly_token_branch',intern:'tly_token_intern'};
 const cfg={title:'相談会',description:'一般の方もどうぞ',template:'custom',rows:[{id:'r1',label:'午前',active:true}],columns:[{id:'c1',label:'月曜',active:true},{id:'c2',label:'火曜',active:true}]};
 let count=0;
 function eq(actual,want,label){assert.deepEqual(actual,want,label);count++;}
@@ -22,7 +22,7 @@ async function setupDB(dbPath){
  for(const [key,token] of Object.entries(TOK)){const role={a:'staff',b:'staff',admin:'admin',branch:'branch_admin',intern:'intern'}[key];await c.execute({sql:'INSERT INTO users(id,email,password_hash,nickname,role,branch_id,status,created_at) VALUES(?,?,?,?,?,?,?,?)',args:['u_'+key,key+'@example.test','','検査スタッフ '+key,role,'b1','active',now]});await c.execute({sql:'INSERT INTO sessions VALUES(?,?,?,?)',args:[crypto.createHash('sha256').update(token).digest('hex'),'u_'+key,now,exp]});}
  await c.execute({sql:'INSERT INTO store VALUES(1,?,?)',args:[JSON.stringify({branches:[{id:'b1',name:'東京'}],availability:{}}),now]});c.close();
 }
-function startServer(dbPath,writeLimit=0){const child=spawn(process.execPath,['server.js'],{cwd:path.join(ROOT,'server'),env:{...process.env,PORT:'8128',TURSO_DATABASE_URL:'file:'+dbPath,TURSO_AUTH_TOKEN:'',PUBLIC_BASE_URL:BASE,PUBLIC_WRITE_PER_MIN:String(writeLimit),PUBLIC_READ_PER_MIN:'0',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',TOKEN_ENCRYPTION_KEY:'',SMTP_USER:'',SMTP_PASS:'',SEED_ADMIN_EMAIL:''},stdio:['ignore','pipe','pipe']});let log='';child.stdout.on('data',d=>log+=d);child.stderr.on('data',d=>log+=d);return {child,log:()=>log};}
+function startServer(dbPath,writeLimit=0){const child=spawn(process.execPath,['server.js'],{cwd:path.join(ROOT,'server'),env:{...process.env,PORT:'8129',TURSO_DATABASE_URL:'file:'+dbPath,TURSO_AUTH_TOKEN:'',PUBLIC_BASE_URL:BASE,PUBLIC_WRITE_PER_MIN:String(writeLimit),PUBLIC_READ_PER_MIN:'0',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',TOKEN_ENCRYPTION_KEY:'',SMTP_USER:'',SMTP_PASS:'',SEED_ADMIN_EMAIL:''},stdio:['ignore','pipe','pipe']});let log='';child.stdout.on('data',d=>log+=d);child.stderr.on('data',d=>log+=d);return {child,log:()=>log};}
 async function ready(server){for(let i=0;i<80;i++){if(server.child.exitCode!==null)throw Error(server.log());try{if((await api(null,'GET','/api/db')).status===401)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error(server.log());}
 async function stop(server){await new Promise(resolve=>{if(server.child.exitCode!==null)return resolve();server.child.once('exit',resolve);server.child.kill();});}
 async function staffTests(){
@@ -74,7 +74,8 @@ async function publicTests(board){
 }
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ops-tally-')),dbPath=path.join(dir,'test.db');let server;
 try{await setupDB(dbPath);server=startServer(dbPath);await ready(server);const board=await staffTests();
- await publicTests(board);
+ if(!process.argv.includes('--serve'))await publicTests(board);
+ else {await api(null,'POST','/api/tally/'+board.token+'/responses',{...fresh(board),name:'山田'});await api(null,'POST','/api/tally/'+board.token+'/responses',{...fresh(board),name:'佐藤',selected:['r1:c2']});}
  if(process.argv.includes('--serve')){console.log('STAFF_TOKEN='+TOK.a+'\nSHARE_URL='+BASE+'/t/'+board.token+'\nDB='+dbPath);await new Promise(()=>{});}
  console.log('表で日程調整 E2E: '+count+'件成功');
 }catch(e){console.error(e);process.exitCode=1;}finally{if(server)await stop(server);}

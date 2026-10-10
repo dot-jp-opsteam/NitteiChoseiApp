@@ -3855,6 +3855,8 @@ const PUBLIC_FILES = {
   '/': 'index.html',
   '/index.html': 'index.html',
   '/style.css': 'style.css',
+  '/tally-model.js': 'server/tally.js',
+  '/tally-ui.js': 'tally-ui.js',
   // 祝日の計算。index.html と apply.html の両方が読む
   '/holidays.js': 'holidays.js',
   /* アプリのアイコン。原本は icon.svg（白地・黒文字2行・エメラルドの枠）で、
