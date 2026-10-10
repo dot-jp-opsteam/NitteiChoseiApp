@@ -38,7 +38,7 @@ function openForm(){if(saved){$('answer-card').hidden=false;return;}$('answer-ca
 function receipt(token,name,message='回答を保存しました。'){const holder=$('receipt');holder.replaceChildren();const h=document.createElement('h3');h.textContent=message;const p=document.createElement('p');p.className='tly-muted';p.textContent='本人専用の編集リンクです。必ず控えてください。このリンクを知っている人は、あなたの回答を変更できます。';const a=document.createElement('a');a.className='tly-link';a.href='/t/manage/'+token;a.textContent=location.origin+'/t/manage/'+token;const copy=document.createElement('button');copy.type='button';copy.className='btn';copy.textContent='編集リンクをコピー';copy.onclick=async()=>{try{await navigator.clipboard.writeText(a.href);status('編集リンクをコピーしました。');}catch{const range=document.createRange();range.selectNodeContents(a);getSelection().removeAllRanges();getSelection().addRange(range);status('表示したリンクを選択してコピーしてください。');}};holder.append(h,p,a,copy);if(!ownLinks.some(x=>x.token===token))ownLinks.push({token,name});store(myKey(),ownLinks);drawOwnLinks();}
 async function refresh(){if(!boardToken||refreshing)return;refreshing=true;try{const data=await api('/api/tally/'+boardToken);board=data.board;responses=data.responses;drawHeader();drawSummary();}catch(e){$('board-status').textContent=e.message;}finally{refreshing=false;}}
 async function reloadForm(staleResponse=false){try{
- let data;if(editToken){data=await api('/api/tally/manage/'+editToken);board=data.board;ownResponse=data.response;}else{data=await api('/api/tally/'+boardToken);board=data.board;responses=data.responses;}
+ let data;if(editToken){data=await api('/api/tally/manage/'+editToken);board=data.board;if(staleResponse)ownResponse=data.response;}else{data=await api('/api/tally/'+boardToken);board=data.board;responses=data.responses;}
  const old=editor.getSelected(),valid=new Set(M().activeCells(board.config));const kept=old.filter(id=>valid.has(id));
  formBoard=structuredClone(board);
  if(staleResponse){$('name').value=ownResponse.name;$('note').value=ownResponse.note;installEditor(board.config,ownResponse.selected);status('最新の回答を読み込みました。内容を確認してから編集してください。');}
@@ -57,7 +57,9 @@ async function submit(event){event.preventDefault();if(busy||saved)return;if(!pe
   status(changed?'前回送信した内容が保存されています。送信後に入力した変更は未保存です。上の編集リンクから変更してください。':'保存した回答は、本人専用リンクから変更できます。');
   $('answer-card').hidden=false;await refresh();
  }catch(e){
-  if(e.status){pending=null;draft();}
+  // 未確認の送信の再試行では、HTTPエラーでも元のキーを失わない。
+  // 最初の送信が4xxで拒否された場合だけ、未保存と確定して入力をやり直せる。
+  if(e.status&&e.status<500&&!wasPending){pending=null;draft();}
   if(e.code==='stale_board')status(e.message,[['入力を保持して最新の表を読み込む',()=>reloadForm(false)]]);
   else if(e.code==='stale_response')status(e.message+' 現在の入力はまだ保存されていません。',[['現在の入力を破棄して最新の回答を確認する',()=>reloadForm(true)]]);
   else if(pending)status('送信結果を確認できませんでした。入力と送信キーは保持しています。前回と同じ内容で確認します。',[['前回の送信結果を確認する',()=>submit(new Event('submit'))]]);

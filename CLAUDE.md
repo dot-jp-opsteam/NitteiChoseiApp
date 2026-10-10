@@ -96,6 +96,7 @@ node tools/test-booking-e2e.mjs # 予約の通し（56件）。偽のGoogleを�
 node tools/test-booking-e2e.mjs --serve  # 画面確認用に立てたままにする（URLが出る）
 node tools/test-tally.mjs      # 表のモデル（33件）。固定ID・未回答・テンプレート・集計・なぞり
 node tools/test-tally-e2e.mjs  # 表の実API。認証・再送・同時更新・上限・回数制限（8129番）
+# tools/test-tally-browser.mjs の runTallyBrowserTests(page) をPlaywrightで実行：応答喪失後429/500・表と回答の同時変更を検査
 node tools/test-tally-e2e.mjs --serve # ダミーのスタッフと共有URLで画面確認。終了後も一時DBを残す
 node tools/test-login.mjs      # Googleでログインの通し（21件）。偽のGoogleを立てて8127番で起動
 ```
