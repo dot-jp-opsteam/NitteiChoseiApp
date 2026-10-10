@@ -3290,6 +3290,8 @@ const bookingApi = require('./booking-routes')({
   insertNotification, push, mail, limitPublicRead, limitPublicWrite, removeExternalGoogleBlock,
 });
 
+const tallyApi = require('./tally-routes')({app, client, requireAuth, limitPublicRead, limitPublicWrite});
+
 /* 旧・ログインした状態からの面談申請。
    インターン生のログインを廃止したため、この入口は誰も通れなくなった。
    古い画面が残っている端末に、行き先を案内できるように残してある */
@@ -3929,6 +3931,7 @@ initDB()
   .then(() => migrateStoreToTables())
   .then(() => purgeTaskRequests())
   .then(() => bookingApi.init())
+  .then(() => tallyApi.init())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`OPS日調アプリ サーバー起動: http://localhost:${PORT}`);
