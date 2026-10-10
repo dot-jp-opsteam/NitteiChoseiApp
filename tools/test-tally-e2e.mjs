@@ -45,7 +45,7 @@ async function staffTests(){
 
 const fresh=board=>({name:'山田',note:'',selected:['r1:c1'],boardRevision:board.revision,submissionKey:crypto.randomBytes(24).toString('hex'),editToken:crypto.randomBytes(24).toString('hex')});
 async function publicTests(board){
- eq((await fetch(BASE+'/t/'+board.token)).status,200,'共有HTML');eq((await fetch(BASE+'/t/manage/'+'0'.repeat(48))).status,200,'編集HTML');
+ const html=await fetch(BASE+'/t/'+board.token);eq(html.status,200,'共有HTML');eq(html.headers.get('referrer-policy'),'no-referrer','参照元なし');eq((await fetch(BASE+'/t/manage/'+'0'.repeat(48))).status,200,'編集HTML');
  const url='/api/tally/'+board.token,body=fresh(board),first=await api(null,'POST',url+'/responses',body);eq(first.status,200,'公開初回');
  const retry=await api(null,'POST',url+'/responses',body);eq(retry.json.responseId,first.json.responseId,'再送同じ回答');
  let data=await api(null,'GET',url);eq(data.json.responses.length,1,'二重登録なし');eq(data.headers.get('cache-control'),'no-store','キャッシュなし');
@@ -73,10 +73,25 @@ async function publicTests(board){
  const last=await Promise.all([1,2].map(()=>api(null,'POST',url+'/responses',fresh(board))));eq(last.map(r=>r.status).sort(),[200,409],'同時100人上限');eq((await api(null,'GET',url)).json.responses.length,100,'100人超えない');
  eq((await api(null,'PUT',link,{...edited,boardRevision:board.revision,responseRevision:3})).status,200,'上限でも本人編集');
 }
+
+async function preservationTests(){
+ let b=(await api(TOK.a,'POST','/api/tally-boards',{config:cfg})).json.board;
+ const body=fresh(b);eq((await api(null,'POST','/api/tally/'+b.token+'/responses',body)).status,200,'非表示保持 初回');
+ b=(await api(TOK.a,'PUT','/api/tally-boards/'+b.id,{config:{...cfg,columns:[{...cfg.columns[0],active:false},cfg.columns[1]]},active:true,revision:b.revision})).json.board;
+ eq((await api(null,'PUT','/api/tally/manage/'+body.editToken,{name:'再編集',note:'',selected:['r1:c2'],boardRevision:b.revision,responseRevision:1})).status,200,'非表示のまま本人更新');
+ b=(await api(TOK.a,'PUT','/api/tally-boards/'+b.id,{config:cfg,active:true,revision:b.revision})).json.board;
+ const restored=await api(null,'GET','/api/tally/'+b.token);eq(restored.json.responses[0].selected.sort(),['r1:c1','r1:c2'],'本人編集を挟んでも非表示マスの元回答を保持');
+ eq((await api(TOK.a,'POST','/api/tally-boards',null)).status,400,'null表入力');eq((await api(null,'POST','/api/tally/'+b.token+'/responses',null)).status,400,'null回答入力');
+}
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ops-tally-')),dbPath=path.join(dir,'test.db');let server;
 try{await setupDB(dbPath);server=startServer(dbPath);await ready(server);const board=await staffTests();
- if(!process.argv.includes('--serve'))await publicTests(board);
+ if(!process.argv.includes('--serve')){await publicTests(board);await preservationTests();}
  else {await api(null,'POST','/api/tally/'+board.token+'/responses',{...fresh(board),name:'山田'});await api(null,'POST','/api/tally/'+board.token+'/responses',{...fresh(board),name:'佐藤',selected:['r1:c2']});}
  if(process.argv.includes('--serve')){console.log('STAFF_TOKEN='+TOK.a+'\nSHARE_URL='+BASE+'/t/'+board.token+'\nDB='+dbPath);await new Promise(()=>{});}
+
+ await stop(server);server=startServer(dbPath,2);await ready(server);
+ const rl=await api(TOK.admin,'POST','/api/tally-boards',{config:cfg}),rb=rl.json.board;
+ const rurl='/api/tally/'+rb.token+'/responses';eq((await api(null,'POST',rurl,fresh(rb))).status,200,'回数制限1');eq((await api(null,'POST',rurl,fresh(rb))).status,200,'回数制限2');
+ const third=await api(null,'POST',rurl,fresh(rb));eq(third.status,429,'回数制限3');eq(Number(third.headers.get('retry-after'))>0,true,'Retry-After');eq((await api(null,'GET','/api/tally/'+rb.token)).json.responses.length,2,'制限後DB増えない');
  console.log('表で日程調整 E2E: '+count+'件成功');
 }catch(e){console.error(e);process.exitCode=1;}finally{if(server)await stop(server);}

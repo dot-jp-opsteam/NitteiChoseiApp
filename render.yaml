@@ -39,6 +39,9 @@ services:
         - attendance.html
         # 予約スケジュールの予約ページ（2026-10-05 追加。ダッシュボードへの登録も要る）
         - book.html
+        # 表で日程調整の公開ページと共通UI（ダッシュボードにも登録）
+        - tally.html
+        - tally-ui.js
         # 祝日の計算（index.html と apply.html の両方が読む）
         - holidays.js
         # プッシュ通知の受け取り役（Service Worker）

@@ -30,6 +30,8 @@ Tappy相当の日程調整機能は、作成・管理をOPSスタッフが行い
 | `server/` の他 | `slots.js` 空き枠 / `google.js` カレンダー / `stream.js` SSE / `mail.js` / `ical.js` / `auth.js` / `dblock.js` |
 | `demo/` | 左メニュー・ホームのホバーで流れる「相手の回答画面」の動画（mp4＋webm）。**手で編集せず** `node tools/record-demos.mjs` で作る |
 | `server/booking.js` / `booking-routes.js` | 予約スケジュールの枠の計算（純粋関数）と API 一式（`/api/booking-pages` `/api/book/*`） |
+| `tally.html` / `tally-ui.js` | 表で日程調整の公開回答・本人編集（`/t/*`）、共通の表入力と集計。ログイン不要・CSSは `tly-` |
+| `server/tally.js` / `tally-routes.js` | 表のテンプレート・正規化・集計（Node/ブラウザ共通）と管理・公開API。編集鍵はハッシュで保存 |
 | `tools/` | テストと道具（下記） |
 | `_specs/` | 設計書。**新機能の前にここを見る** |
 
@@ -54,6 +56,7 @@ Tappy相当の日程調整機能は、作成・管理をOPSスタッフが行い
 | **4781** | **出欠確認** | 集計・回答・確定・共有URL・ミニカレンダー |
 | 5173 | 日程調整を出す | 「日程を決める」フォーム（`openRequestForm` / `submitRequest`） |
 | 5086 | BOOT | 起動処理・自動ログイン |
+| — | 表で日程調整 | `viewTally` / `openTallyEditor` / `saveTallyBoard` / `openTallyDetail`。管理は作成者のみ |
 | — | 予約スケジュール | 一覧・編集シート（`viewBooking` / `openBookingEditor` / `bkSave`）。CSSは `bkp-` |
 
 出欠まわりでよく触る関数：
@@ -91,6 +94,9 @@ node tools/test-booking-editor.mjs # 予約編集（6件）。日付・時刻の
 node tools/test-booking.mjs    # 予約スケジュールの枠の計算（31件）
 node tools/test-booking-e2e.mjs # 予約の通し（56件）。偽のGoogleを立てて8125番で起動
 node tools/test-booking-e2e.mjs --serve  # 画面確認用に立てたままにする（URLが出る）
+node tools/test-tally.mjs      # 表のモデル（33件）。固定ID・未回答・テンプレート・集計・なぞり
+node tools/test-tally-e2e.mjs  # 表の実API。認証・再送・同時更新・上限・回数制限（8129番）
+node tools/test-tally-e2e.mjs --serve # ダミーのスタッフと共有URLで画面確認。終了後も一時DBを残す
 node tools/test-login.mjs      # Googleでログインの通し（21件）。偽のGoogleを立てて8127番で起動
 ```
 

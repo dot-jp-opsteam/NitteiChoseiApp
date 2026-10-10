@@ -55,7 +55,11 @@ module.exports=function({app,client,requireAuth,limitPublicRead,limitPublicWrite
   if(!Number.isInteger(req.body.responseRevision))fail(400,'invalid','回答の版を確認してください。');
   if(Number(r.revision)!==req.body.responseRevision)fail(409,'stale_response','別の画面で回答が変更されました。最新の回答を確認してください。');
   const norm=model.normalizeResponse(req.body,JSON.parse(b.data));if(!norm.ok)fail(400,norm.code,norm.error);
-  const {name,note,selected,answered}=norm.data;
+  const {name,note}=norm.data;
+  const active=new Set(norm.data.answered),old=JSON.parse(r.data);
+  // 現在見えているマスだけ更新し、非表示のマスの回答は再表示のために残す。
+  const selected=[...old.selected.filter(id=>!active.has(id)),...norm.data.selected];
+  const answered=[...old.answered.filter(id=>!active.has(id)),...norm.data.answered];
   const result=await tx.execute({sql:'UPDATE tally_responses SET name=?,note=?,data=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?',args:[name,note,JSON.stringify({selected,answered}),new Date().toISOString(),r.id,req.body.responseRevision]});
   if(!result.rowsAffected)fail(409,'stale_response','回答が変更されました。');
   return ack(b,await one(tx,'SELECT * FROM tally_responses WHERE id=?',[r.id]),req.params.editToken);
