@@ -2044,40 +2044,42 @@
   .bkp-ovadd .btn{flex:none;white-space:nowrap}
   /* 予約の長さ・空き情報はGoogleカレンダーの編集欄と同じ並びにする。 */
   @media(min-width:640px){.sheet:has(.bkp-gcal){max-width:640px}}
-  .bkp-gcal{max-width:560px;margin:12px 0 18px;padding:16px 20px;background:#f0f4fa;color:#1f1f1f;border-radius:8px;font-size:16px;font-weight:400}
-  .bkp-gsection{display:grid;grid-template-columns:24px minmax(0,1fr);gap:28px;padding:12px 0}
-  .bkp-gsection+.bkp-gsection .bkp-gbody{border-top:1px solid #c4c7c5;padding-top:20px}
+  .bkp-gcal{max-width:560px;margin:12px 0 18px;padding:16px 20px;background:var(--panel2);color:var(--ink);border:1px solid var(--line2);border-radius:10px;font-size:14px;font-weight:400}
+  .bkp-gsection{display:grid;grid-template-columns:24px minmax(0,1fr);gap:20px;padding:12px 0}
+  .bkp-gsection+.bkp-gsection .bkp-gbody{border-top:1px solid var(--line);padding-top:20px}
   .bkp-gsection+.bkp-gsection .bkp-gsectionicon{padding-top:28px}
-  .bkp-gsectionicon{color:#444746;padding-top:8px}
+  .bkp-gsectionicon{color:var(--brand-ink);padding-top:8px}
   .bkp-gsectionicon .ic{width:24px;height:24px}
-  .bkp-gbody h4{font-size:16px;font-weight:600;margin:0 0 2px;color:#1f1f1f}
-  .bkp-gbody p{font-size:14px;line-height:1.5;margin:0 0 10px;color:#444746}
-  .bkp-gcal input,.bkp-gcal select{background:#e8eef7;color:#1f1f1f;border:0;border-radius:4px;font-weight:400;font-size:16px;box-shadow:none}
-  .bkp-gcal input:focus,.bkp-gcal select:focus{outline:2px solid #0b57d0;outline-offset:1px}
-  .bkp-gcal .bkp-gselect{width:auto;min-height:50px;padding:0 40px 0 18px;color-scheme:light}
-  .bkp-gcal .bkp-gduration{width:126px;min-width:126px}
-  .bkp-grepeat{margin-bottom:10px;min-width:184px}
+  .bkp-gbody h4{font-size:14px;font-weight:700;margin:0 0 4px;color:var(--ink)}
+  .bkp-gbody p{font-size:13px;line-height:1.6;margin:0 0 10px;color:var(--sub)}
+  .bkp-gcal input,.bkp-gcal select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;font-weight:400;font-size:14px;box-shadow:none}
+  .bkp-gcal input:focus,.bkp-gcal select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+  .bkp-gcal .bkp-gselect{width:auto;min-height:44px;padding:0 32px 0 12px}
+  .bkp-gcal .bkp-gduration{width:120px;min-width:120px}
+  .bkp-grepeat{margin-bottom:10px;min-width:164px}
   .bkp-gdates{display:flex;flex-direction:column;gap:10px}
   .bkp-gdategroup{display:flex;flex-direction:column;gap:10px}
   .bkp-gdaterow{display:grid;grid-template-columns:minmax(140px,1.7fr) minmax(80px,1fr) 8px minmax(80px,1fr) 28px 28px;align-items:center;gap:8px}
-  .bkp-gdate{display:flex;align-items:center;position:relative;min-width:0;height:50px;padding:0 8px;border-radius:4px;background:#e8eef7;white-space:nowrap;cursor:pointer;font-variant-numeric:tabular-nums}
-  .bkp-gdate input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;color-scheme:light}
-  .bkp-gdate:focus-within{outline:2px solid #0b57d0;outline-offset:1px}
-  .bkp-gcal .bkp-gtime{width:100%;min-width:0;height:50px;padding:0 8px;font-variant-numeric:tabular-nums}
+  .bkp-gdate{display:flex;align-items:center;position:relative;min-width:0;height:44px;padding:0 8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);white-space:nowrap;cursor:pointer;font-variant-numeric:tabular-nums}
+  .bkp-gdate input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+  .bkp-gdate:focus-within{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+  .bkp-gcal .bkp-gtime{width:100%;min-width:0;height:44px;padding:0 8px;font-variant-numeric:tabular-nums}
   .bkp-gtime::-webkit-calendar-picker-indicator{display:none!important}
-  .bkp-gdash{font-size:14px;color:#444746;text-align:center}
-  .bkp-gicon{display:grid;place-items:center;width:28px;height:36px;padding:0;border:0;border-radius:50%;background:transparent;color:#444746;font-size:28px;line-height:1;cursor:pointer}
-  .bkp-gicon:hover{background:#dce3ee}
-  .bkp-gicon:focus-visible,.bkp-gadd:focus-visible{outline:2px solid #0b57d0;outline-offset:2px}
-  .bkp-gadd{margin-top:14px;min-height:50px;padding:0 30px;border:1px solid #747775;border-radius:28px;background:transparent;color:#0b57d0;font:inherit;cursor:pointer}
-  .bkp-gadd:hover{background:#e2eaf7}
-  .bkp-gclosed{grid-column:2/5;font-size:14px;color:#444746}
-  :root:not([data-theme="light"]) .bkp-gcal input[type="time"]{color-scheme:light}
-  .bkp-gcal .bkp-dow,.bkp-gcal .bkp-chk{color:#1f1f1f}
-  .bkp-gcal .bkp-off,.bkp-gcal .bkp-copylab{color:#444746}
-  .bkp-gcal .bkp-dayrow{border-color:#c4c7c5}
-  .bkp-gcal .bkp-dayact .btn,.bkp-gcal .bkp-range .btn{color:#444746;background:transparent;border-color:transparent}
-  .bkp-gcal .bkp-copyto{background:#e8eef7}
+  .bkp-gdash{font-size:14px;color:var(--sub);text-align:center}
+  .bkp-gicon{display:grid;place-items:center;width:28px;height:36px;padding:0;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--sub);font-size:24px;line-height:1;cursor:pointer}
+  .bkp-gicon:hover{background:var(--brand-soft);color:var(--brand-ink);border-color:var(--hint-line)}
+  .bkp-gicon:last-child:hover{background:var(--bad-soft);color:var(--bad);border-color:var(--bad-line)}
+  .bkp-gicon:focus-visible,.bkp-gadd:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+  .bkp-gadd{margin-top:14px;min-height:44px;padding:11px 16px;border:1px solid var(--hint-line);border-radius:10px;background:var(--brand-soft);color:var(--brand-ink);font:inherit;font-weight:600;cursor:pointer}
+  .bkp-gadd:hover{border-color:var(--brand);background:var(--panel)}
+  .bkp-gclosed{grid-column:2/5;font-size:14px;color:var(--sub)}
+  :root:not([data-theme="light"]) .bkp-gcal input[type="date"],
+  :root:not([data-theme="light"]) .bkp-gcal select{color-scheme:dark}
+  .bkp-gcal .bkp-dow,.bkp-gcal .bkp-chk{color:var(--ink)}
+  .bkp-gcal .bkp-off,.bkp-gcal .bkp-copylab{color:var(--sub)}
+  .bkp-gcal .bkp-dayrow{border-color:var(--line)}
+  .bkp-gcal .bkp-dayact .btn,.bkp-gcal .bkp-range .btn{color:var(--sub);background:transparent;border-color:transparent}
+  .bkp-gcal .bkp-copyto{background:var(--panel)}
   @media(max-width:560px){
     .bkp-gcal{padding:12px}
     .bkp-gsection{grid-template-columns:20px minmax(0,1fr);gap:12px}
@@ -2085,7 +2087,7 @@
     .bkp-gdaterow{grid-template-columns:minmax(0,1fr) 8px minmax(0,1fr) 28px 28px;gap:6px}
     .bkp-gdate{grid-column:1/-1;width:max-content;min-width:156px}
     .bkp-gdatespace{display:none}
-    .bkp-gcal .bkp-gtime{font-size:15px;padding:0 6px}
+    .bkp-gcal .bkp-gtime{font-size:14px;padding:0 6px}
     .bkp-gclosed{grid-column:1/4}
   }
   @media(max-width:380px){
