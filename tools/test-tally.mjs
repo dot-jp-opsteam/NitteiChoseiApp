@@ -31,3 +31,7 @@ test('非表示のマスは集計から外す',()=>{const x=clone(cfg);x.columns
 test('Tappy形式は短い日付と終了時刻そのものを候補へ含める',()=>{const r=template({style:'tappy',startDate:'2026-12-31',start:'09:00',end:'11:00'});assert.deepEqual(r.config.columns.map(x=>x.label),['12/31','1/1']);assert.deepEqual(r.config.rows.map(x=>x.label),['09:00','10:00','11:00']);});
 test('Tappy時間割は英語曜日と数字のコマ、末尾に昼休み',()=>{let n=0;const r=model.makeTemplate({kind:'timetable',style:'tappy',periods:3,lunch:true,weekend:true},p=>p+(++n));assert.deepEqual(r.config.columns.map(x=>x.label),['Mon','Tue','Wed','Thu','Fri','Sat','Sun']);assert.deepEqual(r.config.rows.map(x=>x.label),['1','2','3','昼休み']);});
 test('Tappy形式でも30分・24時の上限超過を拒否して保存可能な軸だけを作る',()=>assert.equal(template({style:'tappy',start:'00:00',end:'24:00',step:30}).ok,false));
+// カレンダー形式の横を曜日にする（2026-10-15）。並びは月曜始まり、区切り30分は終了時刻まで行に含める
+test('Tappyカレンダーの横を選んだ曜日で月曜始まりに並べる',()=>{const r=template({style:'tappy',columnMode:'weekday',weekdays:[0,5,1,3],startDate:undefined,days:undefined,start:'09:00',end:'10:00',step:30});assert.ok(r.ok);assert.deepEqual(r.config.columns.map(x=>x.label),['月','水','金','日']);assert.deepEqual(r.config.rows.map(x=>x.label),['09:00','09:30','10:00']);});
+test('曜日モードは曜日が空・範囲外なら拒否する',()=>{for(const weekdays of [[],[7],['1'],undefined])assert.equal(template({style:'tappy',columnMode:'weekday',weekdays}).ok,false);});
+test('30分刻みの開始時刻を受け付け、1時間区切りで割り切れなければ拒否する',()=>{assert.ok(template({style:'tappy',start:'09:30',end:'11:30',step:60}).ok);assert.equal(template({style:'tappy',start:'09:30',end:'11:00',step:60}).ok,false);});

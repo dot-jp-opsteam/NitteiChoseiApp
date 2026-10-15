@@ -25,9 +25,17 @@
     const config={title:'',description:'',template:input.kind,rows:[],columns:[]},tappy=input.style==='tappy';
     const add=(axis,label)=>config[axis].push({id:idFactory(axis==='rows'?'r_':'c_'),label,active:true});
     if(input.kind==='calendar'){
-      const s=time(input.start),e=time(input.end),d=new Date(input.startDate+'T00:00:00Z');
-      if(typeof input.startDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)||!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==input.startDate||!Number.isInteger(input.days)||input.days<1||input.days>31||s===null||e===null||s>=e||![30,60].includes(input.step)||(e-s)%input.step!==0)return bad('日付・日数・時間を確認してください。終了まで間隔で割り切れる設定にしてください。');
-      for(let i=0;i<input.days;i++){const at=new Date(d.getTime()+i*86400000);add('columns',tappy?(at.getUTCMonth()+1)+'/'+at.getUTCDate():at.getUTCFullYear()+'/'+(at.getUTCMonth()+1)+'/'+at.getUTCDate()+'（'+'日月火水木金土'[at.getUTCDay()]+'）');}
+      const s=time(input.start),e=time(input.end);
+      if(s===null||e===null||s>=e||![30,60].includes(input.step)||(e-s)%input.step!==0)return bad('開始・終了時刻と区切りを確認してください。終了まで区切りで割り切れる設定にしてください。');
+      // 横は曜日（weekdays: 0=日〜6=土、月曜始まりで並べる）か、開始日からの日付。指定が無ければ日付
+      if(input.columnMode==='weekday'){
+        if(!Array.isArray(input.weekdays)||!input.weekdays.length||input.weekdays.some(w=>!Number.isInteger(w)||w<0||w>6))return bad('曜日を1つ以上選んでください。');
+        for(const w of [1,2,3,4,5,6,0])if(input.weekdays.includes(w))add('columns','日月火水木金土'[w]+(tappy?'':'曜'));
+      }else{
+        const d=new Date(input.startDate+'T00:00:00Z');
+        if(typeof input.startDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)||!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==input.startDate||!Number.isInteger(input.days)||input.days<1||input.days>31)return bad('開始日と日数を確認してください。');
+        for(let i=0;i<input.days;i++){const at=new Date(d.getTime()+i*86400000);add('columns',tappy?(at.getUTCMonth()+1)+'/'+at.getUTCDate():at.getUTCFullYear()+'/'+(at.getUTCMonth()+1)+'/'+at.getUTCDate()+'（'+'日月火水木金土'[at.getUTCDay()]+'）');}
+      }
       if(tappy&&(e-s)/input.step+1>48)return bad('縦の項目は48件までです。');
       for(let t=s;t<(tappy?e+1:e);t+=input.step)add('rows',tappy?fmt(t):fmt(t)+'–'+fmt(t+input.step));
     }else if(input.kind==='timetable'){
