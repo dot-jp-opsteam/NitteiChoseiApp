@@ -27,3 +27,7 @@ _reference/
 _archive/
 # Codexの隔離作業領域。リポジトリ本体へ混入させない
 .worktrees/
+# 作業ツールの途中経過（画面写真・テストログ）。本番画面の写真も入るので上げない
+.superpowers/
+# 他社サイト（Tappy）の画面写真。_reference/ と同じ理由で手元にだけ置く
+_specs/OPStappy-reference/
