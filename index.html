@@ -5380,7 +5380,24 @@ function tlyTemplateSettings(){const st=TLYEDIT.settings;
  return st.kind==='calendar'?`<div class="tly-field">横に並べるもの<div class="tly-modes">${mode('weekday','曜日')}${mode('date','日付')}</div></div>${columns}<div class="tly-form-row tly-time-row">${select('start','開始時刻',times)}${select('end','終了時刻',times)}${select('step','区切り',[[30,'30分'],[60,'1時間']])}</div>`:st.kind==='timetable'?`<label class="tly-check"><input type="checkbox" ${st.lunch?'checked':''} onchange="tlySetting('lunch',this.checked)">昼休みあり</label><label class="tly-check"><input type="checkbox" ${st.weekend?'checked':''} onchange="tlySetting('weekend',this.checked)">土日あり</label>${select('periods','時間数',range(10))}`:'<p class="tly-muted">縦・横の項目を入力するか、上の形式を選んでください。</p>';
 }
 function tlyWeekday(w,on){const list=TLYEDIT.settings.weekdays.filter(x=>x!==w);if(on)list.push(w);TLYEDIT.settings.weekdays=list;tlyApplyTemplate();}
-function tlyApplyTemplate(){const result=TallyModel.makeTemplate(TLYEDIT.settings,tlyId);if(!result.ok){TLYEDIT.templateError=result.error;return tlyEditorError(result.error);}const {title,description}=TLYEDIT.config;TLYEDIT.config={...result.config,title,description};TLYEDIT.templateError='';tlyDrawEditor();}
+/* 生成候補の履歴と手動削除のIDを持ち、設定を往復しても編集を保持する。
+   改名・並べ替え項目と手動追加は設定範囲外でも残し、未編集の自動候補だけを入れ替える。 */
+function tlyMergeTemplateAxis(current,previous,next,removed,moved){
+ const oldByLabel=new Map(previous.map(a=>[a.label,a])),oldById=new Map(previous.map(a=>[a.id,a]));
+ const candidates=next.map(a=>({...a,id:oldByLabel.get(a.label)?.id||a.id})),labels=new Set(candidates.map(a=>a.label));
+ const merged=current.filter(a=>{const old=oldById.get(a.id);return !old||a.label!==old.label||moved.has(a.id)||labels.has(old.label);});
+ for(let i=0;i<candidates.length;i++){const a=candidates[i];if(removed.has(a.id)||merged.some(x=>x.id===a.id))continue;const following=new Set(candidates.slice(i+1).map(x=>x.id)),at=merged.findIndex(x=>following.has(x.id));merged.splice(at<0?merged.length:at,0,{...a});}
+ const baseline=[...previous,...candidates.filter(a=>!oldByLabel.has(a.label))];
+ return {items:merged,baseline};
+}
+function tlyApplyTemplate(){
+ const state=TLYEDIT,result=TallyModel.makeTemplate(state.settings,tlyId);
+ if(!result.ok){state.templateError=result.error;tlyDrawEditor();return tlyEditorError(result.error);}
+ const {title,description}=state.config,next=result.config,previous=state.templateBase;
+ if(previous&&previous.template===next.template){for(const axis of ['rows','columns']){const merged=tlyMergeTemplateAxis(state.config[axis],previous[axis],next[axis],state.templateRemoved[axis],state.templateMoved[axis]);next[axis]=merged.items;state.templateBase[axis]=merged.baseline;}}
+ else{state.templateBase=structuredClone(next);state.templateRemoved={rows:new Set(),columns:new Set()};state.templateMoved={rows:new Set(),columns:new Set()};}
+ state.config={...next,title,description};state.templateError='';tlyDrawEditor();
+}
 /* 縦・横の項目。各行に ↑↓×、末尾に「＋追加」。
    × は未保存の項目なら消し、保存済みの項目なら回答との対応を残すため非表示にする（「戻す」で復帰） */
 const TLY_AXIS_MAX={rows:48,columns:31};
@@ -5389,9 +5406,9 @@ function tlyAxisHTML(axis,title){const list=TLYEDIT.config[axis],full=list.lengt
 function tlyDrawAxes(){const box=document.getElementById('tly-axes');if(!box)return tlyDrawEditor();box.innerHTML=tlyAxisHTML('rows','縦')+tlyAxisHTML('columns','横');tlyPreview();}
 function tlyAxisValue(axis,index,value){TLYEDIT.config[axis][index].label=value;tlyPreview();}
 function tlyAddAxis(axis){const list=TLYEDIT.config[axis];if(list.length>=TLY_AXIS_MAX[axis])return;list.push(tlyBlank(axis));tlyDrawAxes();document.getElementById('tly-axis-'+axis)?.lastElementChild?.querySelector('input')?.focus();}
-function tlyRemoveAxis(axis,index){const list=TLYEDIT.config[axis],a=list[index];if(TLYEDIT.original?.[axis].some(x=>x.id===a.id))a.active=false;else list.splice(index,1);tlyDrawAxes();}
+function tlyRemoveAxis(axis,index){const list=TLYEDIT.config[axis],a=list[index];if(TLYEDIT.original?.[axis].some(x=>x.id===a.id))a.active=false;else{if(TLYEDIT.templateBase?.[axis].some(x=>x.id===a.id))TLYEDIT.templateRemoved[axis].add(a.id);list.splice(index,1);}tlyDrawAxes();}
 function tlyRestoreAxis(axis,index){TLYEDIT.config[axis][index].active=true;tlyDrawAxes();}
-function tlyMove(axis,index,step){const list=TLYEDIT.config[axis],to=index+step;if(to<0||to>=list.length)return;[list[index],list[to]]=[list[to],list[index]];tlyDrawAxes();document.querySelectorAll('#tly-axis-'+axis+' .tly-axis')[to]?.querySelector(step<0?'[title="上へ"]':'[title="下へ"]')?.focus();}
+function tlyMove(axis,index,step){const list=TLYEDIT.config[axis],to=index+step;if(to<0||to>=list.length)return;if(TLYEDIT.templateMoved){TLYEDIT.templateMoved[axis].add(list[index].id);TLYEDIT.templateMoved[axis].add(list[to].id);}[list[index],list[to]]=[list[to],list[index]];tlyDrawAxes();document.querySelectorAll('#tly-axis-'+axis+' .tly-axis')[to]?.querySelector(step<0?'[title="上へ"]':'[title="下へ"]')?.focus();}
 function tlyDrawEditor(){refreshSheet(()=>openSheet(`<div id="tly-staff-editor" class="tly-surface tly-create"><div class="tly-hero"><div class="tly-wordmark">OPStappy</div><h1>${TLYEDIT.id?'Edit OPStappy!':'Create new OPStappy!'}</h1><div class="tly-meta"><div><label class="tly-field">イベント名<input id="tly-title" maxlength="100" value="${esc(TLYEDIT.config.title)}" oninput="tlySet('title',this.value)"></label><p class="tly-owner">作成・管理：OPSスタッフ</p></div><label class="tly-field">イベントの詳細<textarea id="tly-description" rows="3" maxlength="2000" oninput="tlySet('description',this.value)">${esc(TLYEDIT.config.description)}</textarea></label></div>${TLYEDIT.id?'':`<div class="tly-formats"><button class="btn ${TLYEDIT.settings.kind==='timetable'?'tly-format-active':''}" aria-pressed="${TLYEDIT.settings.kind==='timetable'}" onclick="tlySelectTemplate('timetable')">時間割形式</button><button class="btn ${TLYEDIT.settings.kind==='calendar'?'tly-format-active':''}" aria-pressed="${TLYEDIT.settings.kind==='calendar'}" onclick="tlySelectTemplate('calendar')">カレンダー形式</button></div>`}</div><div class="tly-create-body"><section class="tly-settings"><h2>表の設定</h2>${TLYEDIT.id?'<p class="tly-muted">保存済みの回答を保持して編集します。×で消した保存済みの項目は非表示になり、「戻す」で元に戻せます。</p>':tlyTemplateSettings()}<div class="tly-axes" id="tly-axes">${tlyAxisHTML('rows','縦')}${tlyAxisHTML('columns','横')}</div></section><section class="tly-preview"><h2>プレビュー</h2><div id="tly-preview"></div></section></div><div class="tly-create-footer"><div id="tly-editor-error" class="tly-status" role="status"></div><button class="btn pri" id="tly-save" onclick="saveTallyBoard()">${TLYEDIT.id?'変更を保存':'この内容で作成する'}</button><button class="btn ghost" onclick="closeSheet()">閉じる</button></div></div>`));tlyPreview();}
 function tlyCleanConfig(state){const clean=axis=>state.config[axis].flatMap(a=>{if(a.label.trim())return [a];const old=state.original?.[axis].find(x=>x.id===a.id);return old?[{...old,active:false}]:[];});return {...state.config,rows:clean('rows'),columns:clean('columns')};}
 function tlyPreview(){const target=document.getElementById('tly-preview');if(target)TallyUI.renderPreview(target,tlyCleanConfig(TLYEDIT));}
