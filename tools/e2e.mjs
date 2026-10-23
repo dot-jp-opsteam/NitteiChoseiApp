@@ -1140,6 +1140,16 @@ async function testMyCalendar() {
      他人のIDを添えても自分のぶんしか返らない（＝他人の予定は取り出せない） */
   const spoof = await api(TOKENS.staff3, 'GET', '/api/my-calendar/events' + range + '&staffId=u_e2e_staff');
   check('他人のIDを付けても他人の予定は取れない', spoof.json.connected, false);
+  const candidateDay = new Date(Date.now() + 86400000 + 9 * 3600000).toISOString().slice(0, 10);
+  const candidateRange = `?from=${candidateDay}&to=${candidateDay}&duration=30`;
+  const candidates = await api(TOKENS.staff, 'GET', '/api/availability/candidates' + candidateRange);
+  check('スタッフは自分の空き候補を取得できる', candidates.status, 200);
+  check('空き候補は日時だけを返す', Array.isArray(candidates.json.slots) && candidates.json.slots.every(slot => slot.start && slot.end && !slot.title && !slot.note), true);
+  check('候補の呼び出しにはログインが必要', (await fetch(BASE + '/api/availability/candidates' + candidateRange)).status, 401);
+  check('長すぎる候補期間は拒否する', (await api(TOKENS.staff, 'GET', `/api/availability/candidates?from=${candidateDay}&to=2099-12-31`)).status, 400);
+  for (const filename of ['candidate-ui.js', 'candidate-ui.css', 'availability-ui.js']) {
+    check(`${filename}を配信する`, (await fetch(BASE + '/' + filename)).status, 200);
+  }
 }
 
 /* ---------- iCalendar の文字列仕様 ---------- */

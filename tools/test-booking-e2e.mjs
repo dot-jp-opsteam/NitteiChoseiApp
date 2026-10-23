@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInterviewChangeTests } from './test-interview-changes.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const req = createRequire(path.join(ROOT, 'server', 'package.json'));
@@ -44,6 +45,8 @@ function check(label, actual, expected) {
 const G = {
   busy: [],          // [{start, end}] freeBusy が返す埋まり
   failFreeBusy: false,
+  failUpdate: false,
+  failDeleteId: null,
   events: new Map(), // id -> event
   calls: [],         // { method, path, query, body }
   delay: 0,
@@ -61,7 +64,8 @@ const gServer = http.createServer(async (rq, rs) => {
   if (u.pathname === '/cal/freeBusy') {
     if (G.failFreeBusy) return json(500, { error: 'boom' });
     const calendars = {};
-    (parsed.items || []).forEach((it) => { calendars[it.id] = { busy: G.busy }; });
+    const eventBusy = [...G.events.values()].filter(event => event.start?.dateTime && event.end?.dateTime).map(event => ({start:event.start.dateTime,end:event.end.dateTime}));
+    (parsed.items || []).forEach((it) => { calendars[it.id] = { busy: [...G.busy, ...eventBusy] }; });
     return json(200, { calendars });
   }
   if (u.pathname === '/cal/users/me/calendarList') {
@@ -77,12 +81,19 @@ const gServer = http.createServer(async (rq, rs) => {
       return json(200, ev);
     }
     if (rq.method === 'PATCH') {
+      if (G.failUpdate) return json(500, { error: 'update failed' });
       const ev = { ...(G.events.get(id) || {}), ...parsed, id };
       G.events.set(id, ev);
       return json(200, ev);
     }
-    if (rq.method === 'DELETE') { G.events.delete(id); rs.writeHead(204); return rs.end(); }
-    if (rq.method === 'GET') return json(200, { items: [] });
+    if (rq.method === 'DELETE') {
+      if (id === G.failDeleteId) return json(500, { error: 'delete failed' });
+      G.events.delete(id); rs.writeHead(204); return rs.end();
+    }
+    if (rq.method === 'GET') {
+      if (id) return json(200, G.events.get(id) || { id, status: 'cancelled' });
+      return json(200, { items: [...G.events.values(), ...G.busy.map((busy, index) => ({ id: 'busy_' + index, start: { dateTime: busy.start }, end: { dateTime: busy.end } }))] });
+    }
   }
   if (u.pathname.endsWith('/watch')) return json(200, { id: 'ch', resourceId: 'res', expiration: String(Date.now() + 86400000) });
   json(404, { error: 'not found' });
@@ -215,6 +226,30 @@ async function run(dbPath) {
   const fb = G.calls.filter((c) => c.path === '/cal/freeBusy').pop();
   check('freeBusy は選んだカレンダーで聞く', fb.body.items, [{ id: 'primary' }]);
 
+  const adjustable = { id: 'adjustable_event', summary: '本人だけの予定名', start: { dateTime: atT(11).toISOString() }, end: { dateTime: atT(11, 30).toISOString() } };
+  G.events.set(adjustable.id, adjustable);
+  const invite = await api(TOK.a, 'GET', '/api/staff/intern-invite-url');
+  const inviteToken = invite.json.url.split('/i/')[1];
+  const freeRequest = await api(TOK.a, 'POST', '/api/freeslots', { title: '共通の空き時間判定' });
+  async function adjustedStates() {
+    const bookingSlots = await api(null, 'GET', `/api/book/${token}/slots?from=${TDAY}&days=2`);
+    const candidateSlots = await api(TOK.a, 'GET', `/api/availability/candidates?from=${TDAY}&to=${TDAY}&duration=30`);
+    const applySlots = await api(null, 'GET', `/api/apply/${inviteToken}/slots?staff_id=u_bk_a&week=0`);
+    const freeSlots = await api(null, 'GET', `/api/free/${freeRequest.json.token}/slots?week=0`);
+    const gridOpen = response => response.json.grid?.flat().find(slot => slot.iso === atT(11).toISOString())?.state === 'ok';
+    return [bookingSlots.json.days?.[TDAY]?.includes('11:00'), candidateSlots.json.slots?.some(slot => slot.time === '11:00'), gridOpen(applySlots), gridOpen(freeSlots)];
+  }
+  check('Google予定は予約・候補・申請・空き時間収集の全てで不可', await adjustedStates(), [false, false, false, false]);
+  const ignoredEvent = await api(TOK.a, 'PATCH', `/api/availability/google-events/${adjustable.id}`, { calendar_id: 'primary', start: atT(11).toISOString(), end: atT(11, 30).toISOString(), ignored: true });
+  check('本人のGoogle予定を日調だけで面談OKにする', ignoredEvent.status, 200);
+  check('調整を予約・候補・申請・空き時間収集の全てへ反映', await adjustedStates(), [true, true, true, true]);
+  check('面談OKへの調整でGoogleの元予定は変わらない', G.events.get(adjustable.id), adjustable);
+  const publicAdjusted = await api(null, 'GET', `/api/book/${token}/slots?from=${TDAY}&days=1`);
+  check('公開の空き枠にはGoogle予定名を含まない', JSON.stringify(publicAdjusted.json).includes(adjustable.summary), false);
+  await api(TOK.a, 'PATCH', `/api/availability/google-events/${adjustable.id}`, { calendar_id: 'primary', reset: true });
+  check('元に戻すと全ての空き時間で再び不可', await adjustedStates(), [false, false, false, false]);
+  G.events.delete(adjustable.id);
+
   const guest = { last_name: '山田', first_name: '太郎', email: 'Taro@Example.com', answers: { univ: '東京大学' } };
   check('必須の質問に答えていなければ弾く',
     (await api(null, 'POST', `/api/book/${token}`, { ...guest, answers: {}, start: atT(9).toISOString() })).status, 400);
@@ -265,9 +300,12 @@ async function run(dbPath) {
   check('予約の内容が読める', [mg.status, mg.json.booking.name, mg.json.changeable, mg.json.reschedulable], [200, '山田 太郎', true, true]);
   check('知らない合言葉は404', (await api(null, 'GET', `/api/book/manage/${'a'.repeat(48)}`)).status, 404);
   // 自分の今の予約（9:00）は、Googleの予定にも入っているが、選び直しでは空きとして扱う
-  G.busy = [{ start: atT(9).toISOString(), end: atT(9, 30).toISOString() }];
+  G.busy = [];
   const msl = await api(null, 'GET', `/api/book/manage/${mt}/slots?from=${TDAY}&days=1`);
   check('選び直しでは自分の今の枠も選べる', msl.json.days[TDAY].includes('09:00'), true);
+  G.busy = [{ start: atT(9).toISOString(), end: atT(9, 30).toISOString() }];
+  check('自分の枠に重なる別のGoogle予定は除外しない', (await api(null, 'PATCH', `/api/book/manage/${mt}`, { start: atT(9).toISOString() })).status, 409);
+  G.busy = [];
   G.calls.length = 0;
   const ch = await api(null, 'PATCH', `/api/book/manage/${mt}`, { start: atT(10, 30).toISOString() });
   check('日時を変えられる', [ch.status, ch.json.booking.label.endsWith('10:30〜11:00')], [200, true]);
@@ -290,10 +328,18 @@ async function run(dbPath) {
   const bk2 = await api(null, 'POST', `/api/book/${token}`, { ...guest, first_name: '次郎', start: atT(9, 30).toISOString() });
   const iv2 = (await api(TOK.a, 'GET', '/api/db')).json.interviews.find((iv) => iv.intern_name === '山田 次郎');
   check('ほかのスタッフはキャンセルできない', (await api(TOK.b, 'POST', `/api/interviews/${iv2.id}/cancel-booking`)).status, 403);
+  check('ほかのスタッフは日時変更できない', (await api(TOK.b, 'POST', `/api/interviews/${iv2.id}/reschedule-booking`, { start: atT(10).toISOString() })).status, 403);
+  const staffChange = await api(TOK.a, 'POST', `/api/interviews/${iv2.id}/reschedule-booking`, { start: atT(10).toISOString() });
+  check('スタッフが予約日時を変更できる', [staffChange.status, staffChange.json.interview?.confirmed_datetime], [200, atT(10).toISOString()]);
+  check('スタッフ変更で名前と質問回答と元の希望を保持', [staffChange.json.interview?.intern_name, staffChange.json.interview?.answers, staffChange.json.interview?.choices], [iv2.intern_name, iv2.answers, iv2.choices]);
+  check('予約変更で過去日時は拒否', (await api(TOK.a, 'POST', `/api/interviews/${iv2.id}/reschedule-booking`, { start: '2000-01-01T10:00:00+09:00' })).status, 400);
   const sc = await api(TOK.a, 'POST', `/api/interviews/${iv2.id}/cancel-booking`);
   check('担当はキャンセルできる', [bk2.status, sc.status, sc.json.interview.status, sc.json.interview.cancelled_by], [200, 200, 'failed', 'staff']);
 
   console.log('\n─────── 受け付けない状態 ───────');
+  const interviewDatabase = createClient({ url: 'file:' + dbPath });
+  await runInterviewChangeTests({ api, check, database: interviewDatabase, token: TOK.a, otherToken: TOK.b, at: (hour, minute = 0) => atT(hour, minute).toISOString(), googleState: G, reserve: start => api(null, 'POST', `/api/book/${token}`, {...guest,first_name:'競合確認',start}), publicSlots: () => api(null, 'GET', `/api/book/${token}/slots?from=${TDAY}&days=1`), publicDay: TDAY });
+  interviewDatabase.close();
   G.failFreeBusy = true;
   const tomorrow2 = new Date(TOMORROW); tomorrow2.setDate(tomorrow2.getDate() + 1);
   check('Googleに聞けなければ枠を出さない',

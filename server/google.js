@@ -291,6 +291,8 @@ async function listEventsInRange(accessToken, calendarId, timeMin, timeMax) {
   const params = new URLSearchParams({
     singleEvents: 'true', orderBy: 'startTime', maxResults: '2500', timeMin, timeMax,
   });
+  const items = [];
+  do {
   const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -303,7 +305,11 @@ async function listEventsInRange(accessToken, calendarId, timeMin, timeMax) {
     throw err;
   }
   const data = await res.json();
-  return (data.items || [])
+  items.push(...(data.items || []));
+  if (data.nextPageToken) params.set('pageToken', data.nextPageToken);
+  else params.delete('pageToken');
+  } while (params.has('pageToken'));
+  return items
     .filter((e) => e.status !== 'cancelled')
     .map((e) => ({
       id: e.id,
@@ -313,8 +319,23 @@ async function listEventsInRange(accessToken, calendarId, timeMin, timeMax) {
       end: e.end?.dateTime || e.end?.date || null,
       allDay: !e.start?.dateTime,
       location: e.location || '',
+      transparency: e.transparency || 'opaque',
+      declined: (e.attendees || []).some(attendee => attendee.self && attendee.responseStatus === 'declined'),
     }))
     .filter((e) => e.start);
+}
+
+async function getEvent(accessToken, calendarId, eventId) {
+  const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+    headers: {Authorization: `Bearer ${accessToken}`},
+  });
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) throw new Error(`events.get failed: ${res.status}`);
+  const event = await res.json();
+  if (!event.id || !event.start || !event.end) return null;
+  return {id:event.id,title:event.summary || '(タイトルなし)',start:event.start.dateTime || event.start.date,end:event.end.dateTime || event.end.date,
+    allDay:!event.start.dateTime,status:event.status,transparency:event.transparency || 'opaque',
+    declined:(event.attendees || []).some(attendee => attendee.self && attendee.responseStatus === 'declined')};
 }
 
 /* sendUpdates：'all' にすると、ゲストへGoogleが招待・変更・取消のメールを送る。
@@ -391,6 +412,6 @@ module.exports = {
   getLoginAuthUrl, exchangeLoginCode, parseIdToken, loginRedirectUri,
   signPayload, verifyPayload,
   startWatch, stopWatch, listChangedEvents,
-  listCalendars, listEventsInRange,
+  listCalendars, listEventsInRange, getEvent,
   createEvent, updateEvent, deleteEvent, freeBusy,
 };

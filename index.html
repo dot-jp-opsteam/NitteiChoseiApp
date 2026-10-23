@@ -53,6 +53,8 @@
      登録しておかないと、ここを直したpushはビルドされず本番に届かない
      （2026-08-06に登録し直し済み。控えは render.yaml のコメント） -->
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="candidate-ui.css">
+<script src="candidate-ui.js" defer></script>
 </head>
 <body>
 
@@ -132,6 +134,7 @@
 <script src="/holidays.js"></script>
 <script src="/tally-model.js"></script>
 <script src="/tally-ui.js"></script>
+<script src="/availability-ui.js"></script>
 
 <script>
 /* =========================================================
@@ -1055,7 +1058,7 @@ function blkColumnPlan(cells,blocks,newId){
 function genEditGrid(staffId,weekOffset){
   const blocks=((DB.availability[staffId]||{}).blocks||[]);
   const taken=(DB.interviews||[]).filter(i=>i.staff_id===staffId&&i.status==='fixed'&&i.confirmed_datetime)
-    .map(i=>new Date(i.confirmed_datetime).getTime());
+    .map(i=>{const start=new Date(i.confirmed_datetime).getTime();return [start,start+(Number(i.duration_min)||30)*60000];});
   const now=Date.now();
   /* 週の始まりは月曜ではなく「今日」。月曜固定だと、週の後半に開いたときに
      もう過ぎた日が何列も先頭に並んで、いま指定できる日が右端に寄ってしまう。
@@ -1068,7 +1071,7 @@ function genEditGrid(staffId,weekOffset){
      曜日ごとの「面談を受けられる時間」の外側や休みの曜日のマスも押せる。
      マス1つは「その時刻から30分」で、9:00〜23:30 から始まる30個。時刻は線の横に出す */
   const times=[];for(let t=BLK_GRID_START;t+30<=BLK_GRID_END;t+=30)times.push(t);
-  const google=blocks.filter(b=>b.kind==='external-google');
+  const google=avGoogleGridBlocks(staffId,days,blocks.filter(b=>b.kind==='external-google'));
   const own=blkIntervals(blocks);
   const grid=days.map(day=>{
     return times.map(t=>{
@@ -1076,7 +1079,7 @@ function genEditGrid(staffId,weekOffset){
       const st=dt.getTime(),en=st+30*60000;
       const iso=dt.toISOString();
       if(st<now)return{state:'off',iso};
-      const takenHit=taken.some(x=>Math.abs(x-st)<30*60000-1);
+      const takenHit=taken.some(([start,end])=>st<end&&en>start);
       if(takenHit)return{state:'locked',iso,label:'面談'};
       /* Googleカレンダーから取り込んだ予定（external-google）は
          向こうが元なので、ここでは外せない「予定あり」のままにする */
@@ -1921,7 +1924,7 @@ async function copyInviteLink(url){
 }
 function go(tab,saveHistory=true){
   currentTab=tab;
-  if(tab==='avset'){AVSET=null;initBlkForm();}  // 不可時間エディタは毎回リセット
+  if(tab==='avset'){AVSET=null;AVGOOGLE.key='';initBlkForm();}  // 不可時間エディタは毎回リセット
   if(tab==='home')calSel=null;      // ホーム表示時にカレンダーの日選択をリセット
   // ほかの画面へ移るときは全画面を解除する。解除し忘れるとサイドバーが隠れたままになる
   if(tab!=='home'&&calFull){calFull=false;document.documentElement.setAttribute('data-calfull','0');}
@@ -2501,6 +2504,7 @@ function viewGuide(){
       ${steps([
         '左メニューの「候補日を送る」を押し、件名と候補の日時を入れます。',
         '送る相手を選ぶか、共有用のURLを作って送ります。',
+        '日時の入力を減らすには「自分の空き時間から候補を選ぶ」で期間と必要な空き時間を指定し、送りたい候補を選びます。送信前に時刻を変更・削除できます。',
         '相手は候補ごとに ○ △ × で答えます。集計は「面談一覧・時間」に並ぶ日程調整の行を開くと見られます。',
         'いちばん都合の良い候補を選んで日程を確定します。'])}
       ${video('attend')}
@@ -2533,7 +2537,7 @@ function viewGuide(){
         'ホームの「受けられる時間」を開き、受けられないマスを押して × にします。もう一度押すと戻ります。',
         '長い時間や特定の日は、下の「日時でまとめて追加」からも入れられます。',
         '× にした時間は、学生の申請画面や空き時間のページで選べなくなります。'])}
-      <p class="fine">Googleカレンダーと連携していれば、予定がある時間は自動で選べなくなります（表では「－」）。</p>
+      <p class="fine">Googleの予定は名前付きの帯で表示します。帯を押すと、日調アプリだけの面談不可時間を変更できます。上下のつまみで伸縮するか、日時を入力してください。「この予定中も面談OK」なら不可指定を外せます。Googleの元予定は変わりません。</p>
       ${open("sbGo('avset')",'受けられない時間を開く')}`},
     {id:'calendar',icon:'calendar',title:'カレンダー連携',body:`
       ${steps([
@@ -2545,6 +2549,8 @@ function viewGuide(){
       <dl class="gd-faq">
         <dt>開くのに時間がかかる</dt>
         <dd>しばらく誰も使っていないと、最初の表示に20〜60秒ほどかかります（無料のサーバーが休んでいるため）。待てば開きます。</dd>
+        <dt>確定した面談の日時を変更したい</dt>
+        <dd>「面談一覧・時間」で面談を開き、<b>日時を変更</b>を押します。相手と相談済みの日時を入力して確定してください。通常の面談は表示された連絡文をLINEなどで送り、予約スケジュールの予約ではGoogleの変更通知も利用します。取り消す場合は「面談をキャンセル」または「予約をキャンセル」を使います。</dd>
         <dt>日程調整をまちがえて消した</dt>
         <dd>左メニューの「削除リスト」から元に戻せます。7日たつと完全に消えます。</dd>
         <dt>面談申請リンクが外に漏れた</dt>
@@ -2831,6 +2837,7 @@ function openInterview(id){
     actions=`<div class="hint">${ic('check')}<span>予約スケジュールから予約されました</span></div>
       ${ivBookingHTML(iv)}
       <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventId?'Googleカレンダーに登録し、予約した人を招待しました':'Googleカレンダーには登録されていません'}</span></div>
+      <button class="btn pri block" style="margin-top:12px" onclick="openInterviewReschedule('${id}')">日時を変更</button>
       <div class="danger-zone">
         <button class="btn bad block sm" onclick="cancelBookingIv('${id}')">予約をキャンセル</button>
         <p class="fine" style="margin-top:6px">予約した人にGoogleカレンダーから取り消しのお知らせが届きます。</p>
@@ -2840,12 +2847,15 @@ function openInterview(id){
       ${ivBookingHTML(iv)}`;
   }else if(iv.status==='fixed'){
     actions=`<div class="hint">${ic('check')}<span>確定日時：<b>${fmtDT(iv.confirmed_datetime)}</b></span></div>
+      ${iv.cancellation_pending?'<div class="hint mock">Googleカレンダーのキャンセルが途中です。面談枠は確保したままです。「面談をキャンセル」をもう一度押して完了してください。</div>':''}
       <div class="hint${iv.googleEventId?'':' mock'}" style="margin-top:8px">${ic('calendar-check')}<span>${iv.googleEventId?'担当者のGoogleカレンダーに登録済み':'Googleカレンダー未連携のため登録されていません（スタッフ設定から連携できます）'}</span></div>
       ${guest?`<div class="hint mock" style="margin-top:12px">${ic('alert')}<span>この申請にはメールアドレスがありません。
         確定した日時は、LINEなどで直接お伝えください。</span></div>`
-      :`<button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','面談リンクの送付','お疲れ様です。面談のリンクをお送りします。')">面談リンクを送る</button>`}`;
+      :`<button class="btn block" style="margin-top:12px" onclick="openSendMail('${iv.intern_id}','面談リンクの送付','お疲れ様です。面談のリンクをお送りします。')">面談リンクを送る</button>`}
+      <button class="btn pri block" style="margin-top:12px" ${iv.cancellation_pending?'disabled':''} onclick="openInterviewReschedule('${id}')">日時を変更</button>
+      <div class="danger-zone"><button class="btn bad block sm" onclick="cancelOrdinaryInterview('${id}')">面談をキャンセル</button></div>`;
   }else{
-    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>この面談は不成立として処理されています。</span></div>
+    actions=`<div class="hint mock" style="background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)">${ic('alert')}<span>${iv.cancelled?'この面談はキャンセルされました。':'この面談は不成立として処理されています。'}</span></div>
       <button class="btn block" style="margin-top:12px" onclick="reopenInterview('${id}')">申請中に戻す</button>`;
   }
   openSheet(`
@@ -2927,6 +2937,54 @@ async function reopenInterview(id){
   if(!next)return;
   applyInterview(next);
   closeSheet();toast('申請中に戻しました');go('interviews');
+}
+function openInterviewReschedule(id){
+  const interview=(DB.interviews||[]).find(item=>item.id===id);
+  if(!interview||interview.status!=='fixed')return;
+  const date=new Date(interview.confirmed_datetime);
+  const local=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}T${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+  openSheet(`<h3>面談日時を変更</h3><p class="page-sub">${esc(ivInternName(interview))}さんと相談済みの日時を指定してください。相手の再承認は不要です。</p>
+    <p>現在：${fmtDT(interview.confirmed_datetime)}</p><label class="fl" for="iv-change-datetime">変更後の日時</label>
+    <input type="datetime-local" id="iv-change-datetime" value="${esc(local)}"><div class="field-err" id="iv-change-error"></div>
+    ${ivIsBooking(interview)?'<p class="fine">予約スケジュールの受付時間から指定してください。Googleカレンダーから変更をお知らせします。</p>':'<p class="fine">変更後、LINEなどで相手に日時を連絡してください。</p>'}
+    <button class="btn pri block" style="margin-top:16px" onclick="submitInterviewReschedule('${id}',this)">変更内容を確認</button>`);
+}
+async function submitInterviewReschedule(id,button){
+  const interview=(DB.interviews||[]).find(item=>item.id===id);
+  const date=new Date(document.getElementById('iv-change-datetime').value);
+  const error=document.getElementById('iv-change-error');
+  if(!Number.isFinite(date.getTime())||date.getTime()<=Date.now()){error.textContent='未来の日時を入力してください';error.classList.add('show');return;}
+  if(date.getTime()===new Date(interview.confirmed_datetime).getTime()){error.textContent='変更後の日時を指定してください';error.classList.add('show');return;}
+  button.disabled=true;
+  if(!await confirmSheet('面談日時を変更',`${ivInternName(interview)}さんの面談を ${fmtDT(interview.confirmed_datetime)} から ${fmtDT(date.toISOString())} に変更します。`,'変更する')){openInterviewReschedule(id);return;}
+  try{
+    const booking=ivIsBooking(interview);
+    const result=await fsJSON('/api/interviews/'+encodeURIComponent(id)+(booking?'/reschedule-booking':''),{method:booking?'POST':'PATCH',body:JSON.stringify(booking?{start:date.toISOString()}:{status:'fixed',confirmed_datetime:date.toISOString()})});
+    applyInterview(result.interview);renderQuiet();
+    interviewChangeComplete(interview,result.interview,false);
+  }catch(failure){toast(failure.message);openInterviewReschedule(id);}
+}
+async function cancelOrdinaryInterview(id){
+  const interview=(DB.interviews||[]).find(item=>item.id===id);
+  if(!interview||!await confirmSheet('面談をキャンセル',`${ivInternName(interview)}さんの面談（${fmtDT(interview.confirmed_datetime)}）をキャンセルします。Googleに登録した面談予定を取り消し、申請情報は履歴に残します。`,'キャンセルする'))return;
+  try{
+    const result=await fsJSON('/api/interviews/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({status:'failed',cancelled:true})});
+    applyInterview(result.interview);renderQuiet();interviewChangeComplete(interview,result.interview,true);
+  }catch(failure){toast(failure.message);openInterview(id);}
+}
+function interviewChangeComplete(before,after,cancelled){
+  const message=`${ivInternName(before)}さん\n面談${cancelled?'キャンセル':'日時変更'}のお知らせです。\n${cancelled?'日時':'変更前'}：${fmtDT(before.confirmed_datetime)}\n${cancelled?'上記の面談はキャンセルとなりました。':'変更後：'+fmtDT(after.confirmed_datetime)+'\nよろしくお願いいたします。'}`;
+  openSheet(`<h3>${cancelled?'面談をキャンセルしました':'面談日時を変更しました'}</h3>
+    <p>${fmtDT(before.confirmed_datetime)} → ${cancelled?'キャンセル':fmtDT(after.confirmed_datetime)}</p>
+    <p class="page-sub">${ivIsBooking(before)?'Googleカレンダーへ通知を依頼しました。必要に応じて直接ご連絡ください。':'相手にLINEなどで連絡してください。'}</p>
+    <label class="fl" for="iv-change-message">連絡文</label><textarea id="iv-change-message" readonly rows="6">${esc(message)}</textarea>
+    <button class="btn pri block" style="margin-top:12px" onclick="copyInterviewChangeMessage()">連絡文をコピー</button>
+    <button class="btn block" style="margin-top:8px" onclick="closeSheet()">閉じる</button>`);
+}
+async function copyInterviewChangeMessage(){
+  const field=document.getElementById('iv-change-message');
+  try{await navigator.clipboard.writeText(field.value);toast('連絡文をコピーしました');}
+  catch(error){field.focus();field.select();toast('連絡文を選択しました。コピーしてお使いください');}
 }
 
 /* =========================================================
@@ -3739,9 +3797,9 @@ function viewAvailSet(){
     /* 時刻はマスの境目の線の横に出す（Googleカレンダーと同じ）。いちばん下の線の 24:00 だけの行 */
     +`<tr class="bt-endrow"><th class="bt-t bt-line"><span class="bt-tl">${pad(Math.floor(BLK_GRID_END/60))}:${pad(BLK_GRID_END%60)}</span></th><td class="bt-endc" colspan="${days.length}"></td></tr>`;
 
-  const table=times.length?`<div class="booktable-wrap">
+  const table=times.length?`<div class="booktable-wrap"><div class="avg-stage">
     <table class="booktable"><thead><tr><th class="bt-corner"></th>${headCells}</tr></thead>
-    <tbody>${bodyRows}</tbody></table></div>`
+    <tbody>${bodyRows}</tbody></table></div></div>`
     :`<div class="empty" style="padding:28px"><div class="ei">${ic('calendar-check')}</div><p>受けられる時間がまだ決まっていません。<br>先に「面談を受けられる時間」で曜日を有効にしてください。</p>
       <button class="btn pri" onclick="openAvailabilitySettings()">面談を受けられる時間を決める</button></div>`;
   const blockedCnt=egrid.reduce((n,col)=>n+col.filter(c=>c.state==='block').length,0);
@@ -3787,11 +3845,13 @@ function viewAvailSet(){
         <button class="pg" onclick="avSetWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
       <label class="fl"><span>時間をタップ（受けられない <span id="avBlockedCnt">${blockedCnt}</span>枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）。マス1つは30分。21:00〜22:00 を外すなら 21:00 と 21:30 の2マスに×</span></label>
+      ${avGoogleQueue(days)}
       ${table}
       <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
         <span><span class="legend-dot" style="background:var(--panel);border:1px solid var(--line)"></span>受けられる（タップで外す）</span>
         <span><span class="legend-dot" style="background:var(--bad)"></span>受けられない（タップで戻す）</span>
-        <span><span class="legend-dot" style="background:var(--disabled)"></span>予定・面談あり</span>
+        <span><span class="legend-dot" style="background:var(--disabled)"></span>確定面談（面談一覧で変更）</span>
+        <span><span class="legend-dot" style="background:var(--brand)"></span>Google予定（帯をタップして調整）</span>
       </div>
     </div></div>
 
@@ -5333,7 +5393,7 @@ async function cancelBookingIv(id){
     'キャンセルする'))return;
   try{
     const r=await fsJSON('/api/interviews/'+encodeURIComponent(id)+'/cancel-booking',{method:'POST'});
-    applyInterview(r.interview);closeSheet();renderQuiet();toast('予約をキャンセルしました');
+    applyInterview(r.interview);renderQuiet();interviewChangeComplete(iv,r.interview,true);
   }catch(e){toast(e.message);}
 }
 
@@ -6463,7 +6523,7 @@ function renderRequestForm(keepText){
     <textarea id="reqBody" class="textarea-compact" rows="3" placeholder="集まる場所や持ち物など、伝えたいことがあれば書いてください。">${esc(prevBody)}</textarea>`;
   /* 候補日のカレンダーは背が高い。
      「あて先＋件名・本文」を左、「締切＋候補日」を右にすると、左右の高さが釣り合う */
-  const cols=[colTarget+colText, reqDueFieldHTML()+reqOptionsHTML()];
+  const cols=[colTarget+colText, reqDueFieldHTML()+reqCandidateHTML()+reqOptionsHTML()];
 
   const html=`<h3>候補日を送る</h3>
     <div class="sheet2">

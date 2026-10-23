@@ -17,6 +17,7 @@
 'use strict';
 const crypto = require('node:crypto');
 const booking = require('./booking');
+const { withStaffLock } = require('./stafflock');
 
 const STAFF_ROLES = ['staff', 'branch_admin', 'admin'];
 const MAX_PAGES_PER_STAFF = 30;
@@ -40,7 +41,7 @@ module.exports = function registerBookingRoutes(d) {
   const {
     app, client, requireAuth, google, GOOGLE_ENABLED,
     getTokenRow, accessTokenFor, saveInterview, getInterview, rowToInterview,
-    insertNotification, push, mail, limitPublicRead, limitPublicWrite, removeExternalGoogleBlock,
+    insertNotification, push, mail, limitPublicRead, limitPublicWrite, removeExternalGoogleBlock, availabilityApi, readDB,
   } = d;
 
   async function init() {
@@ -109,29 +110,21 @@ module.exports = function registerBookingRoutes(d) {
      スタッフごとに1本の列に並べて、1件ずつ通す。
      store 全体の列（withDBLock）を使わないのは、Googleとの通信を待つ間
      ほかの保存まで止めてしまうため */
-  const staffChains = new Map();
-  function withStaffLock(staffId, fn) {
-    const prev = staffChains.get(staffId) || Promise.resolve();
-    const run = prev.then(fn, fn);
-    const tail = run.then(() => undefined, () => undefined);
-    staffChains.set(staffId, tail);
-    tail.then(() => { if (staffChains.get(staffId) === tail) staffChains.delete(staffId); });
-    return run;
-  }
 
   /* ---------- Googleの「埋まっている時間」 ----------
      公開ページは誰でも開けるので、開くたびにGoogleへ聞くと上限に届きかねない。
      同じ問い合わせは60秒だけ使い回す。予約を確定する直前だけは必ず取り直す */
   const busyCache = new Map();
-  async function googleBusy(staffId, calendars, fromMs, toMs, fresh) {
-    const key = `${staffId}|${calendars.join(',')}|${fromMs}|${toMs}`;
+  async function googleBusy(staffId, calendars, fromMs, toMs, fresh, excludeGoogleEventId) {
+    const key = `${staffId}|${calendars.join(',')}|${fromMs}|${toMs}|${availabilityApi?.revision || 0}|${excludeGoogleEventId || ''}`;
     const hit = busyCache.get(key);
     if (!fresh && hit && Date.now() - hit.at < BUSY_CACHE_MS) return hit.busy;
     const tokenRow = await getTokenRow(staffId);
     if (!tokenRow) throw Object.assign(new Error('Google未連携'), { closed: true });
     const accessToken = await accessTokenFor(tokenRow);
-    const busy = await google.freeBusy(accessToken, calendars,
-      new Date(fromMs).toISOString(), new Date(toMs).toISOString());
+    const busy = availabilityApi
+      ? await availabilityApi.busyFor(staffId,calendars,fromMs,toMs,{excludeGoogleEventId})
+      : await google.freeBusy(accessToken, calendars, new Date(fromMs).toISOString(), new Date(toMs).toISOString());
     if (busyCache.size > 500) busyCache.clear();
     busyCache.set(key, { at: Date.now(), busy });
     return busy;
@@ -156,11 +149,12 @@ module.exports = function registerBookingRoutes(d) {
   /* 枠の計算に要る材料をそろえる */
   async function slotInputs(page, fromMs, toMs, { fresh = false, exclude = null } = {}) {
     const ivs = (await fixedInterviewsOf(page.staff_id)).filter((iv) => !exclude || iv.id !== exclude.id);
-    let gBusy = await googleBusy(page.staff_id, page.config.calendars, fromMs, toMs + 24 * 60 * 60 * 1000, fresh);
-    if (exclude) gBusy = subtract(gBusy, ivInterval(exclude));
+    let gBusy = await googleBusy(page.staff_id, page.config.calendars, fromMs, toMs + 24 * 60 * 60 * 1000, fresh, exclude?.googleEventId);
+    if (exclude && !availabilityApi) gBusy = subtract(gBusy, ivInterval(exclude));
+    const manual = availabilityApi && readDB ? availabilityApi.manualBusy((await readDB())?.availability?.[page.staff_id]) : [];
     return {
       now: Date.now(),
-      busy: [...gBusy, ...ivs.map(ivInterval)],
+      busy: [...gBusy, ...manual, ...ivs.map(ivInterval)],
       pageBookings: ivs.filter((iv) => iv.booking_page_id === page.id).map(ivInterval),
     };
   }
@@ -321,6 +315,7 @@ module.exports = function registerBookingRoutes(d) {
   async function cancelBooking(iv, by) {
     if (iv.googleEventId && by !== 'google') {
       const tokenRow = await getTokenRow(iv.staff_id);
+      if (!tokenRow) throw new Error('Google連携を確認してください');
       if (tokenRow) {
         const accessToken = await accessTokenFor(tokenRow);
         await google.deleteEvent(accessToken, tokenRow.calendar_id, iv.googleEventId, { sendUpdates: 'all' });
@@ -473,11 +468,53 @@ module.exports = function registerBookingRoutes(d) {
         return res.status(403).json({ error: '自分が担当する予約だけキャンセルできます' });
       }
       if (iv.status !== 'fixed') return res.status(409).json({ error: 'この予約はすでにキャンセルされています' });
-      const next = await withStaffLock(iv.staff_id, () => cancelBooking(iv, 'staff'));
+      const next = await withStaffLock(iv.staff_id, async () => {
+        const current = await getInterview(iv.id);
+        if (current.status !== 'fixed') return null;
+        return cancelBooking(current, 'staff');
+      });
+      if (!next) return res.status(409).json({ error: 'この予約はすでにキャンセルされています' });
       res.json({ ok: true, interview: next });
     } catch (e) {
       console.error('予約のキャンセルに失敗しました', e);
       res.status(502).json({ error: 'キャンセルできませんでした。時間をおいてやり直してください' });
+    }
+  });
+
+  app.post('/api/interviews/:id/reschedule-booking', requireAuth, requireStaff, async (req, res) => {
+    try {
+      const first = await getInterview(req.params.id);
+      if (!first || first.source !== 'booking') return res.status(404).json({ error: '予約が見つかりません' });
+      if (req.authUser.role !== 'admin' && first.staff_id !== req.authUser.id) return res.status(403).json({ error: '自分が担当する予約だけ変更できます' });
+      const startMs = new Date(req.body?.start || '').getTime();
+      if (!Number.isFinite(startMs) || startMs <= Date.now()) return res.status(400).json({ error: '未来の日時を指定してください' });
+      const result = await withStaffLock(first.staff_id, async () => {
+        const iv = await getInterview(first.id);
+        if (iv.status !== 'fixed') return { code: 409, error: 'この予約は変更できません' };
+        if (startMs === new Date(iv.confirmed_datetime).getTime()) return { iv };
+        const page = await pageById(iv.booking_page_id);
+        if (!page) return { code: 409, error: '予約スケジュールが見つかりません' };
+        const day = booking.parseYmd(booking.ymdOf(new Date(startMs))).getTime();
+        const inputs = await slotInputs(page, day, day + 86400000, { fresh: true, exclude: iv });
+        const config = { ...page.config, duration: Number(iv.duration_min) || page.config.duration };
+        if (!booking.isBookable(config, inputs, startMs)) return { code: 409, error: 'この時間は予約できません。別の時間を選んでください' };
+        const tokenRow = await getTokenRow(iv.staff_id);
+        if (!tokenRow || !iv.googleEventId) throw new Error('Google連携を確認してください');
+        await google.updateEvent(await accessTokenFor(tokenRow), tokenRow.calendar_id, iv.googleEventId, {
+          start: { dateTime: new Date(startMs).toISOString(), timeZone: 'Asia/Tokyo' },
+          end: { dateTime: new Date(startMs + config.duration * 60000).toISOString(), timeZone: 'Asia/Tokyo' },
+        }, { sendUpdates: 'all' });
+        const next = { ...iv, confirmed_datetime: new Date(startMs).toISOString(), rescheduled_at: new Date().toISOString(), reminders_sent: passedReminders(iv.reminders, startMs, Date.now()) };
+        await saveInterview(next);
+        forgetBusy(iv.staff_id);
+        await removeExternalGoogleBlock(iv.staff_id, iv.googleEventId);
+        return { iv: next };
+      });
+      if (result.error) return res.status(result.code).json({ error: result.error });
+      res.json({ ok: true, interview: result.iv });
+    } catch (error) {
+      console.error('予約日時の変更に失敗しました', error);
+      res.status(502).json({ error: '日時変更できませんでした。Google連携と空き状況を確認してください' });
     }
   });
 
@@ -832,5 +869,5 @@ module.exports = function registerBookingRoutes(d) {
     }
   }
 
-  return { init, handleGoogleChanges, sendDueReminders };
+  return { init, handleGoogleChanges, sendDueReminders, forgetBusy };
 };

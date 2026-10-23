@@ -1117,6 +1117,20 @@
   .colorpick .cdot.on{border-color:var(--ink)}
 
   /* weekday availability rows */
+  .avg-stage{position:relative;min-width:740px}
+  .avg-stage .booktable{table-layout:fixed;min-width:740px}
+  .avg-stage .bt-corner,.avg-stage .bt-t{width:60px}
+  .avg-overlay{position:absolute;inset:0;pointer-events:none;z-index:2}
+  .avg-band{position:absolute;min-height:18px;display:flex;flex-direction:column;border:1px solid var(--brand);border-radius:5px;background:var(--brand-soft);overflow:hidden;pointer-events:auto;box-shadow:0 1px 3px #0003}
+  .avg-band.avg-ignored{border-style:dashed;background:transparent;opacity:.8;pointer-events:none}
+  .avg-ignored .avg-resize{display:none}
+  .avg-ignored .avg-event-open{flex:none;height:28px;pointer-events:auto;background:var(--panel)}
+  .avg-event-open{flex:1;min-height:0;padding:1px 4px;border:0;background:none;color:var(--ink);text-align:left;cursor:pointer;overflow:hidden;font-size:11px}
+  .avg-event-open strong,.avg-event-open span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .avg-event-open span{font-size:10px;color:var(--sub)}
+  .avg-resize{height:9px;min-height:9px;padding:0;border:0;background:var(--brand);opacity:.55;cursor:ns-resize;touch-action:none}
+  .avg-resize:focus-visible,.avg-event-open:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+  .avg-event-list,.avg-actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
   .wkrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line2)}
   .wkrow:last-child{border-bottom:0}
   .wkrow .wd{width:28px;font-weight:700;text-align:center}

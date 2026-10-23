@@ -43,6 +43,7 @@ const mail = require('./mail');
 const sharedCalFilter = require('./shared-cal-filter');
 const googleSyncFilter = require('./google-sync-filter');
 const slots = require('./slots');
+const { withStaffLock } = require('./stafflock');
 const push = require('./push');
 const rateLimit = require('./ratelimit');
 
@@ -1375,11 +1376,16 @@ async function deleteGoogleEventFor(userId, eventId) {
 /* 面談1件ぶんの同期。確定に変わったら作り、確定でなくなったら消す。
    iv を書き換えて googleEventId を持たせるので、呼び出し側はこのあと保存すること */
 async function syncInterviewToGoogle(old, iv, users) {
-  if (!GOOGLE_ENABLED) return iv;
+  if (!GOOGLE_ENABLED) {
+    if (old?.status === 'fixed' && (old.googleEventId || old.googleEventIdIntern) && (old.status !== iv.status || old.confirmed_datetime !== iv.confirmed_datetime)) throw new Error('Google連携を確認してください');
+    return iv;
+  }
   const wasFixed = old && old.status === 'fixed';
   const isFixed = iv.status === 'fixed';
   const intern = (users || []).find((u) => u.id === iv.intern_id);
   const staff = (users || []).find((u) => u.id === iv.staff_id);
+  const movedEvents = [];
+  const clearedEvents = {};
 
   for (const t of IV_GOOGLE_SYNC_TARGETS) {
     const userId = iv[t.userIdField];
@@ -1402,12 +1408,43 @@ async function syncInterviewToGoogle(old, iv, users) {
         });
         iv[t.eventIdField] = created.id;
         console.log(`Googleカレンダーにイベントを作成しました（interview ${iv.id}, user ${userId}, event ${created.id}）`);
+      } else if (wasFixed && isFixed && old.confirmed_datetime !== iv.confirmed_datetime && old[t.eventIdField]) {
+        const tokenRow = await getTokenRow(userId);
+        if (!tokenRow) throw new Error('Google連携を確認してください');
+        const startMs = new Date(iv.confirmed_datetime).getTime();
+        await google.updateEvent(await accessTokenFor(tokenRow), tokenRow.calendar_id, old[t.eventIdField], {
+          start: { dateTime: new Date(startMs).toISOString(), timeZone: 'Asia/Tokyo' },
+          end: { dateTime: new Date(startMs + (Number(iv.duration_min) || 30) * 60000).toISOString(), timeZone: 'Asia/Tokyo' },
+        });
+        movedEvents.push({ tokenRow, eventId: old[t.eventIdField] });
+        await removeExternalGoogleBlock(userId, old[t.eventIdField]);
       } else if (wasFixed && !isFixed && old[t.eventIdField]) {
-        await deleteGoogleEventFor(userId, old[t.eventIdField]);
+        const tokenRow = await getTokenRow(userId);
+        if (!tokenRow) throw new Error('Google連携を確認してください');
+        await google.deleteEvent(await accessTokenFor(tokenRow), tokenRow.calendar_id, old[t.eventIdField]);
         iv[t.eventIdField] = null;
+        clearedEvents[t.eventIdField] = null;
+        await saveInterview({ ...old, ...clearedEvents, cancellation_pending: true });
+        bookingApi.forgetBusy(iv.staff_id);
+        await removeExternalGoogleBlock(userId, old[t.eventIdField]);
       }
     } catch (e) {
       console.warn(`Googleカレンダー同期に失敗しました（interview ${iv.id}, ${t.eventIdField}）`, e.message || e);
+      if (wasFixed) {
+        if (!isFixed && (old.cancellation_pending || Object.keys(clearedEvents).length)) e.publicMessage = 'Googleカレンダーのキャンセルを完了できませんでした。面談枠は確保したままです。もう一度キャンセルを実行してください。';
+        for (const moved of movedEvents.reverse()) {
+          try {
+            const originalStart = new Date(old.confirmed_datetime).getTime();
+            await google.updateEvent(await accessTokenFor(moved.tokenRow), moved.tokenRow.calendar_id, moved.eventId, {
+              start: { dateTime: new Date(originalStart).toISOString(), timeZone: 'Asia/Tokyo' },
+              end: { dateTime: new Date(originalStart + (Number(old.duration_min) || 30) * 60000).toISOString(), timeZone: 'Asia/Tokyo' },
+            });
+          } catch (rollbackError) {
+            console.error('面談のGoogle日時を元に戻せませんでした', iv.id, moved.eventId, rollbackError.message);
+          }
+        }
+        throw e;
+      }
     }
   }
   return iv;
@@ -1438,7 +1475,7 @@ function visibleEventsFor(obj, user) {
 function scopeDBForUser(obj, user, users) {
   const events = visibleEventsFor(obj, user);
   // 全体管理者でも、他の人の「自分だけ」の予定は見えない
-  if (user.role === 'admin') return { ...obj, events };
+  if (user.role === 'admin') return { ...obj, events, availability: Object.fromEntries(Object.entries(obj.availability || {}).map(([id, availability]) => [id, id === user.id ? availability : {...availability, blocks: (availability.blocks || []).map(block => block.kind === 'external-google' ? {id:block.id,start:block.start,end:block.end,kind:block.kind,googleEventId:block.googleEventId} : block)}])) };
   const branchId = user.branch_id;
   const isIntern = user.role === 'intern';
   const userById = new Map(users.map((u) => [u.id, u]));
@@ -1454,7 +1491,7 @@ function scopeDBForUser(obj, user, users) {
   for (const [id, av] of Object.entries(obj.availability || {})) {
     const u = userById.get(id);
     if (!u || u.branch_id !== branchId) continue;
-    availability[id] = isIntern
+    availability[id] = isIntern || id !== user.id
       ? {
         weekly: av.weekly,
         blocks: (av.blocks || []).map((b) => ({ id: b.id, start: b.start, end: b.end, kind: b.kind })),
@@ -1500,7 +1537,15 @@ function mergeScoped(oldDB, clientDB, user, users) {
     const hidden = (oldDB[key] || []).filter((x) => !visibleIds.has(x.id));
     merged[key] = [...hidden, ...(clientDB[key] || [])];
   }
-  if (isAdmin) return merged;
+  if (isAdmin) {
+    merged.availability = {...(clientDB.availability || {})};
+    for (const [id, availability] of Object.entries(oldDB.availability || {})) {
+      if (id === user.id || !merged.availability[id]) continue;
+      const oldExternal = new Map((availability.blocks || []).filter(block => block.kind === 'external-google').map(block => [block.id,block]));
+      merged.availability[id] = {...merged.availability[id],blocks:(merged.availability[id].blocks || []).map(block => oldExternal.get(block.id) || block)};
+    }
+    return merged;
+  }
 
   /* インターン先マスタ。見えていなかった他支部の分を戻したうえで、
      送られてきた分をそのまま採用する。ここで黙って捨てず validateDiff へ届けるのは、
@@ -3064,7 +3109,7 @@ async function applyContextFor(token, staffId) {
     return { error: 'このスタッフは選べません', code: 400 };
   }
   const obj = await readDB();
-  const availability = (obj?.availability || {})[staff.id] || {};
+  const availability = await availabilityApi.effectiveAvailability(staff.id, (obj?.availability || {})[staff.id] || {}, Date.now(), Date.now() + 31 * 86400000);
   const ivs = await client.execute({
     sql: `SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'`,
     args: [staff.id],
@@ -3186,7 +3231,7 @@ async function freeslotContext(token) {
   if (!staff) return NG;
   const obj = await readDB();
   const branch = (obj?.branches || []).find((b) => b.id === row.branch_id);
-  const availability = (obj?.availability || {})[staff.id] || {};
+  const availability = await availabilityApi.effectiveAvailability(staff.id, (obj?.availability || {})[staff.id] || {}, Date.now(), Date.now() + 31 * 86400000);
   const ivs = await client.execute({
     sql: `SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'`,
     args: [staff.id],
@@ -3284,10 +3329,13 @@ app.post('/api/free/:token', limitPublicWrite, async (req, res) => {
 
 /* 予約スケジュール（Googleカレンダーの予約スケジュールと同じ動き）。
    中身は booking-routes.js。ここでは材料を渡してつなぐだけ */
+const availabilityApi = require('./availability-routes')({app, client, requireAuth, google, GOOGLE_ENABLED, getTokenRow, accessTokenFor, ownGoogleEventIdsFor, readDB});
+require('./candidate-routes')({app, requireAuth, client, readDB, rowToInterview, availabilityApi});
+
 const bookingApi = require('./booking-routes')({
   app, client, requireAuth, google, GOOGLE_ENABLED,
   getTokenRow, accessTokenFor, saveInterview, getInterview, rowToInterview,
-  insertNotification, push, mail, limitPublicRead, limitPublicWrite, removeExternalGoogleBlock,
+  insertNotification, push, mail, limitPublicRead, limitPublicWrite, removeExternalGoogleBlock, availabilityApi, readDB,
 });
 
 const tallyApi = require('./tally-routes')({app, client, requireAuth, limitPublicRead, limitPublicWrite});
@@ -3315,6 +3363,9 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: '確定する日時が必要です' });
   }
   try {
+    const first = await getInterview(req.params.id);
+    if (!first) return res.status(404).json({ error: '面談が見つかりません' });
+    await withStaffLock(first.staff_id, async () => {
     const old = await getInterview(req.params.id);
     if (!old) return res.status(404).json({ error: '面談が見つかりません' });
     if (actor.role !== 'admin' && old.staff_id !== actor.id) {
@@ -3325,15 +3376,37 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
     if (old.source === 'booking') {
       return res.status(400).json({ error: '予約は「予約をキャンセル」から取り消してください' });
     }
+    if (old.cancellation_pending && status === 'fixed') return res.status(409).json({ error: 'キャンセル処理が途中です。もう一度キャンセルを実行して完了してください' });
+    const startMs = new Date(confirmed_datetime || '').getTime();
+    if (status === 'fixed' && (!Number.isFinite(startMs) || startMs <= Date.now())) return res.status(400).json({ error: '未来の日時を指定してください' });
+    if (old.status === 'fixed' && status === 'fixed' && startMs === new Date(old.confirmed_datetime).getTime()) return res.json({ ok: true, interview: old });
+    if (status === 'fixed') {
+      const endMs = startMs + (Number(old.duration_min) || 30) * 60000;
+      const stored = await readDB();
+      const raw = stored?.availability?.[old.staff_id] || {};
+      const availability = await availabilityApi.effectiveAvailability(old.staff_id, raw, startMs, endMs, { excludeGoogleEventId: old.googleEventId });
+      const blocked = (availability.blocks || []).some(block => startMs < new Date(block.end).getTime() && endMs > new Date(block.start).getTime());
+      const fixed = await client.execute({ sql: "SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed' AND id != ?", args: [old.staff_id, old.id] });
+      const overlaps = fixed.rows.map(rowToInterview).some(interview => {
+        const otherStart = new Date(interview.confirmed_datetime).getTime();
+        return startMs < otherStart + (Number(interview.duration_min) || 30) * 60000 && endMs > otherStart;
+      });
+      if (blocked || overlaps) return res.status(409).json({ error: 'この時間は面談できません。別の時間を選んでください' });
+    }
     const next = {
       ...old, status,
-      confirmed_datetime: status === 'fixed' ? confirmed_datetime : null,
+      confirmed_datetime: status === 'fixed' ? new Date(startMs).toISOString() : null,
+      ...(old.status === 'fixed' && status === 'fixed' ? { rescheduled_at: new Date().toISOString() } : {}),
+      ...(old.status === 'fixed' && status !== 'fixed' ? { cancelled: true, cancelled_by: 'staff', cancelled_at: new Date().toISOString(), previous_confirmed_datetime: old.confirmed_datetime } : {}),
+      ...(['fixed', 'applied'].includes(status) ? { cancelled: false } : {}),
+      cancellation_pending: false,
     };
     /* Googleへの反映を先に済ませてから保存する。
        先に保存すると、通信に失敗したときイベントIDを取りこぼす */
     const users = await listActiveUsers();
     await syncInterviewToGoogle(old, next, users);
     await saveInterview(next);
+    bookingApi.forgetBusy(next.staff_id);
 
     let notification = null;
     if (old.status !== status && (status === 'fixed' || status === 'failed')) {
@@ -3345,9 +3418,10 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
       });
     }
     res.json({ ok: true, interview: next, notification });
+    });
   } catch (e) {
     console.error('面談の変更に失敗しました', e);
-    res.status(500).json({ error: '変更できませんでした' });
+    res.status(500).json({ error: e.publicMessage || '変更できませんでした' });
   }
 });
 
@@ -3792,7 +3866,7 @@ app.post('/api/webhooks/google-calendar', async (req, res) => {
         const changedIds = new Set(items.map((e) => e.id));
         blocks = blocks.filter((b) => !(b.kind === 'external-google' && changedIds.has(b.googleEventId)));
         for (const ev of items) {
-          if (ev.status === 'cancelled') continue;
+          if (ev.status === 'cancelled' || ev.transparency === 'transparent' || (ev.attendees || []).some(attendee => attendee.self && attendee.responseStatus === 'declined')) continue;
           const start = ev.start && (ev.start.dateTime || ev.start.date);
           const end = ev.end && (ev.end.dateTime || ev.end.date);
           if (!start || !end) continue;
@@ -3855,6 +3929,9 @@ const PUBLIC_FILES = {
   '/': 'index.html',
   '/index.html': 'index.html',
   '/style.css': 'style.css',
+  '/candidate-ui.js': 'candidate-ui.js',
+  '/candidate-ui.css': 'candidate-ui.css',
+  '/availability-ui.js': 'availability-ui.js',
   '/tally-model.js': 'server/tally.js',
   '/tally-ui.js': 'tally-ui.js',
   '/tally.html': 'tally.html',
@@ -3939,6 +4016,7 @@ initDB()
   .then(() => migrateStoreToTables())
   .then(() => purgeTaskRequests())
   .then(() => bookingApi.init())
+  .then(() => availabilityApi.init())
   .then(() => tallyApi.init())
   .then(() => {
     app.listen(PORT, () => {

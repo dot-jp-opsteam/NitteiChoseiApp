@@ -1,0 +1,68 @@
+export async function runInterviewChangeTests({ api, check, database, token, otherToken, at, googleState, reserve, publicSlots, publicDay }) {
+  const created = new Date().toISOString();
+  const seed = async (id, staffId, start, extra = {}) => {
+    const data = { confirmed_datetime: start, intern_name: '変更テストの相手', choices: [start], note: '引継ぎ事項', ...extra };
+    await database.execute({ sql: 'INSERT INTO interviews (id,intern_id,staff_id,branch_id,status,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', args: [id, 'guest_' + id, staffId, 'b1', 'fixed', JSON.stringify(data), created, created] });
+    return data;
+  };
+  const original = await seed('iv_change_ordinary', 'u_bk_a', at(15), { googleEventId: 'ordinary_google' });
+  googleState.events.set('ordinary_google', { id: 'ordinary_google', start: { dateTime: at(15) }, end: { dateTime: at(15, 30) } });
+  const change = (id, datetime, actor = token) => api(actor, 'PATCH', '/api/interviews/' + id, { status: 'fixed', confirmed_datetime: datetime });
+  check('通常面談の担当以外の変更を拒否', (await change('iv_change_ordinary', at(16), otherToken)).status, 403);
+  check('通常面談の不正日時を拒否', (await change('iv_change_ordinary', 'invalid')).status, 400);
+  check('通常面談の過去日時を拒否', (await change('iv_change_ordinary', '2000-01-01T00:00:00Z')).status, 400);
+  const beforeCalls = googleState.calls.length;
+  const moved = await change('iv_change_ordinary', at(16));
+  check('確定済み通常面談を直接変更', [moved.status, moved.json.interview?.confirmed_datetime], [200, at(16)]);
+  check('通常面談の申請情報を引き継ぐ', [moved.json.interview?.intern_name, moved.json.interview?.choices, moved.json.interview?.note], [original.intern_name, original.choices, original.note]);
+  check('通常面談のGoogle予定を同じIDで更新', googleState.calls.slice(beforeCalls).some(call => call.method === 'PATCH' && call.path.endsWith('/ordinary_google')), true);
+  const unchangedCalls = googleState.calls.length;
+  check('同一日時への変更は成功', (await change('iv_change_ordinary', at(16))).status, 200);
+  check('同一日時ではGoogle更新しない', googleState.calls.length, unchangedCalls);
+  googleState.failUpdate = true;
+  check('Google更新失敗は変更完了にしない', (await change('iv_change_ordinary', at(16, 30))).status, 500);
+  googleState.failUpdate = false;
+  const afterFailure = (await api(token, 'GET', '/api/db')).json.interviews.find(item => item.id === 'iv_change_ordinary');
+  check('Google更新失敗時は元の面談日時を維持', afterFailure.confirmed_datetime, at(16));
+  const returned = await change('iv_change_ordinary', at(15));
+  check('日時変更後は元の枠を再利用できる', returned.status, 200);
+  googleState.delay = 20;
+  const race = await Promise.all([change('iv_change_ordinary', at(11, 30)), reserve(at(11, 30))]);
+  googleState.delay = 0;
+  check('通常面談の変更と公開予約も同じロックで重複を防ぐ', race.map(result => result.status).sort(), [200, 409]);
+  if (race[1].status === 200) {
+    await api(null, 'DELETE', '/api/book/manage/' + race[1].json.booking.manage_url.split('/b/manage/')[1]);
+  }
+  await change('iv_change_ordinary', at(15));
+  await seed('iv_change_other', 'u_bk_a', at(17));
+  const concurrent = await Promise.all([change('iv_change_ordinary', at(18)), change('iv_change_other', at(18))]);
+  check('通常面談の同じ時間への同時変更は一件だけ', concurrent.map(result => result.status).sort(), [200, 409]);
+  await seed('iv_change_unlinked', 'u_bk_b', at(15));
+  check('Google未連携の通常面談も変更できる', (await change('iv_change_unlinked', at(16), otherToken)).status, 200);
+  const cancelled = await api(token, 'PATCH', '/api/interviews/iv_change_ordinary', { status: 'failed', cancelled: true });
+  check('通常面談キャンセルは履歴を保持', [cancelled.status, cancelled.json.interview?.cancelled, cancelled.json.interview?.intern_name], [200, true, original.intern_name]);
+  const reopened = await api(token, 'PATCH', '/api/interviews/iv_change_ordinary', {status:'applied'});
+  check('キャンセルから申請中に戻すと現在のキャンセル表示を解除し履歴は保持', [reopened.status,reopened.json.interview?.cancelled,!!reopened.json.interview?.cancelled_at], [200,false,true]);
+  await seed('iv_change_cache', 'u_bk_a', at(11,30), {googleEventId:'ordinary_cache'});
+  googleState.events.set('ordinary_cache', {id:'ordinary_cache',start:{dateTime:at(11,30)},end:{dateTime:at(12)}});
+  check('通常面談の旧枠は公開予約で埋まる', (await publicSlots()).json.days[publicDay].includes('11:30'), false);
+  await change('iv_change_cache',at(20));
+  check('通常面談日時変更後の旧枠はキャッシュ待ちなく公開予約へ戻る', (await publicSlots()).json.days[publicDay].includes('11:30'), true);
+  await change('iv_change_cache',at(11,30));
+  await publicSlots();
+  await api(token, 'PATCH', '/api/interviews/iv_change_cache', {status:'failed',cancelled:true});
+  check('通常面談キャンセル後もキャッシュ待ちなく公開予約へ戻る', (await publicSlots()).json.days[publicDay].includes('11:30'), true);
+  await seed('iv_change_dual', 'u_bk_a', at(19), {googleEventId:'dual_staff',googleEventIdIntern:'dual_intern'});
+  await database.execute("UPDATE interviews SET intern_id = 'u_bk_a' WHERE id = 'iv_change_dual'");
+  for(const id of ['dual_staff','dual_intern']) googleState.events.set(id, {id,start:{dateTime:at(19)},end:{dateTime:at(19,30)}});
+  googleState.failDeleteId='dual_intern';
+  const partial = await api(token,'PATCH','/api/interviews/iv_change_dual',{status:'failed',cancelled:true});
+  check('二人目のGoogle取消失敗を成功にしない',partial.status,500);
+  const pending=(await api(token,'GET','/api/db')).json.interviews.find(item=>item.id==='iv_change_dual');
+  check('途中取消は削除済みIDを解除し未完了IDと保護する枠を記録',[pending.status,pending.googleEventId,pending.googleEventIdIntern,pending.cancellation_pending],['fixed',null,'dual_intern',true]);
+  check('途中取消中の日時変更を拒否',(await change('iv_change_dual',at(20))).status,409);
+  googleState.failDeleteId=null;
+  const retried=await api(token,'PATCH','/api/interviews/iv_change_dual',{status:'failed',cancelled:true});
+  check('途中取消を再実行すると残ったGoogle予定だけ取り消して完了',[retried.status,retried.json.interview?.status,retried.json.interview?.cancellation_pending,retried.json.interview?.googleEventIdIntern],[200,'failed',false,null]);
+  check('途中取消の再実行で削除済み予定を再度削除しない',googleState.calls.filter(call=>call.method==='DELETE'&&call.path.endsWith('/dual_staff')).length,1);
+}

@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { eventInterval, effectiveIntervals, manualBusy } = require('../server/availability');
+const event = (id, start, end, extra = {}) => ({id, start, end, ...extra});
+const first = event('first', '2030-01-01T10:00:00+09:00', '2030-01-01T12:00:00+09:00');
+const second = event('second', '2030-01-01T11:00:00+09:00', '2030-01-01T13:00:00+09:00');
+assert.deepEqual(effectiveIntervals([first, second], [{event_id:'first', ignored:1}]), [eventInterval(second)]);
+assert.deepEqual(effectiveIntervals([first], [{event_id:'first', ignored:0, start:'2030-01-01T10:30:00+09:00', end:'2030-01-01T11:00:00+09:00'}]), [[Date.parse('2030-01-01T10:30:00+09:00'),Date.parse('2030-01-01T11:00:00+09:00')]]);
+assert.deepEqual(effectiveIntervals([{...first, start:'2030-01-02T10:00:00+09:00',end:'2030-01-02T12:00:00+09:00'}], [{event_id:'first',ignored:1,original_start:first.start,original_end:first.end}]), [[Date.parse('2030-01-02T10:00:00+09:00'), Date.parse('2030-01-02T12:00:00+09:00')]]);
+assert.deepEqual(effectiveIntervals([first, second], [], 'first'), [eventInterval(second)]);
+assert.deepEqual(effectiveIntervals([{...first, transparency:'transparent'}, {...second, declined:true}], []), []);
+assert.deepEqual(effectiveIntervals([{...first, transparency:'transparent'}], [{event_id:'first', ignored:0, start:first.start, end:first.end}]), [eventInterval(first)]);
+assert.deepEqual(effectiveIntervals([{...first, declined:true}], [{event_id:'first', ignored:0, start:first.start, end:first.end}]), [eventInterval(first)]);
+assert.deepEqual(manualBusy({blocks:[{start:first.start,end:first.end},{kind:'external-google',start:second.start,end:second.end}]}), [eventInterval(first)]);
+assert.equal(new Date(eventInterval(event('day','2030-01-01','2030-01-02'))[0]).toISOString(), '2029-12-31T15:00:00.000Z');
+console.log('availability model: 9 checks passed');

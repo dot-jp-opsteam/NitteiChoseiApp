@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+assert.ok(fs.existsSync(new URL('../server/candidate-slots.js', import.meta.url)), '空き時間から候補を生成するモデルが必要');
+const { candidateWindow, generateCandidates } = require('../server/candidate-slots.js');
+const now = Date.parse('2026-10-23T08:00:00+09:00');
+const window = candidateWindow({ from: '2026-10-24', to: '2026-10-24', duration: '60' }, now);
+const at = time => new Date(`2026-10-24T${time}:00+09:00`).toISOString();
+const options = { ...window, now, blocks: [{ start: at('10:00'), end: at('11:00') }], interviews: [{ status: 'fixed', confirmed_datetime: at('13:00'), duration_min: 90 }] };
+const candidates = generateCandidates(options);
+assert.ok(candidates.some(slot => slot.time === '09:00'));
+assert.ok(!candidates.some(slot => slot.time === '09:30'));
+assert.ok(!candidates.some(slot => ['10:00', '10:30', '12:30', '13:00', '13:30', '14:00', '23:30'].includes(slot.time)));
+assert.ok(candidates.some(slot => slot.time === '14:30'));
+assert.ok(candidates.every(slot => slot.date === '2026-10-24' && slot.duration === 60));
+assert.equal(generateCandidates({ ...options, blocks: [], interviews: [] }).length, 29);
+assert.equal(generateCandidates({ ...options, blocks: [], interviews: [{ ...options.interviews[0], status: 'failed' }] }).length, 29);
+assert.ok(generateCandidates({ ...options, blocks: [], interviews: [] }).every(slot => Date.parse(slot.end) - Date.parse(slot.start) === 3600000));
+assert.throws(() => candidateWindow({ from: '2026-02-30', to: '2026-03-01' }, now), /日付/);
+assert.throws(() => candidateWindow({ from: '2026-10-22', to: '2026-10-24' }, now), /過去/);
+assert.throws(() => candidateWindow({ from: '2026-10-24', to: '2026-11-20' }, now), /21日/);
+assert.throws(() => candidateWindow({ from: '2026-10-24', to: '2026-10-24', duration: '1' }, now), /所要時間/);
+const today = generateCandidates({ ...candidateWindow({ from: '2026-10-23', to: '2026-10-23', duration: '30' }, now), now: Date.parse('2026-10-23T23:40:00+09:00') });
+assert.equal(today.length, 0);
+console.log('候補日モデル：14件成功');

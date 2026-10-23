@@ -1,0 +1,99 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+import {pathToFileURL} from 'node:url';
+
+export async function runAvailabilityBrowserTests(page){
+  const results=[];
+  const check=(condition,message)=>{if(!condition)throw Error(message);};
+  const day=new Date();day.setDate(day.getDate()+1);day.setHours(13,0,0,0);
+  const start=day.toISOString(),end=new Date(+day+7200000).toISOString();
+  let events=[{id:'ui_event',calendar_id:'primary',title:'授業 <テスト>',start,end,blocking_start:start,blocking_end:end,ignored:false,adjusted:false}];
+  let fail=false;
+  await page.route('**/api/availability/google-events**',async route=>{
+    if(route.request().method()==='PATCH'){
+      if(fail)return route.fulfill({status:503,json:{error:'保存テストエラー'}});
+      const body=route.request().postDataJSON();
+      events=events.map(event=>({...event,blocking_start:body.reset?start:body.start||event.blocking_start,blocking_end:body.reset?end:body.end||event.blocking_end,ignored:body.reset?false:!!body.ignored,adjusted:!body.reset}));
+      return route.fulfill({json:{event:events[0]}});
+    }
+    return route.fulfill({json:{connected:true,events}});
+  });
+  try{
+    await page.evaluate(()=>go('avset'));
+    await page.getByRole('button',{name:'授業 <テスト> の面談不可時間を調整',exact:true}).first().waitFor();
+    check(await page.locator('.avg-band').count()===1,'名前付き帯を表示');
+    await page.locator('.avg-event-open').first().click();
+    await page.getByRole('button',{name:'この予定中も面談OK',exact:true}).click();
+    await page.locator('.avg-band.avg-ignored').waitFor();
+    results.push({label:'Google予定を面談OKにできる',ok:true});
+    await page.locator('.avg-event-open').first().click();
+    await page.getByRole('button',{name:'元の予定どおりに戻す',exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('.avg-band.avg-ignored'));
+    results.push({label:'面談OKから元に戻せる',ok:true});
+    const handle=await page.locator('.avg-resize-end').first().boundingBox();
+    const row=await page.locator('.avg-stage tbody tr').first().boundingBox();
+    await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);
+    await page.mouse.down();await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2-row.height,{steps:6});await page.mouse.up();
+    await page.waitForFunction(expected=>AVGOOGLE.events[0].blocking_end===expected,new Date(+new Date(end)-1800000).toISOString());
+    results.push({label:'Google帯の下端ドラッグで30分短縮',ok:true});
+    await page.locator('.avg-event-open').first().click();
+    const local=await page.locator('#avg-start').inputValue();
+    await page.getByLabel('面談不可の終了',{exact:true}).fill(local.slice(0,11)+'14:00');
+    await page.getByRole('button',{name:'面談不可時間を保存',exact:true}).click();
+    await page.waitForFunction(()=>new Date(AVGOOGLE.events[0].blocking_end).getHours()===14);
+    results.push({label:'日時入力でも不可範囲を変更',ok:true});
+    fail=true;
+    await page.locator('.avg-event-open').first().click();
+    await page.getByRole('button',{name:'この予定中も面談OK',exact:true}).click();
+    await page.getByText('保存テストエラー',{exact:true}).waitFor();
+    check(await page.locator('.avg-band.avg-ignored').count()===0,'保存失敗で表示が変わらない');
+    results.push({label:'保存失敗は元の状態を保持',ok:true});
+  }finally{await page.unroute('**/api/availability/google-events**');}
+  return results;
+}
+
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
+  const context=vm.createContext({console});
+  vm.runInContext(readFileSync(new URL('../availability-ui.js',import.meta.url),'utf8'),context);
+  const lanes=context.avGoogleLanes([{start:0,end:10},{start:5,end:20},{start:20,end:30}]);
+  assert.equal(lanes[0].lanes,2);
+  assert.equal(lanes[1].lane,1);
+  assert.equal(lanes[2].lanes,1);
+  assert.equal(+context.avGoogleDate('2026-10-24'),Date.parse('2026-10-24T00:00:00+09:00'));
+  const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+  const gridSource=html.slice(html.indexOf('function genEditGrid('),html.indexOf('\nfunction toast('));
+  const day=new Date();day.setDate(day.getDate()+1);day.setHours(13,15,0,0);
+  Object.assign(context,{DB:{availability:{staff:{blocks:[]}},interviews:[{staff_id:'staff',status:'fixed',confirmed_datetime:day.toISOString(),duration_min:60}]},ME:{id:'staff'},BLK_GRID_START:540,BLK_GRID_END:1440,blkIntervals:()=>[],blkHit:()=>false});
+  vm.runInContext(gridSource,context);
+  const grid=context.genEditGrid('staff',0).grid[1];
+  assert.equal(grid[8].state,'locked');
+  assert.equal(grid[9].state,'locked');
+  assert.equal(grid[10].state,'locked');
+  assert.equal(grid[11].state,'free');
+  let sent;
+  Object.assign(context,{document:{querySelectorAll:()=>[],getElementById:()=>null},currentTab:'',toast:()=>{},api:async(path,opts)=>{sent=JSON.parse(opts.body);return {ok:true,json:async()=>({event:{id:'event',calendar_id:'primary',start:day.toISOString(),end:new Date(+day+3600000).toISOString(),blocking_start:day.toISOString(),blocking_end:new Date(+day+3600000).toISOString(),ignored:true}})};}});
+  vm.runInContext(`AVGOOGLE={key:'test',events:[{id:'event',calendar_id:'primary',start:'${day.toISOString()}',end:'${new Date(+day+3600000).toISOString()}'}]};AVGOOGLE_EDIT={event:AVGOOGLE.events[0],key:'test'};`,context);
+  await context.avGoogleSave({ignored:true});
+  assert.equal(sent.start,day.toISOString());assert.equal(sent.end,new Date(+day+3600000).toISOString());
+  assert.equal(vm.runInContext('AVGOOGLE.events[0].ignored',context),true);
+  context.api=async()=>({ok:false,json:async()=>({error:'save failed'})});
+  vm.runInContext("AVGOOGLE_EDIT={event:AVGOOGLE.events[0],key:'test'}",context);
+  await context.avGoogleSave({ignored:false});
+  assert.equal(vm.runInContext('AVGOOGLE.events[0].ignored',context),true);
+  const classes=new Set(),label={textContent:'',classList:{add:name=>classes.add(name)}};
+  context.document.getElementById=()=>label;
+  vm.runInContext("AVGOOGLE_EDIT={event:AVGOOGLE.events[0],key:'test',sheet:true}",context);
+  await context.avGoogleSave({ignored:false});
+  assert.equal(label.textContent,'save failed');assert.ok(classes.has('show'));
+  classes.clear();
+  context.document.getElementById=id=>id==='avg-error'?label:{value:'2026-10-24T13:00'};
+  context.avGoogleSaveInputs();
+  assert.ok(classes.has('show'));
+  Object.assign(context,{setTimeout:()=>{},esc:String,testDays:context.genEditGrid('staff',0).days,testFallback:[{start:'cached-google'}]});
+  vm.runInContext("AVGOOGLE={key:avGoogleWeek(testDays).key,connected:false,events:[]}",context);
+  assert.equal(context.avGoogleGridBlocks('staff',context.testDays,context.testFallback),context.testFallback);
+  vm.runInContext("AVGOOGLE.error='load failed'",context);
+  assert.match(context.avGoogleQueue(context.testDays),/field-err show/);
+  console.log('availability layout/date/confirmed duration/save/errors/disconnected: 17 passed');
+}
