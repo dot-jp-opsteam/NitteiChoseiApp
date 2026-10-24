@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {runManualAvailabilityTests} from './test-manual-availability-api.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // server/ 側にインストールされている @libsql/client を借りる（tools用の依存は増やさない）
@@ -2514,6 +2515,7 @@ try {
     await testSharedCalFilter();
     await testGoogleSyncFilter();
     await testLockLogic();
+    await runManualAvailabilityTests({api,getDB,putDB,tokens:TOKENS,check});
   }
   console.log(`\n${'─'.repeat(56)}`);
   if (!process.argv.includes('--browser') && failures.length) {

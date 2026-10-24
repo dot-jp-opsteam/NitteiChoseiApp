@@ -382,9 +382,12 @@ let DB=null;
 let SYNCING=false;
 
 async function apiGetDB(){
-  const res=await api('/api/db');
-  if(!res.ok)throw new Error('GET /api/db failed');
-  return res.json();
+  const read={version:AVBLOCK_VERSION};AVBLOCK_READS.add(read);
+  try{
+    const res=await api('/api/db');
+    if(!res.ok)throw new Error('GET /api/db failed');
+    return avBlockMergeDB(await res.json(),read.version);
+  }finally{AVBLOCK_READS.delete(read);avBlockPrune();}
 }
 async function apiPutDB(obj){
   const res=await api('/api/db',{method:'PUT',body:JSON.stringify(obj)});
@@ -420,6 +423,8 @@ async function bootLoad(){
    やり直しのときに古いDBのオブジェクトを触ってしまい、変更が反映されないため。 */
 async function putDB(){
   const {users,...body}=DB;
+  const blocks=ME&&AVBLOCK_SAVES.get(ME.id);
+  if(blocks&&(blocks.inflight.length||blocks.queue.length))body.availability={...body.availability,[ME.id]:{...body.availability?.[ME.id],blocks:blocks.confirmed}};
   return api('/api/db',{method:'PUT',body:JSON.stringify({...body,_baseUpdatedAt:DB.updatedAt})});
 }
 /* 専用APIを1回呼んで、作られた（または更新された）1件を受け取る。
@@ -499,6 +504,8 @@ function setSaveError(msg){
   if(msg)bar.querySelector('.sb-msg').textContent=msg;
 }
 async function retrySave(){
+  const blocks=ME&&AVBLOCK_SAVES.get(ME.id);
+  if(blocks&&blocks.queue.length){await avBlockSave(blocks);return;}
   const btn=document.getElementById('savebarBtn');
   if(btn){btn.disabled=true;btn.textContent='保存中…';}
   let msg='';
@@ -651,7 +658,7 @@ function applyRemoteUpdate(added){
   if(added>0&&Date.now()>=SUPPRESS_SSE_TOAST_UNTIL)
     toast(added===1?'新しい通知が届きました':`新しい通知が${added}件届きました`);
   if(uiBusy()){REFRESH_PENDING=true;return;}
-  if(ME)renderQuiet();
+  if(ME){if(currentTab==='avset')avGoogleRefresh();else renderQuiet();}
 }
 
 /* 内容が変わったかを見分ける印。
@@ -2004,6 +2011,7 @@ function renderQuiet(){
 /* いま描き直すと困る状態か。
    シートを開いていれば操作の最中だし、入力中なら打ちかけが消える */
 function uiBusy(){
+  if(typeof AVDRAG!=='undefined'&&AVDRAG||typeof AVHOLD!=='undefined'&&AVHOLD)return true;
   const scrim=document.getElementById('scrim');
   if(scrim&&scrim.classList.contains('open'))return true;
   const a=document.activeElement;
@@ -2015,7 +2023,7 @@ let REFRESH_PENDING=false;
 function flushPendingRefresh(){
   if(!REFRESH_PENDING||uiBusy())return;
   REFRESH_PENDING=false;
-  if(ME)renderQuiet();
+  if(ME){if(currentTab==='avset')avGoogleRefresh();else renderQuiet();}
 }
 
 /* =========================================================
@@ -3844,7 +3852,7 @@ function viewAvailSet(){
         <span class="wm">${monthLabel}</span>
         <button class="pg" onclick="avSetWeek(1)">次の1週間${ic('chevron')}</button>
       </div>
-      <label class="fl"><span>時間をタップ（受けられない <span id="avBlockedCnt">${blockedCnt}</span>枠）</span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）。マス1つは30分。21:00〜22:00 を外すなら 21:00 と 21:30 の2マスに×</span></label>
+      <label class="fl"><span>時間をタップ（受けられない <span id="avBlockedCnt">${blockedCnt}</span>枠） <span id="avBlockSaveState" class="fine" role="status">${avBlockStatus()}</span></span><span class="fl-sub">上下になぞればまとめて指定できます（同じ日の中だけ）。マス1つは30分。21:00〜22:00 を外すなら 21:00 と 21:30 の2マスに×</span></label>
       ${avGoogleQueue(days)}
       ${table}
       <div class="votekeys" style="margin-top:10px;flex-wrap:wrap;gap:8px 14px">
@@ -3870,37 +3878,130 @@ function blocksOf(db,userId){
   db.availability[userId].blocks=db.availability[userId].blocks||[];
   return db.availability[userId];
 }
-/* 追加・削除をまとめて反映する。ドラッグで一気に操作した分も1回の保存で済ませる。
-   blocks 全体を置き換えるのではなく増減だけを適用することで、
-   保存し直しになったときにGoogleカレンダー由来の予定を消してしまわないようにしている */
-async function applyBlockChanges({added=[],removedIds=[]}={}){
-  return mutate(db=>{
-    const av=blocksOf(db,ME.id);
-    let list=av.blocks;
-    if(removedIds.length)list=list.filter(b=>!removedIds.includes(b.id));
-    for(const b of added){if(!list.some(x=>x.id===b.id))list.push(b);}
-    av.blocks=list;
-  });
+const AVBLOCK_SAVES=new Map();
+const AVBLOCK_READS=new Set();
+let AVBLOCK_VERSION=0;
+function avBlockApply(blocks,{added=[],removedIds=[]}){
+  const removed=new Set(removedIds);
+  const next=new Map(blocks.filter(block=>!removed.has(block.id)).map(block=>[block.id,block]));
+  added.forEach(block=>next.set(block.id,block));return [...next.values()];
+}
+function avBlockOverlay(state,blocks=state.confirmed){
+  return [...state.inflight,...state.queue].reduce((list,change)=>avBlockApply(list,change),blocks);
+}
+function avBlockMergeDB(remote,version){
+  if(!remote||!ME)return remote;
+  const state=AVBLOCK_SAVES.get(ME.id);
+  if(state){
+    const av=blocksOf(remote,ME.id);
+    const base=remote.updatedAt&&state.confirmedAt&&remote.updatedAt<state.confirmedAt?state.confirmed:av.blocks;
+    const baseAt=remote.updatedAt&&state.confirmedAt&&remote.updatedAt<state.confirmedAt?state.confirmedAt:remote.updatedAt;
+    const completed=state.history.filter(entry=>entry.version>version&&(!entry.updatedAt||!baseAt||entry.updatedAt>baseAt)).map(entry=>entry.change);
+    state.confirmed=completed.reduce((list,change)=>avBlockApply(list,change),base);
+    if(remote.updatedAt&&(!state.confirmedAt||remote.updatedAt>state.confirmedAt))state.confirmedAt=remote.updatedAt;
+    av.blocks=avBlockOverlay(state);
+  }
+  return remote;
+}
+function avBlockPrune(){
+  const oldest=Math.min(...Array.from(AVBLOCK_READS,read=>read.version));
+  for(const state of AVBLOCK_SAVES.values())state.history=state.history.filter(entry=>entry.version>oldest);
+}
+function avBlockStatus(){
+  const state=ME&&AVBLOCK_SAVES.get(ME.id);
+  return state?.failed?'未保存（再試行できます）':state?.running?'保存中…':state?'保存済み':'';
+}
+function avBlockUpdate(state){
+  if(ME?.id!==state.userId)return;
+  blocksOf(DB,state.userId).blocks=avBlockOverlay(state);
+  try{sessionStorage.setItem(DB_KEY,JSON.stringify(DB));}catch(error){}
+  const status=document.getElementById('avBlockSaveState');if(status)status.textContent=avBlockStatus();
+}
+function avBlockCombine(changes){
+  const removedIds=new Set(),added=new Map();
+  for(const change of changes){
+    for(const id of change.removedIds){removedIds.add(id);added.delete(id);}
+    for(const block of change.added)added.set(block.id,block);
+  }
+  return {added:[...added.values()],removedIds:[...removedIds]};
+}
+function avBlockSave(state){
+  if(state.running)return state.running;
+  state.failed=false;
+  state.running=(async()=>{
+    await new Promise(resolve=>setTimeout(resolve,60));
+    try{
+      while(state.queue.length){
+        state.inflight=[];
+        let size=0;
+        while(state.queue.length){
+          const change=state.queue[0],count=change.added.length+change.removedIds.length;
+          if(state.inflight.length&&size+count>800)break;
+          state.inflight.push(state.queue.shift());size+=count;
+        }
+        const body=avBlockCombine(state.inflight);
+        let error;
+        for(let attempt=0;attempt<3;attempt++){
+          try{
+            if(ME?.id!==state.userId){const failure=new Error('ログイン状態が変わりました');failure.retryable=false;throw failure;}
+            const response=await api('/api/availability/blocks',{method:'PATCH',body:JSON.stringify(body)});
+            const data=await response.json();
+            if(!response.ok){const failure=new Error(data.error||'不可時間を保存できませんでした');failure.retryable=response.status>=500||response.status===429;throw failure;}
+            if(!Array.isArray(data.blocks))throw new Error('保存結果を確認できませんでした');
+            if(!data.updatedAt||!state.confirmedAt||data.updatedAt>=state.confirmedAt)state.confirmed=data.blocks;
+            if(data.updatedAt&&(!state.confirmedAt||data.updatedAt>state.confirmedAt))state.confirmedAt=data.updatedAt;
+            state.version=++AVBLOCK_VERSION;
+            state.history.push({change:body,version:state.version,updatedAt:data.updatedAt});avBlockPrune();
+            error=null;break;
+          }catch(failure){error=failure;if(failure.retryable===false)break;if(attempt<2)await new Promise(resolve=>setTimeout(resolve,150*(attempt+1)));}
+        }
+        if(error){
+          state.queue.unshift(...state.inflight);state.inflight=[];state.failed=true;
+          if(ME?.id===state.userId)setSaveError('不可時間がまだ保存できていません。操作内容は保持しています。「再試行」を押してください。');
+          state.queue.forEach(change=>change.resolve(false));break;
+        }
+        const completed=state.inflight;state.inflight=[];
+        avBlockUpdate(state);completed.forEach(change=>change.resolve(true));
+        if(ME?.id===state.userId)setSaveError(null);
+      }
+    }finally{
+      state.running=null;avBlockUpdate(state);
+      if(ME?.id===state.userId&&currentTab==='avset')avGoogleRefresh();
+    }
+    return !state.failed;
+  })();
+  avBlockUpdate(state);return state.running;
+}
+function applyBlockChanges({added=[],removedIds=[]}={}){
+  const userId=ME.id;
+  let state=AVBLOCK_SAVES.get(userId);
+  if(!state){state={userId,confirmed:blocksOf(DB,userId).blocks.slice(),confirmedAt:DB.updatedAt,queue:[],inflight:[],history:[],running:null,failed:false,version:0};AVBLOCK_SAVES.set(userId,state);}
+  else if(!state.running&&!state.queue.length){state.confirmed=blocksOf(DB,userId).blocks.slice();if(DB.updatedAt&&(!state.confirmedAt||DB.updatedAt>state.confirmedAt))state.confirmedAt=DB.updatedAt;}
+  const result=new Promise(resolve=>state.queue.push({added,removedIds,resolve}));
+  state.version=++AVBLOCK_VERSION;
+  avBlockUpdate(state);avBlockSave(state);return result;
 }
 
 /* 押し始めたセルが表の何列目かを覚えておく（なぞれるのはその列だけにするため） */
 function dragColOf(cell){
-  return cell&&cell.cellIndex!==undefined
-    ? {table:cell.closest('table'),index:cell.cellIndex} : null;
+  if(!cell||cell.cellIndex===undefined)return null;
+  const table=cell.closest('table'),index=cell.cellIndex;
+  const cells=Array.from(table.querySelectorAll('tbody .bt-c')).filter(td=>td.cellIndex===index);
+  const positions=cells.map(td=>{const rect=td.getBoundingClientRect();return {top:rect.top+window.scrollY,bottom:rect.bottom+window.scrollY};});
+  return {table,index,cells,positions};
 }
 /* 指の高さが、押し始めた列の何行目にあたるかを探して、そのセルを返す */
 function dragCellAt(e,col){
   if(!col||!col.table)return null;
-  const cells=Array.prototype.filter.call(
-    col.table.querySelectorAll('tbody .bt-c'),
-    td=>td.cellIndex===col.index);
+  const cells=col.cells;
   if(!cells.length)return null;
-  for(const td of cells){
-    const r=td.getBoundingClientRect();
-    if(e.clientY>=r.top&&e.clientY<=r.bottom)return td;
+  const y=e.clientY+window.scrollY;
+  for(let i=0;i<cells.length;i++){
+    const r=col.positions[i];
+    if(y>=r.top&&y<=r.bottom)return cells[i];
   }
-  if(e.clientY<cells[0].getBoundingClientRect().top)return cells[0];
-  if(e.clientY>cells[cells.length-1].getBoundingClientRect().bottom)return cells[cells.length-1];
+  if(y<col.positions[0].top)return cells[0];
+  if(y>col.positions[cells.length-1].bottom)return cells[cells.length-1];
   return null;
 }
 
@@ -3937,7 +4038,7 @@ function avPointerDown(e,iso){
    往復してもモードが入れ替わらないようにする */
 function startAvDrag(cell,iso){
   const mode=cell.classList.contains('block')?'unblock':'block';
-  AVDRAG={mode,touched:new Set(),col:dragColOf(cell)};
+  AVDRAG={mode,touched:new Set(),col:dragColOf(cell),lastIndex:null};
   document.body.classList.add('noselect');
   avDragApply(cell,iso);
 }
@@ -3980,6 +4081,7 @@ function avHoldEnd(e){
   const h=AVHOLD;
   if(!h)return;
   const armed=h.armed;
+  if(armed&&AVDRAG&&e?.changedTouches?.[0]){const cell=dragCellAt(e.changedTouches[0],AVDRAG.col);if(cell)avDragApply(cell,cell.dataset.iso);}
   clearAvHold();
   if(armed){avDragEnd();return;}
   /* 押さえきる前に離した。指が動いていなければ「押すつもり」だったので1マスだけ変える。
@@ -4010,6 +4112,14 @@ function avDragMove(e){
   if(el)avDragApply(el,el.dataset.iso);
 }
 function avDragApply(cell,iso){
+  if(!AVDRAG)return;
+  const cells=AVDRAG.col.cells,index=cells.indexOf(cell);
+  if(index<0)return;
+  const previous=AVDRAG.lastIndex??index;
+  for(let i=Math.min(previous,index);i<=Math.max(previous,index);i++)avDragMark(cells[i],cells[i].dataset.iso);
+  AVDRAG.lastIndex=index;
+}
+function avDragMark(cell,iso){
   if(!AVDRAG||AVDRAG.touched.has(iso))return;
   /* ここでは見た目だけ変える。保存する中身は、指を離したときに
      その列の×の並びから作り直す（avDragEnd → blkColumnPlan）。
@@ -4030,12 +4140,13 @@ function avColumnCells(col){
     .map(td=>({t:new Date(td.dataset.iso).getTime(),
       st:td.classList.contains('block')?'x':td.classList.contains('locked')?'lock':td.classList.contains('off')?'past':'ok'}));
 }
-async function avDragEnd(){
+async function avDragEnd(event){
   document.removeEventListener('pointermove',avDragMove);
   document.removeEventListener('pointerup',avDragEnd);
   document.removeEventListener('pointercancel',avDragEnd);
   document.body.classList.remove('noselect');
   if(!AVDRAG)return;
+  if(event?.type==='pointerup'){const cell=dragCellAt(event,AVDRAG.col);if(cell)avDragApply(cell,cell.dataset.iso);}
   const {touched,col}=AVDRAG;
   AVDRAG=null;
   if(!touched.size)return;
@@ -4044,12 +4155,11 @@ async function avDragEnd(){
      ここで描き直すと、指を離すたびに表がまるごと作り直されて
      スマホでは画面が一瞬ちらつき、見ていた位置も飛ぶ。
      保存が通ったときは何もせず、失敗したときだけ本当の状態へ戻す */
-  const ok=await applyBlockChanges({added,removedIds});
-  if(!ok){renderQuiet();return;}
+  const saved=applyBlockChanges({added,removedIds});
   // 表は描き直さないので、見出しの枠数だけその場で数え直す
   const cnt=document.getElementById('avBlockedCnt');
   if(cnt)cnt.textContent=document.querySelectorAll('.booktable .bt-c.block').length;
-  toast(touched.size>1?`${touched.size}件を更新しました`:'更新しました');
+  await saved;
 }
 
 /* 「日時でまとめて追加」フォーム＋スクロール式 時間ピッカー */
@@ -4086,6 +4196,7 @@ function tpSet(which,v){
   document.getElementById('tpick_'+which).classList.remove('open');
 }
 async function addBlock(){
+  const form=BLKFORM,snapshot=JSON.stringify(BLKFORM),userId=ME.id;
   const {date,start:s,end:e}=BLKFORM;const note=(BLKFORM.note||'').trim();
   const err=document.getElementById('blkErr');err.classList.remove('show');
   if(!date||!s||!e){err.textContent='日付・開始・終了を入力してください';err.classList.add('show');return;}
@@ -4098,9 +4209,10 @@ async function addBlock(){
     added:[{id:'blk_'+uid(),start:start.toISOString(),end:end.toISOString(),note}],
   });
   if(!ok)return;
+  if(ME?.id!==userId)return;
   toast('受けられない時間を登録しました');
   // 追加・削除も同じ画面の中の出来事なので、暗転しない renderQuiet() を使う
-  initBlkForm();renderQuiet();
+  if(currentTab==='avset'&&BLKFORM===form&&JSON.stringify(BLKFORM)===snapshot){initBlkForm();AVGOOGLE_FULL_REFRESH=true;avGoogleRefresh();}
 }
 
 /* =========================================================

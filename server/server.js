@@ -1001,7 +1001,8 @@ async function insertNotification({ type, msg, branch_id }) {
 }
 
 async function writeDB(obj) {
-  const updatedAt = new Date().toISOString();
+  // 同じミリ秒の連続書き込みでも、楽観ロックの版番号を必ず進める。
+  const updatedAt = new Date(Math.max(Date.now(),(Date.parse(dbCache?.updatedAt)||0)+1)).toISOString();
   const { updatedAt: _ignored, ...body } = obj;
   const data = JSON.stringify(body);
   await client.execute({
@@ -2534,6 +2535,39 @@ function scrubEmail(u, actor) {
   const { email, ...rest } = u;
   return rest;
 }
+
+// 通常の不可時間は増減だけを本人の領域へ適用する。DB全体の版番号に依存させない。
+app.patch('/api/availability/blocks', requireAuth, async (req,res) => {
+  const body=req.body;
+  if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!['added','removedIds'].includes(key)))return res.status(400).json({error:'不可時間の変更内容が不正です'});
+  const {added=[],removedIds=[]}=body;
+  const validId=id=>typeof id==='string'&&id.length>0&&id.length<=128;
+  if(!Array.isArray(added)||!Array.isArray(removedIds)||added.length>1000||removedIds.length>1000||!removedIds.every(validId)||added.some(block=>!block||!validId(block.id)||!Number.isFinite(Date.parse(block.start))||!Number.isFinite(Date.parse(block.end))||Date.parse(block.end)<=Date.parse(block.start)||!['slot','range',undefined].includes(block.kind)||(block.note!==undefined&&(typeof block.note!=='string'||block.note.length>2000))))return res.status(400).json({error:'不可時間の日時・内容が不正です'});
+  const normalized=added.map(block=>({id:block.id,start:new Date(block.start).toISOString(),end:new Date(block.end).toISOString(),note:block.note||'',...(block.kind?{kind:block.kind}:{})}));
+  try{
+    const result=await withDBLock(async()=>{
+      const db=await readDBForWrite()||{};
+      const userId=req.authUser.id;
+      db.availability=db.availability||{};
+      const av=db.availability[userId]||{};
+      const blocks=av.blocks||[];
+      const protectedIds=new Set(blocks.filter(block=>block.kind==='external-google').map(block=>block.id));
+      if(removedIds.some(id=>protectedIds.has(id))||normalized.some(block=>protectedIds.has(block.id)))return {status:400,payload:{error:'Google予定は予定の帯から調整してください'}};
+      const removed=new Set(removedIds);
+      const next=new Map(blocks.filter(block=>!removed.has(block.id)).map(block=>[block.id,block]));
+      normalized.forEach(block=>next.set(block.id,block));
+      const updated={...av,blocks:[...next.values()]};
+      db.availability[userId]=updated;
+      const updatedAt=await writeDB(db);
+      return {status:200,payload:{blocks:updated.blocks,updatedAt}};
+    });
+    res.status(result.status).json(result.payload);
+  }catch(error){
+    invalidateDBCache();
+    console.error('不可時間の保存に失敗しました',error);
+    res.status(500).json({error:'不可時間を保存できませんでした'});
+  }
+});
 
 // DB全体を置き換えて保存する。users は専用APIでのみ変更するためここでは無視する
 app.put('/api/db', requireAuth, async (req, res) => {
