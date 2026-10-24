@@ -45,10 +45,10 @@ function canSee(c, branchId) {
 }
 
 /* 見える人にだけ押し出す。書けない相手は切れているので一覧から外す */
-function broadcast(branchId, payload) {
+function broadcast(branchId, payload, recipientId) {
   const body = `event: refresh\ndata: ${JSON.stringify(payload || {})}\n\n`;
   for (const c of [...clients]) {
-    if (!canSee(c, branchId)) continue;
+    if (recipientId ? c.userId!==recipientId : !canSee(c, branchId)) continue;
     try { c.res.write(body); } catch { clients.delete(c); }
   }
 }

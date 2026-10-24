@@ -169,5 +169,17 @@ console.log('\n[ ハートビートの開始と停止 ]');
   }
 }
 
+{
+  delete require.cache[require.resolve('../server/stream.js')];
+  const stream=require('../server/stream.js');
+  const owner=fakeRes(),other=fakeRes(),admin=fakeRes();
+  stream.addClient(owner,{id:'owner',role:'admin',branch_id:null});
+  stream.addClient(other,{id:'other',role:'staff',branch_id:'b1'});
+  stream.addClient(admin,{id:'unrelated-admin',role:'admin',branch_id:null});
+  stream.broadcast(null,{type:'個人申請'},'owner');
+  check('個人宛通知の更新合図は所有者だけに届く',owner.writes.length,1);
+  check('個人宛通知の更新合図は無関係な支部へ届かない',other.writes.length,0);
+  check('個人宛通知の更新合図は他の管理者へ届かない',admin.writes.length,0);
+}
 console.log(`\n合格 ${pass}件 / 不合格 ${failures.length}件`);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

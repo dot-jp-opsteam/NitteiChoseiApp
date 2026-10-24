@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {runManualAvailabilityTests} from './test-manual-availability-api.mjs';
+import {runPersonalApplyTests} from './test-personal-apply.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // server/ 側にインストールされている @libsql/client を借りる（tools用の依存は増やさない）
@@ -104,6 +105,8 @@ async function setupDB(dbPath) {
     token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)`);
   await c.execute(`CREATE TABLE IF NOT EXISTS store (
     id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+  await c.execute('CREATE TABLE IF NOT EXISTS branch_invites (branch_id TEXT PRIMARY KEY,token TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL,created_by TEXT)');
+  await c.execute({sql:'INSERT INTO branch_invites (branch_id,token,created_at,created_by) VALUES (?,?,?,?)',args:['b1','legacy_e2e_branch_link',now,'u_e2e_staff']});
 
   for (const [id, email, role, branch] of USERS) {
     await c.execute({
@@ -1678,17 +1681,17 @@ async function run() {
     check('成功した1件だけが保存されている', saved, 1);
   }
 
-  console.log('\n─────── 面談（支部リンクからの申請） ───────');
+  console.log('\n─────── 面談（個人リンクからの申請） ───────');
   {
     /* インターン生のアカウントは廃止した。
        支部の合言葉つきURLから、本名だけで申請する形になっている */
     const linkRes = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
-    check('スタッフが支部の申請URLを取れる', linkRes.status, 200);
+    check('スタッフが自分の申請URLを取れる', linkRes.status, 200);
     const token1 = String(linkRes.json.url || '').split('/i/')[1];
     check('URLに合言葉が入っている', typeof token1 === 'string' && token1.length >= 32, true);
 
     const again = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
-    check('同じ支部なら同じURLが返る', String(again.json.url || '').split('/i/')[1], token1);
+    check('同じ本人なら同じURLが返る', String(again.json.url || '').split('/i/')[1], token1);
     const otherLink = await api(TOKENS.staff2, 'GET', '/api/staff/intern-invite-url');
     check('支部が違えば別のURLになる',
       String(otherLink.json.url || '').split('/i/')[1] !== token1, true);
@@ -1701,8 +1704,7 @@ async function run() {
     check('合言葉だけで申請ページを開ける', page.status, 200);
     check('支部名が返る', page.json.branch?.name, '東京');
     const staffIds = (page.json.staff || []).map((x) => x.id).sort();
-    check('選べるのは同じ支部のスタッフだけ', staffIds.join(','),
-      'u_e2e_staff,u_e2e_staff3,u_e2e_staff4');
+    check('担当者はURLの所有者に固定', staffIds.join(','),'u_e2e_staff');
     check('メールアドレスは渡さない', 'email' in ((page.json.staff || [])[0] || {}), false);
 
     // 空き枠。今日から1週間ぶんの表で返る。受付時間を決めていなくても既定値で出る
@@ -1766,7 +1768,7 @@ async function run() {
       check('説明は色付きの囲みにしない', applyHtml.includes('<div class="guide">'), true);
       /* 未入力のあいだだけ赤い＊を出す */
       check('お名前に必須の＊がある', applyHtml.includes('id="reqname"'), true);
-      check('担当スタッフに必須の＊がある', applyHtml.includes('id="reqstaff"'), true);
+      check('担当固定では選択を求めず、旧URLだけ選択欄を維持', applyHtml.includes('APPLY.fixedStaff')&&applyHtml.includes('apply-staff-name')&&applyHtml.includes('setApplyStaff(this.value)'), true);
 
       /* スマホの誤タップ対策。画面を送ろうとして表の上に指が乗っただけで
          枠が入ってしまうので、指のときは押さえてからでないと掴まない。
@@ -2086,9 +2088,11 @@ async function run() {
 
     /* 画面では続いた枠がひとつの希望にまとまるので、送られてくる枠は1件とは限らない。
        希望順は送った並びのまま保たれる必要がある */
-    const second = await firstOpenSlot(token1, 'u_e2e_staff3');
-    const third = await firstOpenSlot(token1, 'u_e2e_staff3', [second.iso]);
-    const multi = await api(null, 'POST', `/api/apply/${token1}`,
+    const staff3Link=await api(TOKENS.staff3,'GET','/api/staff/intern-invite-url');
+    const staff3Token=String(staff3Link.json.url||'').split('/i/')[1];
+    const second = await firstOpenSlot(staff3Token, 'u_e2e_staff3');
+    const third = await firstOpenSlot(staff3Token, 'u_e2e_staff3', [second.iso]);
+    const multi = await api(null, 'POST', `/api/apply/${staff3Token}`,
       { name: '複数希望 花子', staff_id: 'u_e2e_staff3', choices: [third.iso, second.iso] });
     check('希望を複数まとめて申請できる', multi.status, 200);
     const multiView = await getDB(TOKENS.staff3);
@@ -2118,8 +2122,10 @@ async function run() {
       const d = new Date(iso);
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
-    const allDaySlot = await firstOpenSlot(token1, 'u_e2e_staff4');
-    const allDayApply = await api(null, 'POST', `/api/apply/${token1}`, {
+    const staff4Link=await api(TOKENS.staff4,'GET','/api/staff/intern-invite-url');
+    const staff4Token=String(staff4Link.json.url||'').split('/i/')[1];
+    const allDaySlot = await firstOpenSlot(staff4Token, 'u_e2e_staff4');
+    const allDayApply = await api(null, 'POST', `/api/apply/${staff4Token}`, {
       name: '終日 太郎', staff_id: 'u_e2e_staff4',
       choices: [allDaySlot.iso], all_day: [dayOf(allDaySlot.iso), 'これは日付ではない'],
     });
@@ -2167,10 +2173,11 @@ async function run() {
 
     // 合言葉の作り直し
     const byStaff = await api(TOKENS.staff, 'POST', '/api/staff/intern-invite-url/regenerate');
-    check('ふつうのスタッフは作り直せない', byStaff.status, 403);
-    const regen = await api(TOKENS.admin, 'POST', '/api/staff/intern-invite-url/regenerate',
+    check('ふつうのスタッフも本人のリンクを作り直せる', byStaff.status, 200);
+    const adminRegen = await api(TOKENS.admin, 'POST', '/api/staff/intern-invite-url/regenerate',
       { branch_id: 'b1' });
-    check('管理者は作り直せる', regen.status, 200);
+    check('管理者も本人のリンクを作り直せる', adminRegen.status, 200);
+    const regen=byStaff;
     const token2 = String(regen.json.url || '').split('/i/')[1];
     check('合言葉が新しくなる', token2 !== token1, true);
     const oldGone = await api(null, 'GET', `/api/apply/${token1}`);
@@ -2468,7 +2475,8 @@ async function run() {
        アカウントが無いので、支部リンクから名前だけで一斉に申し込む。
        希望はそれぞれ別の枠にする（同じ枠を100人が取り合う話ではないため） */
     const link = await api(TOKENS.staff, 'GET', '/api/staff/intern-invite-url');
-    const applyToken = String(link.json.url || '').split('/i/')[1];
+    const staff4Link=await api(TOKENS.staff4,'GET','/api/staff/intern-invite-url');
+    const applyToken = String(staff4Link.json.url || '').split('/i/')[1];
     /* 1週間ぶんでは100枠に届かないので、週をめくって集める。
        今日より前の枠は落ちるため、今週だけでは足りない日がある */
     const openSlots = [];
@@ -2516,6 +2524,7 @@ try {
     await testGoogleSyncFilter();
     await testLockLogic();
     await runManualAvailabilityTests({api,getDB,putDB,tokens:TOKENS,check});
+    await runPersonalApplyTests({api,tokens:TOKENS,check});
   }
   console.log(`\n${'─'.repeat(56)}`);
   if (!process.argv.includes('--browser') && failures.length) {

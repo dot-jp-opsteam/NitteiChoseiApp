@@ -273,8 +273,7 @@ const SCENES = {
   // 面談申請リンク：学生が名前・担当・希望日時を送る
   async apply(page, url) {
     await page.goto(url); await sleep(1500);
-    await page.locator('#applyname').fill('山田 太郎');           // 名前と担当スタッフの選択は
-    await page.locator('select').first().selectOption({ index: 1 }); // 見せない（最初から入れておく）
+    await page.locator('#applyname').fill('山田 太郎');           // 名前は撮影前に入力する。担当はURLで固定。
     await page.locator('td.bt-c.ok').first().waitFor({ timeout: 10000 }); // 空き枠が出るまで待つ
     await start(page);
     await pickSlots(page);
@@ -345,7 +344,10 @@ try {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   try { browser = await chromium.launch(); }
   catch { browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' }); }
-  for (const [name, scene] of Object.entries(SCENES)) {
+  const only=process.argv.find(arg=>arg.startsWith('--only='))?.slice(7);
+  const scenes=Object.entries(SCENES).filter(([name])=>!only||name===only);
+  if(!scenes.length)throw Error('録画対象が見つかりません: '+only);
+  for (const [name, scene] of scenes) {
     const ctx = await browser.newContext({
       viewport: { width: W, height: H }, deviceScaleFactor: S, locale: 'ja-JP', timezoneId: 'Asia/Tokyo',
     });

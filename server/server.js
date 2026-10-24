@@ -286,6 +286,9 @@ async function initDB() {
       created_by TEXT
     )
   `);
+  await client.execute(`CREATE TABLE IF NOT EXISTS staff_apply_links (
+    staff_id TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+  )`);
   /* 日程調整URL（空き時間を確認）。発行するたびに1行できる。
      token は URL に載る合言葉。支部の合言葉と違い作り直しはしない
      （不要になったら配るのをやめるだけ。締め切り・削除の機能は持たない） */
@@ -373,6 +376,8 @@ async function initDB() {
     'ALTER TABLE users ADD COLUMN staff_id TEXT',     // インターン生の担当スタッフ
     'ALTER TABLE google_tokens ADD COLUMN calendar_name TEXT', // 全体予定表の表示名
     'ALTER TABLE freeslot_responses ADD COLUMN choice_mode TEXT', // 選んだマスの読み方（下の CHOICE_MODE）
+    'ALTER TABLE notifications ADD COLUMN recipient_id TEXT',
+    'ALTER TABLE archived_notifications ADD COLUMN recipient_id TEXT',
   ]) {
     try {
       await client.execute(ddl);
@@ -669,12 +674,10 @@ async function listEventResponses(visibleEventIds) {
 }
 
 async function listNotificationsFor(user) {
-  const rs = user.role === 'admin'
-    ? await client.execute('SELECT * FROM notifications')
-    : await client.execute({
-      sql: 'SELECT * FROM notifications WHERE branch_id IS NULL OR branch_id = ?',
-      args: [user.branch_id || null],
-    });
+  const rs=await client.execute({
+    sql:"SELECT * FROM notifications WHERE recipient_id = ? OR (recipient_id IS NULL AND (? = 'admin' OR branch_id IS NULL OR branch_id = ?))",
+    args:[user.id,user.role,user.branch_id||null],
+  });
   return rs.rows.map((r) => ({ id: r.id, type: r.type, msg: r.msg, branch_id: r.branch_id, at: r.at }));
 }
 
@@ -694,7 +697,7 @@ async function archiveOldRecords() {
       { from: 'emails', to: 'archived_emails', dateCol: 'sent_at',
         cols: 'id, sender_id, receiver_id, subject, body, sent_at, delivered' },
       { from: 'notifications', to: 'archived_notifications', dateCol: 'at',
-        cols: 'id, type, msg, branch_id, at' },
+        cols: 'id, type, msg, branch_id, at, recipient_id' },
     ]) {
       // 移してから消す。順番が逆だと、途中で失敗したときに記録そのものが消えてしまう
       const ins = await client.execute({
@@ -981,21 +984,21 @@ async function recordAttendMails(actor, request) {
 
 /* 通知は依頼の送信などに付随して積まれる。専用APIの中から呼ぶ。
    画面側が積まれた通知をその場で表示できるよう、作った1件を返す */
-async function insertNotification({ type, msg, branch_id }) {
+async function insertNotification({ type, msg, branch_id, recipient_id }) {
   const row = {
     id: 'nt_' + crypto.randomBytes(6).toString('hex'),
     type: type || null, msg: msg || '', branch_id: branch_id || null,
     at: new Date().toISOString(),
   };
   await client.execute({
-    sql: 'INSERT INTO notifications (id, type, msg, branch_id, at) VALUES (?,?,?,?,?)',
-    args: [row.id, row.type, row.msg, row.branch_id, row.at],
+    sql: 'INSERT INTO notifications (id, type, msg, branch_id, at, recipient_id) VALUES (?,?,?,?,?,?)',
+    args: [row.id, row.type, row.msg, row.branch_id, row.at, recipient_id||null],
   });
   /* つながっている画面へ「更新があった」ことを押し出す。
      呼び出し側ではなくここに置いているのは、通知を積む場所が増えても
      送り忘れが起きないようにするため（設計書 3.3）。
      送れなくても本筋の保存は済んでいるので、失敗しても先へ進む */
-  try { stream.broadcast(row.branch_id, { type: row.type || '' }); }
+  try { stream.broadcast(row.branch_id, { type: row.type || '' },recipient_id); }
   catch (e) { console.warn('更新の押し出しに失敗しました', e); }
   return row;
 }
@@ -2076,66 +2079,48 @@ app.get('/api/admin/staff-invite-url', requireAuth, requireBranchAdmin, (req, re
   res.json({ url: `${base}/staff`, domain: STAFF_EMAIL_DOMAIN });
 });
 
-/* ---------- スタッフ：インターン生を招くURL ----------
-   支部ごとに1本のURL。同じ支部のスタッフは全員これを配る。
-   以前は「自分のIDを付けた個人ごとのURL」だったが、インターン生の会員登録を
-   廃止したため、登録先ではなく申請ページの入口になった。
+/* スタッフ本人宛の面談申請URL。新規取得は本人専用。配布済みの支部共通URLは当面維持する。 */
 
-   合言葉は推測できない長さにしてある。配布先が広いぶん漏れることも想定し、
-   作り直せるようにしてある（作り直すと古いURLはその場で通らなくなる）。 */
-
-/* 支部の合言葉を引く。まだ無ければ作って返す。
-   支部を作るたびに用意するのは忘れやすいので、最初に必要になった時点で用意する */
-async function getOrCreateBranchInvite(branchId, createdBy) {
-  const rs = await client.execute({
-    sql: 'SELECT token FROM branch_invites WHERE branch_id = ?',
-    args: [String(branchId)],
-  });
-  if (rs.rows[0]) return rs.rows[0].token;
+/* スタッフ本人専用の合言葉。同時取得でも1本だけ発行する。 */
+async function getOrCreateStaffApplyLink(staffId) {
+  const current=await client.execute({sql:'SELECT token FROM staff_apply_links WHERE staff_id = ?',args:[staffId]});
+  if(current.rows[0])return current.rows[0].token;
   const token = crypto.randomBytes(24).toString('hex');
   await client.execute({
-    sql: 'INSERT INTO branch_invites (branch_id, token, created_at, created_by) VALUES (?,?,?,?)',
-    args: [String(branchId), token, new Date().toISOString(), createdBy || null],
+    sql: 'INSERT INTO staff_apply_links (staff_id,token,created_at) VALUES (?,?,?) ON CONFLICT(staff_id) DO NOTHING',
+    args: [staffId,token,new Date().toISOString()],
   });
-  return token;
+  return (await client.execute({sql:'SELECT token FROM staff_apply_links WHERE staff_id = ?',args:[staffId]})).rows[0].token;
 }
 
-/* スタッフが自分の支部の申請URLを見る。
-   admin は支部を持たないことがあるので、その場合は支部を指定してもらう */
+/* 本人の個人用リンクを取得する。管理者も本人のURLだけを返す。 */
 app.get('/api/staff/intern-invite-url', requireAuth, async (req, res) => {
   const me = req.authUser;
   if (!['staff', 'branch_admin', 'admin'].includes(me.role)) {
     return res.status(403).json({ error: 'インターン生を招けるのはスタッフだけです' });
   }
-  // 他支部のURLを覗けないよう、admin 以外は自分の支部に固定する
-  const branchId = me.role === 'admin' ? (req.query.branch_id || me.branch_id) : me.branch_id;
-  if (!branchId) return res.status(400).json({ error: '支部が設定されていません' });
   try {
-    const token = await getOrCreateBranchInvite(branchId, me.id);
+    const token = await getOrCreateStaffApplyLink(me.id);
     const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-    res.json({ url: `${base}/i/${token}`, branch_id: branchId });
+    res.json({ url: `${base}/i/${token}`, branch_id: me.branch_id||null,staff_id:me.id });
   } catch (e) {
     console.error('支部の申請URLの取得に失敗しました', e);
     res.status(500).json({ error: '取得に失敗しました' });
   }
 });
 
-/* 申請URLを作り直す。漏れたときの唯一の対処なので、支部管理者以上に限る。
-   古い合言葉は消すので、配り直すまで誰も申請できなくなる点に注意 */
-app.post('/api/staff/intern-invite-url/regenerate', requireAuth, requireBranchAdmin, async (req, res) => {
+/* 本人の個人用リンクだけを再発行する。他のスタッフや旧支部共通URLには影響しない。 */
+app.post('/api/staff/intern-invite-url/regenerate', requireAuth, async (req, res) => {
   const me = req.authUser;
-  const branchId = me.role === 'admin' ? (req.body?.branch_id || me.branch_id) : me.branch_id;
-  if (!branchId) return res.status(400).json({ error: '支部が設定されていません' });
   try {
     const token = crypto.randomBytes(24).toString('hex');
     await client.execute({
-      sql: `INSERT INTO branch_invites (branch_id, token, created_at, created_by) VALUES (?,?,?,?)
-            ON CONFLICT(branch_id) DO UPDATE SET token = excluded.token,
-              created_at = excluded.created_at, created_by = excluded.created_by`,
-      args: [String(branchId), token, new Date().toISOString(), me.id],
+      sql: `INSERT INTO staff_apply_links (staff_id,token,created_at) VALUES (?,?,?)
+            ON CONFLICT(staff_id) DO UPDATE SET token=excluded.token,created_at=excluded.created_at`,
+      args: [me.id,token,new Date().toISOString()],
     });
     const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-    res.json({ url: `${base}/i/${token}`, branch_id: branchId });
+    res.json({ url: `${base}/i/${token}`, branch_id:me.branch_id||null,staff_id:me.id });
   } catch (e) {
     console.error('支部の申請URLの作り直しに失敗しました', e);
     res.status(500).json({ error: '作り直しに失敗しました' });
@@ -3091,22 +3076,26 @@ async function branchByInviteToken(token) {
   return branch ? { id: branchId, name: branch.name } : null;
 }
 
-/* 申請ページの最初の読み込み。支部名と、選べるスタッフの一覧を返す。
+async function staffByApplyToken(token){
+  const result=await client.execute({sql:`SELECT u.id,u.nickname,u.branch_id FROM staff_apply_links l
+    JOIN users u ON u.id=l.staff_id WHERE l.token=? AND u.status='active' AND u.role IN ('staff','branch_admin','admin')`,args:[String(token||'')]});
+  return result.rows[0]||null;
+}
+
+/* 申請ページの最初の読み込み。支部名と、URLに固定されたスタッフを返す。
    返すのは表示に要る分だけ。メールアドレスや権限は渡さない */
 app.get('/api/apply/:token', limitPublicRead, async (req, res) => {
   try {
+    const owner=await staffByApplyToken(req.params.token);
+    if(owner){
+      const db=await readDB();
+      const branch=(db?.branches||[]).find(item=>item.id===owner.branch_id);
+      return res.json({branch:{name:branch?.name||''},staff:[{id:owner.id,nickname:owner.nickname}],fixed_staff:true});
+    }
     const branch = await branchByInviteToken(req.params.token);
     if (!branch) return res.status(404).json({ error: 'このリンクは使えません。支部の担当者に確認してください' });
-    const rs = await client.execute({
-      sql: `SELECT id, nickname FROM users
-            WHERE branch_id = ? AND status = 'active' AND role IN ('staff','branch_admin')
-            ORDER BY nickname`,
-      args: [branch.id],
-    });
-    res.json({
-      branch: { name: branch.name },
-      staff: rs.rows.map((r) => ({ id: r.id, nickname: r.nickname })),
-    });
+    const rs=await client.execute({sql:"SELECT id,nickname FROM users WHERE branch_id=? AND status='active' AND role IN ('staff','branch_admin') ORDER BY nickname",args:[branch.id]});
+    res.json({branch:{name:branch.name},staff:rs.rows.map(row=>({id:row.id,nickname:row.nickname})),fixed_staff:false});
   } catch (e) {
     console.error('申請ページの読み込みに失敗しました', e);
     res.status(500).json({ error: '読み込めませんでした' });
@@ -3130,26 +3119,24 @@ function takenStartsOf(ivs) {
 /* 指定スタッフが選んでいる担当可能な相手か確かめたうえで、材料を集める。
    スタッフ選択・枠取得・申請の3か所で同じ確認が要るのでまとめてある */
 async function applyContextFor(token, staffId) {
+  const owner=await staffByApplyToken(token);
+  if(owner){
+    if(staffId!==undefined&&staffId!==null&&staffId!==''&&staffId!==owner.id)return {error:'このリンクの担当スタッフは変更できません',code:400};
+    const obj=await readDB();
+    const branch=(obj?.branches||[]).find(item=>item.id===owner.branch_id);
+    const availability=await availabilityApi.effectiveAvailability(owner.id,(obj?.availability||{})[owner.id]||{},Date.now(),Date.now()+31*86400000);
+    const ivs=await client.execute({sql:"SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'",args:[owner.id]});
+    return {branch:{id:owner.branch_id||null,name:branch?.name||''},staff:owner,availability,takenMs:takenStartsOf(ivs.rows.map(rowToInterview))};
+  }
   const branch = await branchByInviteToken(token);
   if (!branch) return { error: 'このリンクは使えません。支部の担当者に確認してください', code: 404 };
-  const rs = await client.execute({
-    sql: `SELECT id, nickname, branch_id FROM users
-          WHERE id = ? AND status = 'active' AND role IN ('staff','branch_admin')`,
-    args: [String(staffId || '')],
-  });
-  const staff = rs.rows[0];
-  // 他支部のスタッフを指定されても、合言葉の支部の外は認めない
-  if (!staff || staff.branch_id !== branch.id) {
-    return { error: 'このスタッフは選べません', code: 400 };
-  }
-  const obj = await readDB();
-  const availability = await availabilityApi.effectiveAvailability(staff.id, (obj?.availability || {})[staff.id] || {}, Date.now(), Date.now() + 31 * 86400000);
-  const ivs = await client.execute({
-    sql: `SELECT * FROM interviews WHERE staff_id = ? AND status = 'fixed'`,
-    args: [staff.id],
-  });
-  const takenMs = takenStartsOf(ivs.rows.map(rowToInterview));
-  return { branch, staff, availability, takenMs };
+  const rs=await client.execute({sql:"SELECT id,nickname,branch_id FROM users WHERE id=? AND status='active' AND role IN ('staff','branch_admin')",args:[String(staffId||'')]});
+  const staff=rs.rows[0];
+  if(!staff||staff.branch_id!==branch.id)return {error:'このスタッフは選べません',code:400};
+  const obj=await readDB();
+  const availability=await availabilityApi.effectiveAvailability(staff.id,(obj?.availability||{})[staff.id]||{},Date.now(),Date.now()+31*86400000);
+  const ivs=await client.execute({sql:"SELECT * FROM interviews WHERE staff_id=? AND status='fixed'",args:[staff.id]});
+  return {branch,staff,availability,takenMs:takenStartsOf(ivs.rows.map(rowToInterview))};
 }
 
 /* 選んだスタッフの空き枠を、今日から1週間ぶんの表として返す。
@@ -3227,6 +3214,7 @@ app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
     await saveInterview(iv);
     await insertNotification({
       type: '面談申請', branch_id: ctx.branch.id,
+      ...(!ctx.branch.id?{recipient_id:ctx.staff.id}:{}),
       msg: `${internName}さんが面談を申請しました`,
     });
     /* 端末の通知欄にも出す。届くのは担当に選ばれたスタッフだけ。

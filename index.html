@@ -1848,9 +1848,7 @@ function openMyStaffForm(){
     <div class="hint" style="margin-top:12px">${ic('alert')}<span>担当スタッフの変更はスタッフ側で行います。変えたいときは担当スタッフか支部の運営にご相談ください。</span></div>`);
 }
 
-/* インターン生に渡す申請リンクを出す。
-   支部ごとに1本の共通URLで、何人にでも、何度でも使える。
-   「登録」リンクではない（会員登録は廃止した）ので、担当が決まることもない */
+/* ログイン中のスタッフ本人へ届く申請リンク。相手のログインは不要。 */
 async function openInternInviteLink(){
   openSheet(`<h3>面談申請リンク</h3>
     <p class="page-sub" style="margin-top:0">読み込んでいます…</p>`);
@@ -1866,16 +1864,16 @@ async function openInternInviteLink(){
     return;
   }
   openSheet(`<h3>面談申請リンク</h3>
-    <p class="page-sub" style="margin-top:0"><b>${esc(branchName(ME.branch_id))}</b>の共通リンクです。
-      同じ支部のスタッフは全員このリンクを配ります。</p>
+    <p class="page-sub" style="margin-top:0"><b>${esc(ME.nickname)}</b>さん宛の個人用リンクです。
+      このリンクからの面談申請は、あなたに届きます。</p>
     <div class="invite-url" id="inviteUrl">${esc(url)}</div>
     <button class="btn pri block" style="margin-top:12px" onclick="copyInviteLink('${esc(url)}')">リンクをコピーする</button>
-    <p class="fine" style="margin-top:14px">学生がリンクを開くと、会員登録もログインも無しで面談を申請できます。
-      入力するのは本名だけです。申請の相手は、この支部のスタッフから学生が選びます。</p>
-    ${isAdminLike()?`<button class="btn block" style="margin-top:10px"
+    <p class="fine" style="margin-top:14px">相手は会員登録もログインも無しで、名前と希望日時を入力して面談を申請できます。
+      担当者はあなたに固定され、相手が選ぶ必要はありません。</p>
+    <button class="btn block" style="margin-top:10px"
       onclick="regenerateInviteLink()">リンクを作り直す</button>
     <p class="fine" style="margin-top:8px">${ic('alert')}リンクが外部に漏れたときに使います。
-      作り直すと<b>今のリンクは使えなくなる</b>ので、学生に配り直してください。</p>`:''}`);
+      作り直すと<b>あなたの今の個人用リンクは使えなくなる</b>ので、相手に配り直してください。他のスタッフのリンクには影響しません。</p>`);
 }
 /* 面談申請リンクの入口。ホームに置く（「面談一覧・時間」には置かない。2026-10-09 の指示）。
    左側（文字）を押すとリンクの説明シートが開き、右の「コピー」でその場でコピーできる */
@@ -1885,7 +1883,7 @@ function internInviteCard(){
       <span class="cta-ic">${ic('link')}</span>
       <button type="button" class="ail-open" onclick="openInternInviteLink()">
         <span class="cta-tx"><b>面談申請リンク</b>
-          <small>学生に送ると、登録なしで面談を申請できます（支部で共通）</small></span>
+          <small>あなた宛の面談を、登録なしで申請できる個人用リンク</small></span>
       </button>
       <button type="button" class="btn pri ail-copy" onclick="copyInternInviteLinkQuick()">${ic('copy')}コピー</button>
     </div></div>`;
@@ -1906,7 +1904,7 @@ async function copyInternInviteLinkQuick(){
 /* 合言葉を新しくして、古いリンクを無効にする。
    配り直しが必要になるため、押し間違いが起きないよう一度確認する */
 async function regenerateInviteLink(){
-  if(!confirm('今のリンクは使えなくなります。学生に新しいリンクを配り直す必要があります。作り直しますか？'))return;
+  if(!confirm('あなたの今の個人用リンクは使えなくなります。相手に新しいリンクを配り直す必要があります。作り直しますか？'))return;
   try{
     const res=await api('/api/staff/intern-invite-url/regenerate',{method:'POST'});
     const data=await res.json();

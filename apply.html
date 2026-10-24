@@ -88,6 +88,7 @@ var APPLY = {
   name: '',          // 入力された本名
   staff: '',         // 選んだスタッフ
   staffList: [],     // 選べるスタッフ（同じ支部のみ）
+  fixedStaff: false, // 個人用はURL所有者に固定。旧共通URLだけ選択を残す
   weekOffset: 0,
   grid: null,        // サーバーから受け取った週の表
   loading: false,
@@ -243,8 +244,8 @@ function api(path,opts){
 }
 function slotsUrl(){
   return '/api/apply/'+encodeURIComponent(TOKEN)+'/slots'
-    +'?staff_id='+encodeURIComponent(APPLY.staff)
-    +'&week='+encodeURIComponent(APPLY.weekOffset);
+    +'?week='+encodeURIComponent(APPLY.weekOffset)
+    +(APPLY.fixedStaff?'':'&staff_id='+encodeURIComponent(APPLY.staff));
 }
 /* 週の表を取り直す。取得中に別のスタッフや週へ移られたら、
    古い結果で画面を上書きしないよう捨てる */
@@ -280,19 +281,18 @@ function viewApply(){
   if(!APPLY.staffList.length){
     return '<h1 class="page">面談を申請</h1>'
       +'<div class="empty"><div class="ei">'+ic('briefcase')+'</div>'
-      +'<p>この支部には、いま面談を担当できるスタッフがいません。<br>'
-      +'支部の担当者にご連絡ください。</p></div>';
+      +'<p>いま、このリンクから面談を申請できません。<br>'
+      +'リンクを送ったスタッフにご連絡ください。</p></div>';
   }
 
   // まとまりごとの希望順。同じ固まりの枠にはすべて同じ番号が付く
   syncAllDay();
   var groups=applyGroups();
 
-  var staffOptions='<option value="">選んでください</option>'
-    +APPLY.staffList.map(function(s){
-      return '<option value="'+esc(s.id)+'"'+(s.id===APPLY.staff?' selected':'')+'>'
-        +esc(s.nickname)+'</option>';
-    }).join('');
+  var staffName=APPLY.staffList[0].nickname;
+  var staffField=APPLY.fixedStaff
+    ? '<p class="apply-staff-name" style="margin:4px 0;font-weight:700">'+esc(staffName)+'さん</p><p class="fine" style="margin-top:6px">このスタッフへ面談を申請します。</p>'
+    : '<select onchange="setApplyStaff(this.value)"><option value="">選んでください</option>'+APPLY.staffList.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id===APPLY.staff?' selected':'')+'>'+esc(s.nickname)+'</option>';}).join('')+'</select><p class="fine" style="margin-top:6px">'+esc(BRANCH_NAME)+'のスタッフから選べます。</p>';
 
   return '<div class="applyhead"><h1 class="page">面談を申請</h1>'
       +'<span class="brand">'+esc(BRANCH_NAME)+'</span></div>'
@@ -304,9 +304,8 @@ function viewApply(){
         +' value="'+esc(APPLY.name)+'" oninput="APPLY.name=this.value;syncReq()">'
       +'<p class="fine" style="margin-top:6px">担当スタッフが本人を確かめるために使います。本名でご記入ください。</p>'
       +'<div class="divider"></div>'
-      +'<label class="fl">担当スタッフ<span class="req" id="reqstaff"'+(reqHidden(APPLY.staff))+'>*</span></label>'
-      +'<select onchange="setApplyStaff(this.value)">'+staffOptions+'</select>'
-      +'<p class="fine" style="margin-top:6px">'+esc(BRANCH_NAME)+'のスタッフから選べます。</p>'
+      +'<label class="fl">担当スタッフ</label>'
+      +staffField
       /* 選び方の案内。担当スタッフを選ぶ前から出しておく。
          インターン生はこの画面に初めて来るので、表が出てから読むのでは遅い。
          色を付けた囲み（.hint）ではなく本文と同じ黒字にしてある。
@@ -382,7 +381,7 @@ function goConfirm(){
     if(f)f.focus();
     return;
   }
-  if(!APPLY.staff){toast('担当スタッフを選んでください');return;}
+  if(!APPLY.staff){toast(APPLY.fixedStaff?'担当スタッフの情報を読み直してください':'担当スタッフを選んでください');return;}
   if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
   APPLY.step='confirm';
   render();
@@ -467,7 +466,7 @@ function weekBlock(groups){
   if(!APPLY.staff){
     return '<div class="divider"></div>'
       +'<div class="empty" style="padding:28px"><div class="ei">'+ic('staff')+'</div>'
-      +'<p>担当スタッフを選ぶと、空いている枠が出ます。</p></div>';
+      +'<p>'+(APPLY.fixedStaff?'担当スタッフの情報を読み込んでいます。':'担当スタッフを選ぶと、空いている枠が出ます。')+'</p></div>';
   }
   var pager='<div class="weekpager">'
     +'<button class="pg" onclick="setApplyWeek(-1)"'+(APPLY.weekOffset<=0?' disabled':'')+'>'
@@ -613,13 +612,11 @@ function reqHidden(v){return (v&&String(v).trim())?' hidden':'';}
 function syncReq(){
   var n=document.getElementById('reqname');
   if(n)n.hidden=!!(APPLY.name&&APPLY.name.trim());
-  var s=document.getElementById('reqstaff');
-  if(s)s.hidden=!!APPLY.staff;
 }
 function setApplyStaff(id){
+  if(APPLY.fixedStaff)return;
   APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];APPLY.grid=null;
-  syncReq();
-  loadGrid();
+  syncReq();loadGrid();
 }
 function setApplyWeek(delta){
   APPLY.weekOffset=Math.max(0,(APPLY.weekOffset||0)+delta);
@@ -979,7 +976,7 @@ function submitApply(){
   api('/api/apply/'+encodeURIComponent(TOKEN),{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:sum.name,staff_id:APPLY.staff,choices:choices,
+    body:JSON.stringify({name:sum.name,staff_id:APPLY.fixedStaff?undefined:APPLY.staff,choices:choices,
       all_day:allDay,note:sum.note,choice_mode:'slot'}),
   }).then(function(data){
     APPLY.sending=false;
@@ -1013,7 +1010,10 @@ api('/api/apply/'+encodeURIComponent(TOKEN)).then(function(data){
   BRANCH_NAME=(data.branch&&data.branch.name)||'';
   if(BRANCH_NAME)document.title=BRANCH_NAME+'の面談を申請 | OPS日調アプリ';
   APPLY.staffList=data.staff||[];
-  render();
+  APPLY.fixedStaff=!!data.fixed_staff;
+  APPLY.staff=APPLY.fixedStaff&&APPLY.staffList[0]&&APPLY.staffList[0].id||'';
+  if(APPLY.staff){document.title=APPLY.staffList[0].nickname+'さんに面談を申請 | OPS日調アプリ';loadGrid();}
+  else render();
 }).catch(function(e){fatal(e.message);});
 </script>
 </body>
