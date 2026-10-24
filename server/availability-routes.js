@@ -3,6 +3,14 @@ const { eventInterval, applicableOverride, effectiveIntervals, manualBusy } = re
 
 module.exports = function registerAvailabilityRoutes({app, client, requireAuth, google, GOOGLE_ENABLED, getTokenRow, accessTokenFor, ownGoogleEventIdsFor, readDB}) {
   let revision = 0;
+  const eventLookups = new Map();
+  async function lookupEvent(staff,row,id) {
+    const key=JSON.stringify([staff,id]);
+    if(eventLookups.has(key))return eventLookups.get(key);
+    const pending=(async()=>google.getEvent(await accessTokenFor(row),'primary',id))();
+    eventLookups.set(key,pending);
+    try{return await pending;}finally{eventLookups.delete(key);}
+  }
   async function init() {
     await client.execute(`CREATE TABLE IF NOT EXISTS availability_google_overrides (
       staff_id TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT NOT NULL,
@@ -91,10 +99,9 @@ module.exports = function registerAvailabilityRoutes({app, client, requireAuth, 
     try {
       const row = GOOGLE_ENABLED && await getTokenRow(req.authUser.id);
       if (!row) return res.status(409).json({error:'Google連携が必要です'});
-      const accessToken = await accessTokenFor(row);
       if (body.calendar_id !== 'primary') return res.status(400).json({error:'自分のカレンダーを指定してください'});
       if ((await ownGoogleEventIdsFor(req.authUser.id)).has(req.params.id)) return res.status(409).json({error:'確定済みの面談は面談一覧から変更してください'});
-      const event = await google.getEvent(accessToken,'primary',req.params.id);
+      const event = await lookupEvent(req.authUser.id,row,req.params.id);
       if (!event || event.status === 'cancelled') return res.status(404).json({error:'予定が見つかりません'});
       const original = eventInterval(event);
       if (!original.every(Number.isFinite)) return res.status(400).json({error:'予定の日時を読み取れません'});

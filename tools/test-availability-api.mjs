@@ -9,11 +9,12 @@ const event = (id,start,end,extra={}) => ({id,title:'private '+id,start:`2030-01
 const events = [event('first','10:00','12:00'),event('second','11:00','13:00'),event('own','15:00','16:00')];
 let fail = false;
 let mutationCalls = 0;
+let lookupCalls = 0;
 let storedCalendarId = 'primary';
 const google = {
   listCalendars:async()=>[{id:'me@example.com',primary:true}],
   listEventsInRange:async(_token,_calendar,from,to)=>{if(fail) throw Error('offline'); return events.filter(event=>Date.parse(event.start)<Date.parse(to) && Date.parse(event.end)>Date.parse(from));},
-  getEvent:async(_token,_calendar,id)=>events.find(event=>event.id===id),
+  getEvent:async(_token,_calendar,id)=>{lookupCalls++;return events.find(event=>event.id===id);},
   freeBusy:async()=>events.map(event=>[Date.parse(event.start),Date.parse(event.end)]),
   updateEvent:async()=>{mutationCalls++;},
 };
@@ -29,6 +30,13 @@ async function request(method,staff='staff',body={},id='first') {
 const body={calendar_id:'primary',start:events[0].start,end:events[0].end,ignored:true};
 assert.equal((await request('GET')).body.events.length,2);
 assert.equal((await request('PATCH','staff',body)).status,200);
+assert.equal(lookupCalls,1,'save verifies current Google event');
+await Promise.all([request('PATCH','staff',body),request('PATCH','staff',body)]);
+assert.equal(lookupCalls,2,'concurrent requests share only in-flight lookup');
+await request('PATCH','staff',body);
+assert.equal(lookupCalls,3,'subsequent save fetches current event again');
+await request('PATCH','isolated',body);
+assert.equal(lookupCalls,4,'lookup is isolated per staff');
 assert.equal(mutationCalls,0);
 assert.equal((await request('GET')).body.events[0].ignored,true);
 assert.equal((await request('GET','other')).body.events[0].ignored,false);
@@ -64,4 +72,4 @@ assert.equal((await request('GET')).body.events.filter(event=>event.id==='outsid
 events.at(-1).start='2029-12-31T09:00:00+09:00';
 assert.equal((await request('GET')).body.events.filter(event=>event.id==='outside').length,0);
 client.close();
-console.log('availability API/service: 24 checks passed');
+console.log('availability API/service/freshness/in-flight sharing: 28 checks passed');

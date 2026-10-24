@@ -10,8 +10,10 @@ export async function runAvailabilityBrowserTests(page){
   const start=day.toISOString(),end=new Date(+day+7200000).toISOString();
   let events=[{id:'ui_event',calendar_id:'primary',title:'授業 <テスト>',start,end,blocking_start:start,blocking_end:end,ignored:false,adjusted:false}];
   let fail=false;
+  let hold=null,patches=0;
   await page.route('**/api/availability/google-events**',async route=>{
     if(route.request().method()==='PATCH'){
+      patches++;if(hold)await hold;
       if(fail)return route.fulfill({status:503,json:{error:'保存テストエラー'}});
       const body=route.request().postDataJSON();
       events=events.map(event=>({...event,blocking_start:body.reset?start:body.start||event.blocking_start,blocking_end:body.reset?end:body.end||event.blocking_end,ignored:body.reset?false:!!body.ignored,adjusted:!body.reset}));
@@ -46,9 +48,28 @@ export async function runAvailabilityBrowserTests(page){
     fail=true;
     await page.locator('.avg-event-open').first().click();
     await page.getByRole('button',{name:'この予定中も面談OK',exact:true}).click();
-    await page.getByText('保存テストエラー',{exact:true}).waitFor();
+    await page.getByText('保存テストエラー。最後に保存できた時間に戻しました',{exact:true}).waitFor();
     check(await page.locator('.avg-band.avg-ignored').count()===0,'保存失敗で表示が変わらない');
     results.push({label:'保存失敗は元の状態を保持',ok:true});
+    fail=false;
+    let release;
+    hold=new Promise(resolve=>{release=resolve;});
+    const before=patches;
+    await page.evaluate(()=>{window.avTestStage=document.querySelector('.avg-stage');});
+    await page.locator('.avg-event-open').first().click();
+    await page.getByRole('button',{name:'この予定中も面談OK',exact:true}).click();
+    await page.locator('.avg-band.avg-ignored').waitFor();
+    check(await page.evaluate(()=>AVGOOGLE_SAVES.size===1),'応答待ちでも即時表示');
+    await page.locator('.avg-event-open').first().click();
+    await page.getByRole('button',{name:'元の予定どおりに戻す',exact:true}).click();
+    check(await page.locator('.avg-band.avg-ignored').count()===0,'保存中の再操作を即時表示');
+    check(patches===before+1,'同じ予定の保存を直列化');
+    hold=null;release();
+    await page.waitForFunction(()=>AVGOOGLE_SAVES.size===0);
+    check(patches===before+2,'最後の操作も保存');
+    check(await page.evaluate(()=>window.avTestStage===document.querySelector('.avg-stage')),'表全体を作り直さない');
+    check(!events[0].ignored,'最後の操作がサーバーに残る');
+    results.push({label:'遅延応答中の即時表示・連続操作・直列保存・部分更新',ok:true});
   }finally{await page.unroute('**/api/availability/google-events**');}
   return results;
 }
@@ -83,9 +104,12 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   assert.equal(vm.runInContext('AVGOOGLE.events[0].ignored',context),true);
   const classes=new Set(),label={textContent:'',classList:{add:name=>classes.add(name)}};
   context.document.getElementById=()=>label;
+  let failureMessage='',closed=false;
+  context.toast=message=>{failureMessage=message;};
+  context.closeSheet=()=>{closed=true;};
   vm.runInContext("AVGOOGLE_EDIT={event:AVGOOGLE.events[0],key:'test',sheet:true}",context);
   await context.avGoogleSave({ignored:false});
-  assert.equal(label.textContent,'save failed');assert.ok(classes.has('show'));
+  assert.match(failureMessage,/save failed/);assert.equal(closed,true);
   classes.clear();
   context.document.getElementById=id=>id==='avg-error'?label:{value:'2026-10-24T13:00'};
   context.avGoogleSaveInputs();

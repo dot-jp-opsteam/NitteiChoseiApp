@@ -1,5 +1,33 @@
 let AVGOOGLE={key:'',events:[],loading:false,error:'',connected:false};
 let AVGOOGLE_EDIT=null;
+const AVGOOGLE_SAVES=new Map();
+let AVGOOGLE_DRAG=false;
+let AVGOOGLE_VERSION=0,AVGOOGLE_REFRESH_TIMER=null;
+let AVGOOGLE_FULL_REFRESH=false;
+const AVGOOGLE_UPDATES=new Map();
+const avGoogleSaveKey=(key,event)=>JSON.stringify([key.split('|')[0],event.calendar_id,event.id]);
+
+function avGoogleRefresh(){
+  if(currentTab!=='avset')return;
+  if(AVGOOGLE_DRAG||(typeof AVDRAG!=='undefined'&&AVDRAG)||(typeof AVHOLD!=='undefined'&&AVHOLD)){
+    clearTimeout(AVGOOGLE_REFRESH_TIMER);AVGOOGLE_REFRESH_TIMER=setTimeout(avGoogleRefresh,50);return;
+  }
+  if(AVGOOGLE_FULL_REFRESH){AVGOOGLE_FULL_REFRESH=false;renderQuiet();return;}
+  if(typeof genEditGrid==='function'){
+    const {grid}=genEditGrid(ME.id,AVSET.weekOffset||0);
+    const states=new Map(grid.flat().map(cell=>[cell.iso,cell]));
+    document.querySelectorAll('.avg-stage td[data-iso]').forEach(cell=>{
+      const state=states.get(cell.dataset.iso);if(!state)return;
+      cell.className='bt-c '+({free:'ok',block:'block',locked:'locked',off:'off'}[state.state]);
+      cell.textContent={free:'○',block:'×',locked:'－',off:'×'}[state.state];
+      cell.title=state.state==='locked'?state.label+'あり':state.state==='block'?'タップまたはドラッグで解除':state.state==='free'?'タップ、または同じ日の中で上下になぞって不可にする':'';
+      cell.onpointerdown=['free','block'].includes(state.state)?event=>avPointerDown(event,state.iso):null;
+    });
+    const count=document.getElementById('avBlockedCnt');
+    if(count)count.textContent=grid.flat().filter(cell=>cell.state==='block').length;
+  }
+  avGooglePaint();
+}
 
 function avGoogleLanes(segments){
   const sorted=segments.slice().sort((left,right)=>left.start-right.start||left.end-right.end);
@@ -32,17 +60,28 @@ function avGoogleQueue(days){
 
 async function avGoogleLoad(range){
   const pending=AVGOOGLE;
+  const version=AVGOOGLE_VERSION;
   try{
     const response=await api('/api/availability/google-events?from='+encodeURIComponent(range.from)+'&to='+encodeURIComponent(range.to));
     const data=await response.json();
     if(!response.ok)throw Error(data.error||'Googleの予定を取得できませんでした');
     if(AVGOOGLE!==pending)return;
-    AVGOOGLE={...range,events:data.events||[],connected:!!data.connected,loading:false,error:''};
+    const events=(data.events||[]).map(event=>{
+      const id=avGoogleSaveKey(range.key,event),changed=AVGOOGLE_UPDATES.get(id);
+      return AVGOOGLE_SAVES.get(id)?.latest||(changed&&changed.version>version?changed.event:event);
+    });
+    for(const [id,changed] of AVGOOGLE_UPDATES){
+      if(JSON.parse(id)[0]!==range.key.split('|')[0]||(!AVGOOGLE_SAVES.has(id)&&changed.version<=version))continue;
+      const event=changed.event,from=Date.parse(range.from),to=Date.parse(range.to);
+      const overlaps=(start,end)=>Date.parse(start)<to&&Date.parse(end)>from;
+      if(!events.some(item=>item.id===event.id&&item.calendar_id===event.calendar_id)&&(overlaps(event.start,event.end)||(!event.ignored&&overlaps(event.blocking_start,event.blocking_end))))events.push(event);
+    }
+    AVGOOGLE={...range,events,connected:!!data.connected,loading:false,error:''};
   }catch(error){
     if(AVGOOGLE!==pending)return;
     AVGOOGLE.loading=false;AVGOOGLE.error=error.message;
   }
-  if(currentTab==='avset')renderQuiet();
+  if(currentTab==='avset'){AVGOOGLE_FULL_REFRESH=true;avGoogleRefresh();}
 }
 
 function avGoogleRetry(){AVGOOGLE.loading=true;AVGOOGLE.error='';avGoogleLoad({...AVGOOGLE});renderQuiet();}
@@ -90,7 +129,6 @@ function avGoogleTime(value){return avGoogleDate(value).toLocaleTimeString('ja-J
 function avGoogleInput(value){const date=avGoogleDate(value);return date.getFullYear()+'-'+pad(date.getMonth()+1)+'-'+pad(date.getDate())+'T'+pad(date.getHours())+':'+pad(date.getMinutes());}
 
 function avGoogleOpen(index){
-  if(AVGOOGLE_EDIT?.saving){toast('保存中です。少しお待ちください');return;}
   const source=AVGOOGLE.events[index];if(!source)return;
   const event={...source,start:avGoogleDate(source.start).toISOString(),end:avGoogleDate(source.end).toISOString()};
   AVGOOGLE_EDIT={event:{...event},key:AVGOOGLE.key,sheet:true};
@@ -104,42 +142,58 @@ function avGoogleSaveInputs(){
 }
 
 async function avGoogleSave(changes){
-  const editing=AVGOOGLE_EDIT;if(!editing||editing.saving)return;
-  editing.saving=true;
-  const buttons=editing.sheet?Array.from(document.querySelectorAll('.avg-actions button')):[];buttons.forEach(button=>button.disabled=true);
-  try{
-    const defaults={start:editing.event.blocking_start||avGoogleDate(editing.event.start).toISOString(),end:editing.event.blocking_end||avGoogleDate(editing.event.end).toISOString()};
-    const response=await api('/api/availability/google-events/'+encodeURIComponent(editing.event.id),{method:'PATCH',body:JSON.stringify({calendar_id:editing.event.calendar_id,...defaults,...changes})});
-    const data=await response.json();if(!response.ok)throw Error(data.error||'保存できませんでした');
-    if(AVGOOGLE.key===editing.key){
-      const updated=data.event||data;
-      AVGOOGLE.events=AVGOOGLE.events.map(event=>event.id===updated.id&&event.calendar_id===updated.calendar_id?updated:event);
-    }
-    if(AVGOOGLE_EDIT===editing){if(editing.sheet)closeSheet();AVGOOGLE_EDIT=null;}
-    if(currentTab==='avset')renderQuiet();
-    toast('面談不可時間を更新しました');
-  }catch(error){
-    if(AVGOOGLE_EDIT===editing){const label=editing.sheet&&document.getElementById('avg-error');if(label){label.textContent=error.message;label.classList.add('show');}else toast(error.message);}
-    else toast(error.message);
-  }finally{editing.saving=false;buttons.forEach(button=>button.disabled=false);}
+  const editing=AVGOOGLE_EDIT;if(!editing)return;
+  const event=editing.event;
+  const id=avGoogleSaveKey(editing.key,event);
+  let state=AVGOOGLE_SAVES.get(id);
+  if(!state){state={confirmed:{...event},pending:null,key:editing.key};AVGOOGLE_SAVES.set(id,state);}
+  const defaults={start:event.blocking_start||avGoogleDate(event.start).toISOString(),end:event.blocking_end||avGoogleDate(event.end).toISOString()};
+  const body={calendar_id:event.calendar_id,...defaults,ignored:!!event.ignored,...changes};
+  const optimistic=changes.reset?{...event,blocking_start:avGoogleDate(event.start).toISOString(),blocking_end:avGoogleDate(event.end).toISOString(),ignored:event.transparency==='transparent'||!!event.declined,adjusted:false}:{...event,blocking_start:body.start,blocking_end:body.end,ignored:body.ignored,adjusted:true};
+  const update=value=>{
+    state.latest=value;
+    AVGOOGLE_UPDATES.set(id,{event:value,version:++AVGOOGLE_VERSION});
+    if(AVGOOGLE_UPDATES.size>1000)AVGOOGLE_UPDATES.delete(AVGOOGLE_UPDATES.keys().next().value);
+    if(AVGOOGLE.key.split('|')[0]===state.key.split('|')[0]){AVGOOGLE.events=AVGOOGLE.events.map(item=>item.id===event.id&&item.calendar_id===event.calendar_id?value:item);avGoogleRefresh();}
+  };
+  state.pending=body;update(optimistic);
+  if(editing.sheet)closeSheet();
+  AVGOOGLE_EDIT=null;
+  if(state.running)return state.running;
+  state.running=(async()=>{
+    try{
+      while(state.pending){
+        const next=state.pending;state.pending=null;
+        try{
+          const response=await api('/api/availability/google-events/'+encodeURIComponent(event.id),{method:'PATCH',body:JSON.stringify(next)});
+          const data=await response.json();if(!response.ok)throw Error(data.error||'保存できませんでした');
+          state.confirmed=data.event||data;
+          if(!state.pending)update(state.confirmed);
+        }catch(error){
+          if(!state.pending){update(state.confirmed);toast(error.message+'。最後に保存できた時間に戻しました');}
+        }
+      }
+    }finally{AVGOOGLE_SAVES.delete(id);}
+  })();
+  return state.running;
 }
 
 function avGoogleResize(pointer,index,edge,rowHeight,band){
   if(pointer.button!==0)return;
-  if(AVGOOGLE_EDIT?.saving){toast('保存中です。少しお待ちください');return;}
   pointer.preventDefault();pointer.stopPropagation();
+  AVGOOGLE_DRAG=true;
   const event=AVGOOGLE.events[index],origin=pointer.clientY,key=AVGOOGLE.key;
   const original=+new Date(edge==='start'?event.blocking_start:event.blocking_end);
   let moved=0;
   const originalTop=parseFloat(band.style.top),originalHeight=parseFloat(band.style.height);
   const move=next=>{moved=Math.round((next.clientY-origin)/rowHeight)*1800000;const pixels=moved/1800000*rowHeight;band.style.opacity='.55';band.style.top=(originalTop+(edge==='start'?pixels:0))+'px';band.style.height=Math.max(18,originalHeight+(edge==='start'?-pixels:pixels))+'px';};
-  const cleanup=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);band.style.opacity='';};
-  const cancel=()=>{cleanup();avGooglePaint();};
+  const cleanup=()=>{AVGOOGLE_DRAG=false;window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);band.style.opacity='';};
+  const cancel=()=>{cleanup();avGoogleRefresh();};
   const finish=()=>{
-    cleanup();avGooglePaint();if(!moved||key!==AVGOOGLE.key)return;
+    cleanup();if(!moved||key!==AVGOOGLE.key){avGoogleRefresh();return;}
     pointer.target.dataset.dragged='1';
     const start=edge==='start'?original+moved:+new Date(event.blocking_start),end=edge==='end'?original+moved:+new Date(event.blocking_end);
-    if(end<=start){toast('終了は開始より後にしてください');return;}
+    if(end<=start){avGooglePaint();toast('終了は開始より後にしてください');return;}
     AVGOOGLE_EDIT={event:{...event},key};
     avGoogleSave({start:new Date(start).toISOString(),end:new Date(end).toISOString(),ignored:false});
   };
