@@ -2944,49 +2944,108 @@ async function reopenInterview(id){
   applyInterview(next);
   closeSheet();toast('申請中に戻しました');go('interviews');
 }
-/* 日時変更シートに出す「申請のときに選んでもらった候補」。押すと日時の欄へ入る。
-   今の確定日時と過ぎた枠は出さない。予約スケジュールの予約には候補が無いので何も出ない */
-function rescheduleCandidatesHTML(iv){
-  if(ivIsBooking(iv))return '';
-  const now=Date.now(),current=new Date(iv.confirmed_datetime).getTime();
-  const groups=ivGroups(iv).map(g=>({g,slots:g.slots.filter(v=>{const t=new Date(v).getTime();return t>now&&t!==current;})})).filter(x=>x.slots.length);
-  if(!groups.length)return '';
-  return `<div class="rsc-box"><div class="fl">申請時の候補から選ぶ</div>${groups.map(({g,slots})=>
-    `<div class="rsc-group"><div class="rsc-head">${fmtGroupRange(g)}</div><div class="rsc-slots">${slots.map(v=>
-      `<button type="button" class="rsc-slot" aria-pressed="false" data-iso="${esc(v)}" onclick="pickRescheduleSlot(this)">${hm(v)}〜</button>`).join('')}</div></div>`).join('')}
-    <p class="fine">選ぶと下の「変更後の日時」に入ります。候補にない時間は下で直接入力できます。</p></div>`;
+/* ---- 面談日時の変更 ----
+   確定するときの画面（openInterview）と同じ作り。申請のときに選んでもらった希望を
+   第1希望・第2希望…の順に並べ、開始時刻を入れて「この日時に変更」を押す。
+   変更前の確定日時は、入っていた希望に「変更前」の札を付けて残す（その時刻自体は選べない）。
+   過ぎた枠は選べない。候補が無い面談（予約スケジュールの予約など）と、
+   候補にない日時にしたいときは、日時を直接入れる画面（openRescheduleCustom）へ進む */
+let RS_OPEN=new Set(),RS_TIME={};
+function rsGroups(iv){
+  if(!iv||ivIsBooking(iv))return [];
+  const now=Date.now(),cur=new Date(iv.confirmed_datetime).getTime();
+  return ivGroups(iv).map((g,i)=>({g,n:i+1,
+    slots:g.slots.filter(v=>{const t=new Date(v).getTime();return t>now&&t!==cur;}),
+    current:g.slots.some(v=>new Date(v).getTime()===cur)})).filter(x=>x.slots.length||x.current);
 }
-function pickRescheduleSlot(button){
-  const d=new Date(button.dataset.iso),pad2=n=>String(n).padStart(2,'0');
-  document.getElementById('iv-change-datetime').value=`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  document.querySelectorAll('.rsc-slot').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
-  const err=document.getElementById('iv-change-error');err.textContent='';err.classList.remove('show');
+function rsSub(x){return {...x.g,slots:x.slots};}
+function rescheduleGroupHTML(id,iv,x){
+  const n=x.n,g=rsSub(x),open=RS_OPEN.has(n);
+  const val=RS_TIME[n]!==undefined?RS_TIME[n]:(x.slots[0]?hm(x.slots[0]):'');
+  const hit=x.slots.length?ivSlotFor(g,val):null;
+  const body=x.slots.length
+    ?`<div class="cpick"><input type="time" class="tin" id="rst${n}" step="1800" value="${esc(val)}"
+        oninput="rsTimeChange('${id}',${n},this.value)"><span class="tlab">開始</span></div>
+      <div class="field-err${hit?'':' show'}" id="rserr${n}">${hit?'':esc(ivTimeErr(g,val))}</div>
+      <button class="btn pri block" id="rsok${n}"${hit?'':' disabled'} onclick="rsPick('${id}',${n})">この日時に変更</button>`
+    :'<p class="fine">この希望は、いまの確定日時だけです。ほかの時間にするときは別の希望か、下の「候補以外の日時に変更する」を使ってください。</p>';
+  return `<div class="cgroup ${open?'open':''} ${x.current?'sel':''}" id="rsg${n}">
+    <div class="chead" onclick="rsToggle(${n})" role="button" tabindex="0" aria-expanded="${open?'true':'false'}"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();rsToggle(${n})}">
+      <span class="cn r${Math.min(n,4)}">第${n}希望</span><span>${fmtGroupRange(x.g)}</span>
+      ${x.current?'<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">変更前</span>':''}
+      <span class="cchev">${ic('chevron')}</span></div>
+    <div class="cwrap"><div class="cbody">${x.current?`<p class="fine">変更前の確定日時：${fmtDT(iv.confirmed_datetime)}</p>`:''}${body}</div></div></div>`;
 }
-function openInterviewReschedule(id){
+function rsToggle(n){
+  const willOpen=!RS_OPEN.has(n);
+  if(willOpen)RS_OPEN.add(n);else RS_OPEN.delete(n);
+  const el=document.getElementById('rsg'+n);if(!el)return;
+  el.classList.toggle('open',willOpen);
+  el.querySelector('.chead')?.setAttribute('aria-expanded',willOpen?'true':'false');
+}
+function rsGroupAt(id,n){
+  const iv=(DB.interviews||[]).find(item=>item.id===id);
+  return rsGroups(iv).find(x=>x.n===n)||null;
+}
+function rsTimeChange(id,n,val){
+  RS_TIME[n]=val;
+  const x=rsGroupAt(id,n);if(!x)return;
+  const g=rsSub(x),slot=ivSlotFor(g,val);
+  const btn=document.getElementById('rsok'+n);if(btn)btn.disabled=!slot;
+  const err=document.getElementById('rserr'+n);if(!err)return;
+  if(slot){err.textContent='';err.classList.remove('show');}
+  else{err.textContent=ivTimeErr(g,val);err.classList.add('show');}
+}
+function rsPick(id,n){
+  const x=rsGroupAt(id,n);if(!x)return;
+  const slot=ivSlotFor(rsSub(x),RS_TIME[n]!==undefined?RS_TIME[n]:hm(x.slots[0]));
+  if(!slot){toast('開始時刻を確かめてください');return;}
+  commitInterviewReschedule(id,new Date(slot),()=>openInterviewReschedule(id,true));
+}
+function openInterviewReschedule(id,keep){
+  const interview=(DB.interviews||[]).find(item=>item.id===id);
+  if(!interview||interview.status!=='fixed')return;
+  const groups=rsGroups(interview);
+  if(!groups.length)return openRescheduleCustom(id);
+  if(!keep){RS_OPEN=new Set([(groups.find(x=>x.slots.length)||groups[0]).n]);RS_TIME={};}
+  openSheet(`<h3>面談日時を変更</h3><p class="page-sub">${esc(ivInternName(interview))}さんと相談済みの日時を選んでください。相手の再承認は不要です。</p>
+    <div class="hint">${ic('calendar-check')}<span>変更前：<b>${fmtDT(interview.confirmed_datetime)}</b></span></div>
+    <div class="choice-list" style="margin-top:12px">${groups.map(x=>rescheduleGroupHTML(id,interview,x)).join('')}</div>
+    <button class="btn block" style="margin-top:14px" onclick="openRescheduleCustom('${id}')">${ic('calendar')}候補以外の日時に変更する</button>
+    <p class="fine" style="margin-top:6px">${esc(ivInternName(interview)||'相手')}さんが出していない時間にするときに使います。</p>
+    <p class="fine">変更後、LINEなどで相手に日時を連絡してください。</p>`);
+}
+function openRescheduleCustom(id){
   const interview=(DB.interviews||[]).find(item=>item.id===id);
   if(!interview||interview.status!=='fixed')return;
   const date=new Date(interview.confirmed_datetime);
   const local=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}T${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
   openSheet(`<h3>面談日時を変更</h3><p class="page-sub">${esc(ivInternName(interview))}さんと相談済みの日時を指定してください。相手の再承認は不要です。</p>
-    <p>現在：${fmtDT(interview.confirmed_datetime)}</p>${rescheduleCandidatesHTML(interview)}<label class="fl" for="iv-change-datetime">変更後の日時</label>
+    <p>変更前：${fmtDT(interview.confirmed_datetime)}</p><label class="fl" for="iv-change-datetime">変更後の日時</label>
     <input type="datetime-local" id="iv-change-datetime" value="${esc(local)}"><div class="field-err" id="iv-change-error"></div>
     ${ivIsBooking(interview)?'<p class="fine">予約スケジュールの受付時間から指定してください。Googleカレンダーから変更をお知らせします。</p>':'<p class="fine">変更後、LINEなどで相手に日時を連絡してください。</p>'}
-    <button class="btn pri block" style="margin-top:16px" onclick="submitInterviewReschedule('${id}',this)">変更内容を確認</button>`);
+    <button class="btn pri block" style="margin-top:16px" onclick="submitInterviewReschedule('${id}',this)">変更内容を確認</button>
+    ${rsGroups(interview).length?`<button class="btn block" style="margin-top:8px" onclick="openInterviewReschedule('${id}',true)">申請時の候補から選ぶ</button>`:''}`);
 }
-async function submitInterviewReschedule(id,button){
+function submitInterviewReschedule(id,button){
   const interview=(DB.interviews||[]).find(item=>item.id===id);
   const date=new Date(document.getElementById('iv-change-datetime').value);
   const error=document.getElementById('iv-change-error');
   if(!Number.isFinite(date.getTime())||date.getTime()<=Date.now()){error.textContent='未来の日時を入力してください';error.classList.add('show');return;}
   if(date.getTime()===new Date(interview.confirmed_datetime).getTime()){error.textContent='変更後の日時を指定してください';error.classList.add('show');return;}
   button.disabled=true;
-  if(!await confirmSheet('面談日時を変更',`${ivInternName(interview)}さんの面談を ${fmtDT(interview.confirmed_datetime)} から ${fmtDT(date.toISOString())} に変更します。`,'変更する')){openInterviewReschedule(id);return;}
+  return commitInterviewReschedule(id,date,()=>openRescheduleCustom(id));
+}
+async function commitInterviewReschedule(id,date,back){
+  const interview=(DB.interviews||[]).find(item=>item.id===id);
+  if(!await confirmSheet('面談日時を変更',`${ivInternName(interview)}さんの面談を ${fmtDT(interview.confirmed_datetime)} から ${fmtDT(date.toISOString())} に変更します。`,'変更する')){back();return;}
   try{
     const booking=ivIsBooking(interview);
     const result=await fsJSON('/api/interviews/'+encodeURIComponent(id)+(booking?'/reschedule-booking':''),{method:booking?'POST':'PATCH',body:JSON.stringify(booking?{start:date.toISOString()}:{status:'fixed',confirmed_datetime:date.toISOString()})});
     applyInterview(result.interview);renderQuiet();
     interviewChangeComplete(interview,result.interview,false);
-  }catch(failure){toast(failure.message);openInterviewReschedule(id);}
+  }catch(failure){toast(failure.message);back();}
 }
 async function cancelOrdinaryInterview(id){
   const interview=(DB.interviews||[]).find(item=>item.id===id);

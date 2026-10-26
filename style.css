@@ -414,13 +414,6 @@
   .cgroup .cslots{display:flex;flex-wrap:wrap;gap:6px}
   .cgroup .cslot{padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--sub)}
   .cgroup .cslot.on{border-color:var(--ok);background:var(--ok-soft);color:var(--ok);font-weight:700}
-  /* 日時変更シートの「申請時の候補」。選んだ枠は緑で示す */
-  .rsc-box{margin:12px 0}
-  .rsc-group{margin-top:8px}
-  .rsc-head{font-size:13px;font-weight:700;color:var(--sub);margin-bottom:6px}
-  .rsc-slots{display:flex;flex-wrap:wrap;gap:6px}
-  .rsc-slot{padding:8px 12px;min-height:40px;border:1px solid var(--line);border-radius:8px;background:transparent;font:inherit;font-size:14px;font-weight:700;color:var(--ink);cursor:pointer}
-  .rsc-slot[aria-pressed="true"]{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
   /* 開始時刻の入力。時刻の欄と「開始」の文字を横に並べる */
   .cgroup .cpick{display:flex;align-items:center;gap:10px}
   .cgroup .cpick .tin{width:auto;min-width:120px;margin:0;font-size:16px;font-weight:700;
