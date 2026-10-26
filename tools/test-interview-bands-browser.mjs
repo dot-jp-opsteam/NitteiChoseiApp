@@ -8,17 +8,19 @@ export async function runInterviewBandBrowserTests(page){
   const original=start.toISOString();
   let interview={id:'ui_band',intern_name:'帯テストさん',status:'fixed',confirmed_datetime:original,duration_min:30,choices:[original],created_at:new Date().toISOString()};
   Object.assign(interview,await page.evaluate(()=>({staff_id:ME.id,branch_id:ME.branch_id})));
-  let fail=false;const bodies=[];
+  let fail=false,delay=0;const bodies=[];
   await page.route('**/api/interviews/ui_band',async route=>{
     if(route.request().method()!=='PATCH')return route.fallback();
     const body=route.request().postDataJSON();bodies.push(body);
+    if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
     if(fail)return route.fulfill({status:409,json:{error:'この時間は面談できません。別の時間を選んでください'}});
     interview={...interview,...body};
     return route.fulfill({json:{ok:true,interview}});
   });
   const band=()=>page.locator('.avg-band.avg-iv[data-id="ui_band"]');
   const row=()=>page.evaluate(()=>document.querySelector('.avg-stage tbody tr').getBoundingClientRect().height);
-  const drag=async(locator,dx,dy)=>{
+  const drag=async(locator,dx,dy,inFlight=false)=>{
+    if(!inFlight){await page.waitForFunction(()=>AV_IV_SAVING.size===0);await page.waitForTimeout(100);} // 保存の返事で帯が描き直されるのを待つ
     await locator.scrollIntoViewIfNeeded();
     const box=await locator.boundingBox();
     const x=box.x+box.width/2,y=box.y+box.height/2;
@@ -26,7 +28,9 @@ export async function runInterviewBandBrowserTests(page){
   };
   try{
     await page.evaluate(fixture=>{DB.interviews=[...DB.interviews.filter(item=>item.id!==fixture.id),fixture];go('avset');},interview);
+    await page.waitForFunction(()=>!AVGOOGLE.loading); // Googleの予定の読み込みが終わると帯が描き直されるので、先に待つ
     await band().waitFor();
+    await page.waitForTimeout(300);
     const unit=await row();
     check((await band().textContent()).includes('13:00〜13:30'),'帯に面談の時間が出ない');
     results.push({label:'確定した面談が帯で出る',ok:true});
@@ -75,6 +79,31 @@ export async function runInterviewBandBrowserTests(page){
     results.push({label:'指定画面から面談の詳細へ進める',ok:true});
 
     await page.evaluate(()=>closeSheet());
+
+    /* つまみを動かしている最中に画面の大きさが変わっても、帯が元の位置へ飛ばない */
+    const handle=band().locator('.avg-resize-end');
+    await handle.scrollIntoViewIfNeeded();
+    const box=await handle.boundingBox(),hx=box.x+box.width/2,hy=box.y+box.height/2;
+    await page.mouse.move(hx,hy);await page.mouse.down();await page.mouse.move(hx,hy+unit/2,{steps:3});await page.mouse.move(hx,hy+unit,{steps:3});
+    const during=await band().evaluate(element=>element.style.height);
+    await page.evaluate(()=>window.dispatchEvent(new Event('resize')));await page.waitForTimeout(200);
+    check(await band().evaluate(element=>element.style.height)===during,'つまみを動かしている途中で画面の大きさが変わると、帯が別の位置へ飛ぶ');
+    await page.mouse.up();
+    await page.waitForFunction(()=>DB.interviews.find(item=>item.id==='ui_band').duration_min===150);
+    results.push({label:'ドラッグ中に画面の大きさが変わっても帯が飛ばない',ok:true});
+
+    /* 保存の返事を待つ間は動かした位置のまま見せ、その間の次の操作は受け付けない（古い内容から動いて飛ぶのを防ぐ） */
+    delay=700;const savesBefore=bodies.length;
+    await drag(band().locator('.avg-resize-end'),0,unit);
+    await page.waitForFunction(()=>document.querySelector('.avg-band.avg-iv span')?.textContent.includes('〜17:00'));
+    await drag(band().locator('.avg-resize-end'),0,unit,true);
+    await page.waitForFunction(()=>DB.interviews.find(item=>item.id==='ui_band').duration_min===180);
+    await page.waitForTimeout(900);
+    check(bodies.length===savesBefore+1,'保存中に次のドラッグが受け付けられ、二重に保存される');
+    check(await page.evaluate(()=>DB.interviews.find(item=>item.id==='ui_band').duration_min)===180,'保存中の操作で長さが変わってしまう');
+    delay=0;
+    results.push({label:'保存中は帯が動かした位置のままで、次の操作は受け付けない',ok:true});
+
     fail=true;const before=interview.confirmed_datetime;
     await drag(band().locator('.avg-resize-end'),0,unit);
     await page.locator('#toast').filter({hasText:'この時間は面談できません'}).waitFor();

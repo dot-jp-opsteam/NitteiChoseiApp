@@ -92,6 +92,10 @@ function avGoogleGridBlocks(staffId,days,fallback){
 }
 
 function avGooglePaint(){
+  /* つまみを動かしている間は描き直さない。描き直すと、動かしている帯が消えて元の位置の帯に入れ替わり、
+     帯が急に別の位置へ飛んだように見える（スマホで画面の大きさが変わったときなど）。
+     ドラッグが終わるときは必ず保存または再読み込みで描き直す */
+  if(AVGOOGLE_DRAG)return;
   const stage=document.querySelector('.avg-stage');
   if(!stage||currentTab!=='avset')return;
   stage.querySelector('.avg-overlay')?.remove();
@@ -184,10 +188,12 @@ function avGoogleResize(pointer,index,edge,rowHeight,band){
   pointer.preventDefault();pointer.stopPropagation();
   AVGOOGLE_DRAG=true;
   const event=AVGOOGLE.events[index],origin=pointer.clientY,key=AVGOOGLE.key;
+  const stage=band.closest('.avg-stage'),stageTop=stage.getBoundingClientRect().top;
+  const travel=y=>y-origin-(stage.getBoundingClientRect().top-stageTop); // 動かしている間にページが流れた分を引く
   const original=+new Date(edge==='start'?event.blocking_start:event.blocking_end);
   let moved=0;
   const originalTop=parseFloat(band.style.top),originalHeight=parseFloat(band.style.height);
-  const move=next=>{moved=Math.round((next.clientY-origin)/rowHeight)*1800000;const pixels=moved/1800000*rowHeight;band.style.opacity='.55';band.style.top=(originalTop+(edge==='start'?pixels:0))+'px';band.style.height=Math.max(18,originalHeight+(edge==='start'?-pixels:pixels))+'px';};
+  const move=next=>{moved=Math.round(travel(next.clientY)/rowHeight)*1800000;const pixels=moved/1800000*rowHeight;band.style.opacity='.55';band.style.top=(originalTop+(edge==='start'?pixels:0))+'px';band.style.height=Math.max(18,originalHeight+(edge==='start'?-pixels:pixels))+'px';};
   const cleanup=()=>{AVGOOGLE_DRAG=false;window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);band.style.opacity='';};
   const cancel=()=>{cleanup();avGoogleRefresh();};
   const finish=()=>{
@@ -241,16 +247,20 @@ function avInterviewBands(overlay,cells,base,rowHeight){
     overlay.append(band);
   });
 }
+const AV_IV_SAVING=new Set();
 function avInterviewDrag(pointer,iv,mode,{cells,base,rowHeight,band}){
   if(pointer.button!==0)return;
+  iv=(DB.interviews||[]).find(item=>item.id===iv.id)||iv; // 描いたあとに変わっていても、いまの内容から動かす
+  if(AV_IV_SAVING.has(iv.id)){pointer.preventDefault();return;} // 保存中は動かせない（古い内容から動かして別の位置へ飛ぶのを防ぐ）
   pointer.preventDefault();
   pointer.stopPropagation();
   AVGOOGLE_DRAG=true;
   const originStart=+new Date(iv.confirmed_datetime),originDuration=(Number(iv.duration_min)||30)*60000;
   const startX=pointer.clientX,startY=pointer.clientY;
+  const stage=band.closest('.avg-stage'),stageTop=stage.getBoundingClientRect().top;
   let next={start:originStart,duration:originDuration},dragging=false;
   const compute=event=>{
-    const steps=Math.round((event.clientY-startY)/rowHeight)*1800000;
+    const steps=Math.round((event.clientY-startY-(stage.getBoundingClientRect().top-stageTop))/rowHeight)*1800000;
     if(mode==='start')return{start:originStart+steps,duration:originDuration-steps};
     return{start:originStart,duration:originDuration+steps};
   };
@@ -294,12 +304,16 @@ function avInterviewSaveInputs(id){
 }
 async function avInterviewSave(iv,start,duration){
   const booking=ivIsBooking(iv),startIso=new Date(start).toISOString();
+  AV_IV_SAVING.add(iv.id);
+  /* 保存の返事を待つ間も、帯は動かした位置のまま見せる（描き直しで元の位置へ戻ってから動き直すのを防ぐ） */
+  applyInterview({...iv,confirmed_datetime:startIso,duration_min:duration/60000});
+  avGoogleRefresh();
   try{
     const result=await fsJSON('/api/interviews/'+encodeURIComponent(iv.id)+(booking?'/reschedule-booking':''),{method:booking?'POST':'PATCH',
       body:JSON.stringify(booking?{start:startIso}:{status:'fixed',confirmed_datetime:startIso,duration_min:duration/60000})});
     applyInterview(result.interview);
-    toast(`${ivInternName(iv)}さんの面談を ${fmtDT(startIso)}〜${hm(new Date(start+duration).toISOString())} に変更しました。相手へも連絡してください`);
-  }catch(failure){toast(failure.message);}
+  }catch(failure){applyInterview(iv);toast(failure.message);}
+  finally{AV_IV_SAVING.delete(iv.id);}
   avGoogleRefresh();
 }
 
