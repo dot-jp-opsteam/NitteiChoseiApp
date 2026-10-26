@@ -55,7 +55,7 @@ function avGoogleQueue(days){
   }
   setTimeout(avGooglePaint,0);
   if(AVGOOGLE.error)return `<p class="field-err show" role="alert">${esc(AVGOOGLE.error)} <button class="btn sm" onclick="avGoogleRetry()">再読み込み</button></p>`;
-  return `<p class="fine" aria-live="polite">${AVGOOGLE.loading?'Googleの予定を読み込んでいます…':AVGOOGLE.connected?'Googleの予定をタップすると、日調アプリの面談不可時間だけ調整できます。上下のつまみは30分単位です。確定した面談の帯は、ドラッグで移動、上下のつまみで長さを変えられます。':'Google未連携の場合は、マスをタップして不可時間を指定できます。'}</p><div id="avg-event-list" class="avg-event-list"></div>`;
+  return `<p class="fine" aria-live="polite">${AVGOOGLE.loading?'Googleの予定を読み込んでいます…':AVGOOGLE.connected?'Googleの予定をタップすると、日調アプリの面談不可時間だけ調整できます。上下のつまみは30分単位です。':'Google未連携の場合は、マスをタップして不可時間を指定できます。'}</p><div id="avg-event-list" class="avg-event-list"></div>`;
 }
 
 async function avGoogleLoad(range){
@@ -96,11 +96,11 @@ function avGooglePaint(){
   if(!stage||currentTab!=='avset')return;
   stage.querySelector('.avg-overlay')?.remove();
   const firstRow=stage.querySelector('tbody tr');
-  if(!firstRow)return;
+  if(!firstRow||!AVGOOGLE.events.length)return;
   const cells=Array.from(firstRow.querySelectorAll('td'));
   const base=stage.getBoundingClientRect(),rowHeight=firstRow.getBoundingClientRect().height;
   const overlay=document.createElement('div');overlay.className='avg-overlay';
-  if(AVGOOGLE.events.length)cells.forEach(cell=>{
+  cells.forEach(cell=>{
     const morning=new Date(cell.dataset.iso),begin=+morning,finish=begin+15*3600000;
     const rect=cell.getBoundingClientRect();
     const segments=AVGOOGLE.events.map((event,index)=>({event,index,start:Math.max(begin,+avGoogleDate(event.ignored?event.start:event.blocking_start)),end:Math.min(finish,+avGoogleDate(event.ignored?event.end:event.blocking_end))})).filter(segment=>segment.end>segment.start);
@@ -119,7 +119,6 @@ function avGooglePaint(){
       overlay.append(band);
     });
   });
-  avInterviewBands(overlay,cells,base,rowHeight);
   stage.append(overlay);
   const list=document.getElementById('avg-event-list');
   if(list)list.innerHTML=AVGOOGLE.events.map((event,index)=>`<button class="btn sm" onclick="avGoogleOpen(${index})">${esc(event.title||'（無題の予定）')} ${event.ignored?'・面談OK':event.adjusted?'・調整済み':''}</button>`).join('');
@@ -199,96 +198,6 @@ function avGoogleResize(pointer,index,edge,rowHeight,band){
     avGoogleSave({start:new Date(start).toISOString(),end:new Date(end).toISOString(),ignored:false});
   };
   window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish);window.addEventListener('pointercancel',cancel);
-}
-
-/* ---- 確定した面談の帯 ----
-   確定した面談は表では「－」で押せないが、帯としても重ねて出す。
-   帯をドラッグすれば別の時間・別の日へ移動、上下のつまみで面談の長さ（30分単位）を変えられ、
-   指を離したらその場で確定する（面談とGoogleの予定が同じ内容に変わる）。
-   予約スケジュールの予約は長さが予約ページで決まっているので、移動だけできる */
-const AV_IV_MIN=30*60000,AV_IV_MAX=240*60000,AV_WINDOW=15*3600000;
-function avInterviewGeometry(cells,base,rowHeight,start,duration){
-  for(const cell of cells){
-    const begin=+new Date(cell.dataset.iso);
-    if(start>=begin&&start+duration<=begin+AV_WINDOW){
-      const rect=cell.getBoundingClientRect();
-      return{top:rect.top-base.top+(start-begin)/1800000*rowHeight,height:duration/1800000*rowHeight,left:rect.left-base.left+1,width:rect.width-3};
-    }
-  }
-  return null;
-}
-function avInterviewBands(overlay,cells,base,rowHeight){
-  const now=Date.now();
-  (DB.interviews||[]).filter(iv=>iv.staff_id===ME.id&&iv.status==='fixed'&&iv.confirmed_datetime&&+new Date(iv.confirmed_datetime)>now).forEach(iv=>{
-    const start=+new Date(iv.confirmed_datetime),duration=(Number(iv.duration_min)||30)*60000;
-    let geometry=avInterviewGeometry(cells,base,rowHeight,start,duration);
-    if(!geometry){ // 表の範囲（9:00〜24:00）からはみ出す面談は、範囲内の部分だけ見せる
-      for(const cell of cells){const begin=+new Date(cell.dataset.iso),s=Math.max(begin,start),e=Math.min(begin+AV_WINDOW,start+duration);if(e>s){geometry=avInterviewGeometry(cells,base,rowHeight,s,e-s);break;}}
-    }
-    if(!geometry)return;
-    const label=ivInternName(iv)+'さん',booking=ivIsBooking(iv);
-    const band=document.createElement('div');band.className='avg-band avg-iv'+(duration<=30*60000?' avg-iv-short':'');band.dataset.id=iv.id;
-    band.style.cssText=`top:${geometry.top}px;height:${geometry.height}px;left:${geometry.left}px;width:${geometry.width}px`;
-    band.innerHTML=(booking?'':`<button type="button" class="avg-resize avg-resize-start" aria-label="${esc(label)}の面談の開始をドラッグ"></button>`)+
-      `<button type="button" class="avg-event-open" aria-label="${esc(label)}の面談をドラッグで移動、押すと詳しく見る"><strong>面談 ${esc(label)}</strong><span>${hm(iv.confirmed_datetime)}〜${hm(new Date(start+duration).toISOString())}</span></button>`+
-      (booking?'':`<button type="button" class="avg-resize avg-resize-end" aria-label="${esc(label)}の面談の終了をドラッグ"></button>`);
-    const body=band.querySelector('.avg-event-open');
-    body.onclick=()=>{if(band.dataset.dragged){delete band.dataset.dragged;return;}openInterview(iv.id);};
-    body.onpointerdown=pointer=>avInterviewDrag(pointer,iv,'move',{cells,base,rowHeight,band});
-    band.querySelectorAll('.avg-resize').forEach((handle,position)=>{
-      handle.onpointerdown=pointer=>avInterviewDrag(pointer,iv,position===0?'start':'end',{cells,base,rowHeight,band});
-    });
-    overlay.append(band);
-  });
-}
-function avInterviewDrag(pointer,iv,mode,{cells,base,rowHeight,band}){
-  if(pointer.button!==0)return;
-  if(mode!=='move')pointer.preventDefault();
-  pointer.stopPropagation();
-  AVGOOGLE_DRAG=true;
-  const originStart=+new Date(iv.confirmed_datetime),originDuration=(Number(iv.duration_min)||30)*60000;
-  const startX=pointer.clientX,startY=pointer.clientY;
-  const columnOf=x=>cells.findIndex(cell=>{const r=cell.getBoundingClientRect();return x>=r.left&&x<r.right;});
-  const startColumn=cells.findIndex(cell=>{const begin=+new Date(cell.dataset.iso);return originStart>=begin&&originStart<begin+AV_WINDOW;});
-  let next={start:originStart,duration:originDuration},dragging=false;
-  const compute=event=>{
-    const steps=Math.round((event.clientY-startY)/rowHeight)*1800000;
-    if(mode==='move'){
-      const column=columnOf(event.clientX),shift=column<0||startColumn<0?0:(column-startColumn)*86400000;
-      return{start:originStart+steps+shift,duration:originDuration};
-    }
-    if(mode==='start')return{start:originStart+steps,duration:originDuration-steps};
-    return{start:originStart,duration:originDuration+steps};
-  };
-  const valid=value=>value.start>Date.now()&&value.duration>=AV_IV_MIN&&value.duration<=AV_IV_MAX&&!!avInterviewGeometry(cells,base,rowHeight,value.start,value.duration);
-  const move=event=>{
-    if(!dragging&&Math.hypot(event.clientX-startX,event.clientY-startY)<5)return;
-    dragging=true;band.dataset.dragged='1';band.style.opacity='.6';
-    const candidate=compute(event);
-    if(!valid(candidate))return;
-    next=candidate;
-    const g=avInterviewGeometry(cells,base,rowHeight,next.start,next.duration);
-    band.style.top=g.top+'px';band.style.height=g.height+'px';band.style.left=g.left+'px';band.style.width=g.width+'px';
-  };
-  const cleanup=()=>{AVGOOGLE_DRAG=false;window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);band.style.opacity='';};
-  const cancel=()=>{cleanup();delete band.dataset.dragged;avGoogleRefresh();};
-  const finish=()=>{
-    cleanup();
-    if(!dragging)return;
-    if(next.start===originStart&&next.duration===originDuration){avGoogleRefresh();return;}
-    avInterviewSave(iv,next.start,next.duration);
-  };
-  window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish);window.addEventListener('pointercancel',cancel);
-}
-async function avInterviewSave(iv,start,duration){
-  const booking=ivIsBooking(iv),startIso=new Date(start).toISOString();
-  try{
-    const result=await fsJSON('/api/interviews/'+encodeURIComponent(iv.id)+(booking?'/reschedule-booking':''),{method:booking?'POST':'PATCH',
-      body:JSON.stringify(booking?{start:startIso}:{status:'fixed',confirmed_datetime:startIso,duration_min:duration/60000})});
-    applyInterview(result.interview);
-    toast(`${ivInternName(iv)}さんの面談を ${fmtDT(startIso)}〜${hm(new Date(start+duration).toISOString())} に変更しました。相手へも連絡してください`);
-  }catch(failure){toast(failure.message);}
-  avGoogleRefresh();
 }
 
 if(typeof window!=='undefined')window.addEventListener('resize',()=>avGooglePaint());
