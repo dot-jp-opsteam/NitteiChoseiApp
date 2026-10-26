@@ -35,6 +35,20 @@ export async function runInterviewBandBrowserTests(page){
     check((await band().textContent()).includes('13:00〜13:30'),'帯に面談の時間が出ない');
     results.push({label:'確定した面談が帯で出る',ok:true});
 
+    /* 帯を描いたあとにページがスクロールしていても、最初に動かすときに帯が別の位置へ飛ばない
+       （描いたときに測った表の位置が古くなり、動かしている帯だけがスクロールした分ずれていた） */
+    await page.evaluate(()=>window.scrollBy(0,60));
+    const scrolled=await page.evaluate(()=>window.scrollY);
+    check(scrolled>0,'検査のためにページをスクロールできない');
+    const resting=await band().evaluate(element=>({top:Math.round(parseFloat(element.style.top)),height:Math.round(parseFloat(element.style.height))}));
+    const grab=await band().locator('.avg-resize-end').boundingBox();
+    const gx=grab.x+grab.width/2,gy=grab.y+grab.height/2;
+    await page.mouse.move(gx,gy);await page.mouse.down();await page.mouse.move(gx,gy+unit*0.2,{steps:2});await page.mouse.move(gx,gy+unit,{steps:3});
+    const moving=await band().evaluate(element=>({top:Math.round(parseFloat(element.style.top)),height:Math.round(parseFloat(element.style.height))}));
+    check(moving.top===resting.top&&moving.height===resting.height+Math.round(unit),'スクロールしたあとの最初のドラッグで帯が別の位置へ飛ぶ：'+JSON.stringify({resting,moving}));
+    await page.mouse.move(gx,gy,{steps:3});await page.mouse.up();await page.waitForTimeout(300);
+    results.push({label:'ページをスクロールしたあとでも、最初のドラッグで帯が飛ばない',ok:true});
+
     await drag(band().locator('.avg-resize-end'),0,unit*2);
     await page.waitForFunction(()=>DB.interviews.find(item=>item.id==='ui_band').duration_min===90);
     check(bodies.at(-1).duration_min===90&&bodies.at(-1).confirmed_datetime===original&&bodies.at(-1).status==='fixed','下のつまみを2マス下げても、開始そのままで90分にならない');

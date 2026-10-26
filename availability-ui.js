@@ -227,6 +227,9 @@ function avGoogleResize(pointer,index,edge,rowHeight,band){
    予約スケジュールの予約は長さが予約ページで決まっているので、帯を押すと面談の詳細が開く */
 const AV_IV_MIN=30*60000,AV_IV_MAX=240*60000,AV_WINDOW=15*3600000;
 function avInterviewGeometry(cells,base,rowHeight,start,duration){
+  /* 表の位置は、いま測り直す。帯を描いたあとにページがスクロールしていると、描いたときに測った位置（base）は
+     古くなっていて、動かしている帯だけがそのずれの分だけ別の位置へ飛ぶ（最初に動かすときだけ起きていた） */
+  base=cells[0].closest('.avg-stage').getBoundingClientRect();
   for(const cell of cells){
     const begin=+new Date(cell.dataset.iso);
     if(start>=begin&&start+duration<=begin+AV_WINDOW){
