@@ -1128,6 +1128,11 @@
   .avg-event-open{flex:1;min-height:0;padding:1px 4px;border:0;background:none;color:var(--ink);text-align:left;cursor:pointer;overflow:hidden;font-size:11px}
   .avg-event-open strong,.avg-event-open span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .avg-event-open span{font-size:10px;color:var(--sub)}
+  /* 確定した面談の帯。Googleの予定の帯と見分けられるよう、面談の色（--iv）で塗る */
+  .avg-band.avg-iv{border-color:var(--iv);background:var(--panel)}
+  .avg-iv .avg-event-open{touch-action:none;cursor:grab;border-left:3px solid var(--iv)}
+  .avg-iv .avg-resize{background:var(--iv);height:6px;min-height:6px}
+  .avg-iv.avg-iv-short .avg-event-open span{display:none}
   .avg-resize{height:9px;min-height:9px;padding:0;border:0;background:var(--brand);opacity:.55;cursor:ns-resize;touch-action:none}
   .avg-resize:focus-visible,.avg-event-open:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
   .avg-event-list,.avg-actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}

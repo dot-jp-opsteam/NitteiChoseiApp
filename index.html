@@ -2877,6 +2877,13 @@ function openInterview(id){
 }
 /* 手元の面談一覧を、サーバーが返した内容で入れ替える */
 function applyInterview(next){
+  /* 確定・日時変更・取消でGoogleの予定が動くので、ホームのカレンダーが月ごとに覚えている
+     Googleの予定（自分のカレンダーと全体予定表）を捨てて取り直す。
+     捨てないと、変更前の予定が再読み込みするまで残って見える */
+  const before=(DB.interviews||[]).find(x=>x.id===next.id);
+  if(!before||before.status!==next.status||before.confirmed_datetime!==next.confirmed_datetime||(Number(before.duration_min)||30)!==(Number(next.duration_min)||30)){
+    MY_CAL.events={};MY_CAL.loading={};MY_CAL.byId={};SHARED_CAL.events={};SHARED_CAL.loading={};
+  }
   DB.interviews=(DB.interviews||[]).map(x=>x.id===next.id?next:x);
   sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
 }

@@ -65,4 +65,33 @@ export async function runInterviewChangeTests({ api, check, database, token, oth
   const retried=await api(token,'PATCH','/api/interviews/iv_change_dual',{status:'failed',cancelled:true});
   check('途中取消を再実行すると残ったGoogle予定だけ取り消して完了',[retried.status,retried.json.interview?.status,retried.json.interview?.cancellation_pending,retried.json.interview?.googleEventIdIntern],[200,'failed',false,null]);
   check('途中取消の再実行で削除済み予定を再度削除しない',googleState.calls.filter(call=>call.method==='DELETE'&&call.path.endsWith('/dual_staff')).length,1);
+  /* 受けられる時間の表で、確定した面談の帯を伸ばす・縮める・動かす操作（面談の長さ duration_min） */
+  await seed('iv_len', 'u_bk_a', at(22), { googleEventId: 'len_google' });
+  googleState.events.set('len_google', { id: 'len_google', start: { dateTime: at(22) }, end: { dateTime: at(22, 30) } });
+  await seed('iv_len_other', 'u_bk_a', at(23, 30));
+  const resize = (duration, start = at(22), status = 'fixed', actor = token) => api(actor, 'PATCH', '/api/interviews/iv_len', { status, confirmed_datetime: start, duration_min: duration });
+  const endOf = (start, minutes) => new Date(new Date(start).getTime() + minutes * 60000).toISOString();
+  check('面談の長さは30分単位の30〜240分だけ', [(await resize(45)).status, (await resize(15)).status, (await resize(270)).status, (await resize(60.5)).status, (await resize('60')).status], [400, 400, 400, 400, 400]);
+  check('確定以外の状態変更では長さを指定できない', (await resize(60, at(22), 'failed')).status, 400);
+  check('担当以外は面談の長さを変えられない', (await resize(60, at(22), 'fixed', otherToken)).status, 403);
+  const longer = await resize(90);
+  check('開始はそのままで面談を伸ばす', [longer.status, longer.json.interview?.duration_min, longer.json.interview?.confirmed_datetime], [200, 90, at(22)]);
+  check('面談を伸ばすとGoogleの終了時刻も変わる', [googleState.events.get('len_google').start.dateTime, googleState.events.get('len_google').end.dateTime], [at(22), endOf(at(22), 90)]);
+  check('次の面談に重なる伸ばし方は拒否', (await resize(120)).status, 409);
+  check('拒否された伸ばし方は面談を変えない', (await api(token, 'GET', '/api/db')).json.interviews.find(item => item.id === 'iv_len').duration_min, 90);
+  const noop = googleState.calls.length;
+  check('同じ長さ・同じ開始なら何もしない', [(await resize(90)).status, googleState.calls.length], [200, noop]);
+  googleState.failUpdate = true;
+  check('Google更新に失敗したら長さを変えない', [(await resize(60)).status, (await api(token, 'GET', '/api/db')).json.interviews.find(item => item.id === 'iv_len').duration_min], [500, 90]);
+  googleState.failUpdate = false;
+  const shorter = await resize(30);
+  check('面談を縮めるとGoogleの終了時刻も戻る', [shorter.status, shorter.json.interview?.duration_min, googleState.events.get('len_google').end.dateTime], [200, 30, endOf(at(22), 30)]);
+  const movedLong = await resize(60, at(21));
+  check('移動と長さを同時に変える', [movedLong.status, movedLong.json.interview?.confirmed_datetime, movedLong.json.interview?.duration_min, googleState.events.get('len_google').start.dateTime, googleState.events.get('len_google').end.dateTime], [200, at(21), 60, at(21), endOf(at(21), 60)]);
+  await seed('iv_len_pub', 'u_bk_a', at(10), { googleEventId: 'len_pub' });
+  googleState.events.set('len_pub', { id: 'len_pub', start: { dateTime: at(10) }, end: { dateTime: at(10, 30) } });
+  const resizePublic = duration => api(token, 'PATCH', '/api/interviews/iv_len_pub', { status: 'fixed', confirmed_datetime: at(10), duration_min: duration });
+  await publicSlots();
+  check('伸ばした面談の枠は公開予約でも埋まる', [(await resizePublic(60)).status, (await publicSlots()).json.days[publicDay].includes('10:30')], [200, false]);
+  check('縮めた面談の後ろの枠は公開予約へ戻る', [(await resizePublic(30)).status, (await publicSlots()).json.days[publicDay].includes('10:30')], [200, true]);
 }

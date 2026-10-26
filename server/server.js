@@ -1381,7 +1381,7 @@ async function deleteGoogleEventFor(userId, eventId) {
    iv を書き換えて googleEventId を持たせるので、呼び出し側はこのあと保存すること */
 async function syncInterviewToGoogle(old, iv, users) {
   if (!GOOGLE_ENABLED) {
-    if (old?.status === 'fixed' && (old.googleEventId || old.googleEventIdIntern) && (old.status !== iv.status || old.confirmed_datetime !== iv.confirmed_datetime)) throw new Error('Google連携を確認してください');
+    if (old?.status === 'fixed' && (old.googleEventId || old.googleEventIdIntern) && (old.status !== iv.status || old.confirmed_datetime !== iv.confirmed_datetime || (Number(old.duration_min) || 30) !== (Number(iv.duration_min) || 30))) throw new Error('Google連携を確認してください');
     return iv;
   }
   const wasFixed = old && old.status === 'fixed';
@@ -1403,7 +1403,7 @@ async function syncInterviewToGoogle(old, iv, users) {
         }
         const accessToken = await accessTokenFor(tokenRow);
         const start = new Date(iv.confirmed_datetime);
-        const end = new Date(start.getTime() + 30 * 60000);
+        const end = new Date(start.getTime() + (Number(iv.duration_min) || 30) * 60000);
         const created = await google.createEvent(accessToken, tokenRow.calendar_id, {
           summary: t.summary(intern, staff),
           description: 'OPS日調アプリで確定した面談です。',
@@ -1412,7 +1412,7 @@ async function syncInterviewToGoogle(old, iv, users) {
         });
         iv[t.eventIdField] = created.id;
         console.log(`Googleカレンダーにイベントを作成しました（interview ${iv.id}, user ${userId}, event ${created.id}）`);
-      } else if (wasFixed && isFixed && old.confirmed_datetime !== iv.confirmed_datetime && old[t.eventIdField]) {
+      } else if (wasFixed && isFixed && (old.confirmed_datetime !== iv.confirmed_datetime || (Number(old.duration_min) || 30) !== (Number(iv.duration_min) || 30)) && old[t.eventIdField]) {
         const tokenRow = await getTokenRow(userId);
         if (!tokenRow) throw new Error('Google連携を確認してください');
         const startMs = new Date(iv.confirmed_datetime).getTime();
@@ -3377,12 +3377,16 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '面談を変更する権限がありません' });
   }
-  const { status, confirmed_datetime } = req.body || {};
+  const { status, confirmed_datetime, duration_min } = req.body || {};
   if (!['fixed', 'failed', 'applied'].includes(status)) {
     return res.status(400).json({ error: '指定された状態が不正です' });
   }
   if (status === 'fixed' && !confirmed_datetime) {
     return res.status(400).json({ error: '確定する日時が必要です' });
+  }
+  /* 面談の長さ（分）。確定済みの面談の帯を伸ばす・縮める操作で送られてくる。30分刻みで30〜240分 */
+  if (duration_min !== undefined && (status !== 'fixed' || !Number.isInteger(duration_min) || duration_min < 30 || duration_min > 240 || duration_min % 30 !== 0)) {
+    return res.status(400).json({ error: '面談の長さは30分から4時間までの30分単位で指定してください' });
   }
   try {
     const first = await getInterview(req.params.id);
@@ -3401,9 +3405,10 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
     if (old.cancellation_pending && status === 'fixed') return res.status(409).json({ error: 'キャンセル処理が途中です。もう一度キャンセルを実行して完了してください' });
     const startMs = new Date(confirmed_datetime || '').getTime();
     if (status === 'fixed' && (!Number.isFinite(startMs) || startMs <= Date.now())) return res.status(400).json({ error: '未来の日時を指定してください' });
-    if (old.status === 'fixed' && status === 'fixed' && startMs === new Date(old.confirmed_datetime).getTime()) return res.json({ ok: true, interview: old });
+    const newDuration = duration_min !== undefined ? duration_min : (Number(old.duration_min) || 30);
+    if (old.status === 'fixed' && status === 'fixed' && startMs === new Date(old.confirmed_datetime).getTime() && newDuration === (Number(old.duration_min) || 30)) return res.json({ ok: true, interview: old });
     if (status === 'fixed') {
-      const endMs = startMs + (Number(old.duration_min) || 30) * 60000;
+      const endMs = startMs + newDuration * 60000;
       const stored = await readDB();
       const raw = stored?.availability?.[old.staff_id] || {};
       const availability = await availabilityApi.effectiveAvailability(old.staff_id, raw, startMs, endMs, { excludeGoogleEventId: old.googleEventId });
@@ -3418,6 +3423,7 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
     const next = {
       ...old, status,
       confirmed_datetime: status === 'fixed' ? new Date(startMs).toISOString() : null,
+      ...(status === 'fixed' && duration_min !== undefined ? { duration_min } : {}),
       ...(old.status === 'fixed' && status === 'fixed' ? { rescheduled_at: new Date().toISOString() } : {}),
       ...(old.status === 'fixed' && status !== 'fixed' ? { cancelled: true, cancelled_by: 'staff', cancelled_at: new Date().toISOString(), previous_confirmed_datetime: old.confirmed_datetime } : {}),
       ...(['fixed', 'applied'].includes(status) ? { cancelled: false } : {}),

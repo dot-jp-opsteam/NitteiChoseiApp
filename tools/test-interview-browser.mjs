@@ -32,8 +32,11 @@ export async function runInterviewBrowserTests(page){
     const local=await page.locator('#iv-change-datetime').inputValue();
     await page.getByLabel('変更後の日時',{exact:true}).fill(local.slice(0,11)+'14:00');
     await page.getByRole('button',{name:'変更内容を確認',exact:true}).click();
+    await page.evaluate(()=>{MY_CAL.events={'2000-1':[{id:'old_google_event'}]};SHARED_CAL.events={'2000-1':[{id:'old_shared_event'}]};});
     await page.getByRole('button',{name:'変更する',exact:true}).click();
     await page.getByRole('heading',{name:'面談日時を変更しました',exact:true}).waitFor();
+    /* ホームのカレンダーが月ごとに覚えているGoogleの予定は、日時変更のあと捨てて取り直す（変更前の予定が残って見えていた） */
+    check(await page.evaluate(()=>!MY_CAL.events['2000-1']&&!SHARED_CAL.events['2000-1']),'日時変更のあとも変更前のGoogle予定の記憶が残る');
     const message=await page.locator('#iv-change-message').inputValue();
     check(message.includes('変更前')&&message.includes('変更後')&&message.includes('13:00')&&message.includes('14:00'),'変更前後の連絡文がない');
     check(await page.evaluate(()=>DB.interviews.find(item=>item.id==='ui_interview').note==='申請メモ'),'申請メモが失われる');
