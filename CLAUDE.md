@@ -93,12 +93,13 @@ node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
 node tools/record-demos.mjs    # demo/ の動画を撮り直す（要 Playwright と ffmpeg・約1分・8124番を使う）
 node tools/test-booking-editor.mjs # 予約編集（6件）。日付・時刻の操作と保存後の公開枠
 node tools/test-booking.mjs    # 予約スケジュールの枠の計算（31件）
-node tools/test-booking-e2e.mjs # 予約の通し（104件）。面談の長さ（duration_min）の変更も含む。偽のGoogleを立てて8125番で起動
+node tools/test-booking-e2e.mjs # 予約の通し（104件）。面談の長さ変更（受けられる時間の表の帯の伸縮）も含む。偽のGoogleを立てて8125番で起動
 node tools/test-booking-e2e.mjs --serve  # 画面確認用に立てたままにする（URLが出る）
 node tools/test-tally.mjs      # 表のモデル（39件）。固定ID・未回答・テンプレート・集計・なぞり
 node tools/test-tally-e2e.mjs  # 表の実API。認証・再送・同時更新・上限・回数制限（8129番）
 # tools/test-tally-browser.mjs の runTallyBrowserTests(page) をPlaywrightで実行：応答喪失後429/500・表と回答の同時変更を検査
 # tools/test-interview-browser.mjs の runInterviewBrowserTests(page)：日時変更の希望一覧・変更前の表示・Google予定の記憶の破棄
+# tools/test-interview-bands-browser.mjs の runInterviewBandBrowserTests(page)：受けられる時間の表の面談の帯（上下のつまみで伸縮・押して数字で指定。帯そのものは動かせない）。tools/test-tally-e2e.mjs --serve の8129番で実行
 # tools/test-opstappy-browser.mjs の runOPStappyBrowserTests(browser)：即時テンプレート・軸の追加・既存回答保持・名前による集計の画面検査
 node tools/test-tally-e2e.mjs --serve # ダミーのスタッフと共有URLで画面確認。終了後も一時DBを残す
 node tools/test-login.mjs      # Googleでログインの通し（21件）。偽のGoogleを立てて8127番で起動
