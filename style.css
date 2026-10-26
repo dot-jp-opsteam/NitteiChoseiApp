@@ -2172,6 +2172,9 @@
 /* 縦横の項目：各行の ↑↓× と末尾の「＋追加」 */
 .tly-create .tly-axis{gap:3px}.tly-create .tly-axis .btn{min-width:26px;min-height:28px;padding:0 4px;font-size:13px;line-height:1}.tly-create .tly-axis .btn:disabled{opacity:.35}.tly-create .tly-axis .tly-remove{color:#b4533c;font-size:17px}.tly-create .tly-axis .tly-restore{font-size:12px;padding:0 6px}
 .tly-create .tly-add{width:100%;margin-top:6px;min-height:32px;border:1px dashed #9cc3d6;background:#fff;color:var(--tly-ink)}.tly-create .tly-add:disabled{opacity:.5}
+.tly-create .tly-axis .tly-grip{font-size:17px;font-weight:700;min-width:30px}
+.tly-grip{cursor:grab;touch-action:none;user-select:none;letter-spacing:-3px;color:var(--tly-ink,inherit)}
+.tly-axis.tly-dragging{background:rgba(0,0,0,.06);border-radius:8px;outline:2px solid var(--tly-ink,#555)}.tly-axis.tly-dragging .tly-grip{cursor:grabbing}
 .tly-axis-hint{display:block;font-size:12px;font-weight:600;color:#777;margin-top:2px}
 /* カレンダー形式の「横に並べるもの」と曜日のチェック */
 .tly-modes{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tly-weekdays{display:flex;flex-wrap:wrap;gap:2px 9px;margin:4px 0 6px}.tly-weekdays .tly-check{gap:5px}.tly-create .tly-time-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}

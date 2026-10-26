@@ -5552,7 +5552,7 @@ function tlyBlank(axis){return {id:tlyId(axis==='rows'?'r_':'c_'),label:'',activ
 async function openTallyEditor(id=null){
  try{const b=id?(await tlyJSON('/api/tally-boards/'+id)).board:null;
   TLYEDIT=b?{id:b.id,config:structuredClone(b.config),original:structuredClone(b.config),active:b.active,revision:b.revision}:{id:null,config:{title:'',description:'',template:'custom',rows:Array.from({length:3},()=>tlyBlank('rows')),columns:Array.from({length:3},()=>tlyBlank('columns'))},original:null,active:true,revision:0};
-  TLYEDIT.settings={kind:b?b.config.template:'custom',style:'tappy',columnMode:'weekday',weekdays:[1,2,3,4,5],startDate:tlyToday(),days:5,start:'09:00',end:'17:00',step:30,periods:5,lunch:false,weekend:false};TLYEDIT.templateError='';tlyDrawEditor();
+  TLYEDIT.settings={kind:b?b.config.template:'calendar',style:'tappy',columnMode:'weekday',weekdays:[1,2,3,4,5],startDate:tlyToday(),days:5,start:'09:00',end:'17:00',step:30,periods:5,lunch:false,weekend:false};TLYEDIT.templateError='';if(b)tlyDrawEditor();else tlyApplyTemplate();
  }catch(e){toast(e.message);}
 }
 function tlySet(key,value){TLYEDIT.config[key]=value;}
@@ -5589,14 +5589,39 @@ function tlyApplyTemplate(){
 /* 縦・横の項目。各行に ↑↓×、末尾に「＋追加」。
    × は未保存の項目なら消し、保存済みの項目なら回答との対応を残すため非表示にする（「戻す」で復帰） */
 const TLY_AXIS_MAX={rows:48,columns:31};
-function tlyAxisInput(axis,title,a,i,len){const name=title+(i+1);return `<div class="tly-axis ${a.active?'':'tly-hidden'}"><input aria-label="${name}の名前" maxlength="40" placeholder="${axis==='rows'?'例：09:00':'例：月'}" value="${esc(a.label)}" oninput="tlyAxisValue('${axis}',${i},this.value)"><button type="button" class="btn ghost" aria-label="${name}を上へ" title="上へ" onclick="tlyMove('${axis}',${i},-1)" ${i===0?'disabled':''}>↑</button><button type="button" class="btn ghost" aria-label="${name}を下へ" title="下へ" onclick="tlyMove('${axis}',${i},1)" ${i===len-1?'disabled':''}>↓</button>${a.active?`<button type="button" class="btn ghost tly-remove" aria-label="${name}を削除" title="削除" onclick="tlyRemoveAxis('${axis}',${i})">×</button>`:`<button type="button" class="btn ghost tly-restore" aria-label="${name}を戻す" onclick="tlyRestoreAxis('${axis}',${i})">戻す</button>`}</div>`;}
-function tlyAxisHTML(axis,title){const list=TLYEDIT.config[axis],full=list.length>=TLY_AXIS_MAX[axis];return `<div><h3>${title}<span class="tly-axis-hint">${axis==='rows'?'表の左に並ぶ項目':'表の上に並ぶ項目'}</span></h3><div id="tly-axis-${axis}">${list.map((a,i)=>tlyAxisInput(axis,title,a,i,list.length)).join('')}</div><button type="button" class="btn tly-add" onclick="tlyAddAxis('${axis}')" ${full?'disabled':''}>＋ ${title}を追加</button>${full?`<p class="tly-muted">${title}は${TLY_AXIS_MAX[axis]}件までです。</p>`:''}</div>`;}
+function tlyAxisInput(axis,title,a,i,len){const name=title+(i+1);return `<div class="tly-axis ${a.active?'':'tly-hidden'}" data-i="${i}"><button type="button" class="btn ghost tly-grip" aria-label="${name}を並べ替え" title="ドラッグで並べ替え（上下キーでも動かせます）" onpointerdown="tlyDragStart(event,'${axis}')" onkeydown="tlyGripKey(event,'${axis}',${i})">⋮⋮</button><input aria-label="${name}の名前" maxlength="40" placeholder="${axis==='rows'?'例：09:00':'例：月'}" value="${esc(a.label)}" oninput="tlyAxisValue('${axis}',${i},this.value)">${a.active?`<button type="button" class="btn ghost tly-remove" aria-label="${name}を削除" title="削除" onclick="tlyRemoveAxis('${axis}',${i})">×</button>`:`<button type="button" class="btn ghost tly-restore" aria-label="${name}を戻す" onclick="tlyRestoreAxis('${axis}',${i})">戻す</button>`}</div>`;}
+function tlyAxisHTML(axis,title){const list=TLYEDIT.config[axis],full=list.length>=TLY_AXIS_MAX[axis];return `<div><h3>${title}<span class="tly-axis-hint">${axis==='rows'?'表の左に並ぶ項目':'表の上に並ぶ項目'}・⋮⋮をドラッグで並べ替え</span></h3><div id="tly-axis-${axis}">${list.map((a,i)=>tlyAxisInput(axis,title,a,i,list.length)).join('')}</div><button type="button" class="btn tly-add" onclick="tlyAddAxis('${axis}')" ${full?'disabled':''}>＋ ${title}を追加</button>${full?`<p class="tly-muted">${title}は${TLY_AXIS_MAX[axis]}件までです。</p>`:''}</div>`;}
 function tlyDrawAxes(){const box=document.getElementById('tly-axes');if(!box)return tlyDrawEditor();box.innerHTML=tlyAxisHTML('rows','縦')+tlyAxisHTML('columns','横');tlyPreview();}
 function tlyAxisValue(axis,index,value){TLYEDIT.config[axis][index].label=value;tlyPreview();}
 function tlyAddAxis(axis){const list=TLYEDIT.config[axis];if(list.length>=TLY_AXIS_MAX[axis])return;list.push(tlyBlank(axis));tlyDrawAxes();document.getElementById('tly-axis-'+axis)?.lastElementChild?.querySelector('input')?.focus();}
 function tlyRemoveAxis(axis,index){const list=TLYEDIT.config[axis],a=list[index];if(TLYEDIT.original?.[axis].some(x=>x.id===a.id))a.active=false;else{if(TLYEDIT.templateBase?.[axis].some(x=>x.id===a.id))TLYEDIT.templateRemoved[axis].add(a.id);list.splice(index,1);}tlyDrawAxes();}
 function tlyRestoreAxis(axis,index){TLYEDIT.config[axis][index].active=true;tlyDrawAxes();}
-function tlyMove(axis,index,step){const list=TLYEDIT.config[axis],to=index+step;if(to<0||to>=list.length)return;if(TLYEDIT.templateMoved){TLYEDIT.templateMoved[axis].add(list[index].id);TLYEDIT.templateMoved[axis].add(list[to].id);}[list[index],list[to]]=[list[to],list[index]];tlyDrawAxes();document.querySelectorAll('#tly-axis-'+axis+' .tly-axis')[to]?.querySelector(step<0?'[title="上へ"]':'[title="下へ"]')?.focus();}
+function tlyMove(axis,index,step){const list=TLYEDIT.config[axis],to=index+step;if(to<0||to>=list.length)return;if(TLYEDIT.templateMoved){TLYEDIT.templateMoved[axis].add(list[index].id);TLYEDIT.templateMoved[axis].add(list[to].id);}[list[index],list[to]]=[list[to],list[index]];tlyDrawAxes();document.querySelectorAll('#tly-axis-'+axis+' .tly-axis')[to]?.querySelector('.tly-grip')?.focus();}
+/* 縦・横の項目はつまみ（⋮⋮）をドラッグして並べ替える。指で触る画面でも動くよう Pointer Events で書く。
+   動かしている間は行を入れ替えて見せ、離したところで並びを確定する。キーボードは上下キーで1つずつ */
+let TLYDRAG=null;
+function tlyDragStart(e,axis){
+ if(e.button>0)return;e.preventDefault();
+ const grip=e.currentTarget,row=grip.closest('.tly-axis');
+ TLYDRAG={axis,row,box:row.parentElement,grip};row.classList.add('tly-dragging');
+ /* 行を入れ替えるとつまみがDOMから外れて pointer capture が切れるので、document で最後まで受ける */
+ document.addEventListener('pointermove',tlyDragMove);document.addEventListener('pointerup',tlyDragEnd);document.addEventListener('pointercancel',tlyDragEnd);
+}
+function tlyDragMove(e){
+ const d=TLYDRAG;if(!d)return;
+ const before=[...d.box.children].filter(r=>r!==d.row).find(r=>{const b=r.getBoundingClientRect();return e.clientY<b.top+b.height/2;})||null;
+ if(before!==d.row.nextElementSibling)d.box.insertBefore(d.row,before);
+}
+function tlyDragEnd(e){
+ const d=TLYDRAG;if(!d)return;TLYDRAG=null;
+ document.removeEventListener('pointermove',tlyDragMove);document.removeEventListener('pointerup',tlyDragEnd);document.removeEventListener('pointercancel',tlyDragEnd);
+ const list=TLYEDIT.config[d.axis],order=[...d.box.children].map(r=>Number(r.dataset.i)),moved=Number(d.row.dataset.i),at=order.indexOf(moved);
+ if(e.type==='pointercancel'||order.every((v,i)=>v===i)){tlyDrawAxes();return;}
+ if(TLYEDIT.templateMoved)order.forEach((v,i)=>{if(v!==i)TLYEDIT.templateMoved[d.axis].add(list[v].id);});
+ TLYEDIT.config[d.axis]=order.map(i=>list[i]);tlyDrawAxes();
+ document.querySelectorAll('#tly-axis-'+d.axis+' .tly-axis')[at]?.querySelector('.tly-grip')?.focus();
+}
+function tlyGripKey(e,axis,i){if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();tlyMove(axis,i,e.key==='ArrowUp'?-1:1);}}
 function tlyDrawEditor(){refreshSheet(()=>openSheet(`<div id="tly-staff-editor" class="tly-surface tly-create"><div class="tly-hero"><div class="tly-wordmark">OPStappy</div><h1>${TLYEDIT.id?'Edit OPStappy!':'Create new OPStappy!'}</h1><div class="tly-meta"><div><label class="tly-field">イベント名<input id="tly-title" maxlength="100" value="${esc(TLYEDIT.config.title)}" oninput="tlySet('title',this.value)"></label><p class="tly-owner">作成・管理：OPSスタッフ</p></div><label class="tly-field">イベントの詳細<textarea id="tly-description" rows="3" maxlength="2000" oninput="tlySet('description',this.value)">${esc(TLYEDIT.config.description)}</textarea></label></div>${TLYEDIT.id?'':`<div class="tly-formats"><button class="btn ${TLYEDIT.settings.kind==='timetable'?'tly-format-active':''}" aria-pressed="${TLYEDIT.settings.kind==='timetable'}" onclick="tlySelectTemplate('timetable')">時間割形式</button><button class="btn ${TLYEDIT.settings.kind==='calendar'?'tly-format-active':''}" aria-pressed="${TLYEDIT.settings.kind==='calendar'}" onclick="tlySelectTemplate('calendar')">カレンダー形式</button></div>`}</div><div class="tly-create-body"><section class="tly-settings"><h2>表の設定</h2>${TLYEDIT.id?'<p class="tly-muted">保存済みの回答を保持して編集します。×で消した保存済みの項目は非表示になり、「戻す」で元に戻せます。</p>':tlyTemplateSettings()}<div class="tly-axes" id="tly-axes">${tlyAxisHTML('rows','縦')}${tlyAxisHTML('columns','横')}</div></section><section class="tly-preview"><h2>プレビュー</h2><div id="tly-preview"></div></section></div><div class="tly-create-footer"><div id="tly-editor-error" class="tly-status" role="status"></div><button class="btn pri" id="tly-save" onclick="saveTallyBoard()">${TLYEDIT.id?'変更を保存':'この内容で作成する'}</button><button class="btn ghost" onclick="closeSheet()">閉じる</button></div></div>`));tlyPreview();}
 function tlyCleanConfig(state){const clean=axis=>state.config[axis].flatMap(a=>{if(a.label.trim())return [a];const old=state.original?.[axis].find(x=>x.id===a.id);return old?[{...old,active:false}]:[];});return {...state.config,rows:clean('rows'),columns:clean('columns')};}
 function tlyPreview(){const target=document.getElementById('tly-preview');if(target)TallyUI.renderPreview(target,tlyCleanConfig(TLYEDIT));}
