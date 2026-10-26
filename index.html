@@ -2944,13 +2944,31 @@ async function reopenInterview(id){
   applyInterview(next);
   closeSheet();toast('申請中に戻しました');go('interviews');
 }
+/* 日時変更シートに出す「申請のときに選んでもらった候補」。押すと日時の欄へ入る。
+   今の確定日時と過ぎた枠は出さない。予約スケジュールの予約には候補が無いので何も出ない */
+function rescheduleCandidatesHTML(iv){
+  if(ivIsBooking(iv))return '';
+  const now=Date.now(),current=new Date(iv.confirmed_datetime).getTime();
+  const groups=ivGroups(iv).map(g=>({g,slots:g.slots.filter(v=>{const t=new Date(v).getTime();return t>now&&t!==current;})})).filter(x=>x.slots.length);
+  if(!groups.length)return '';
+  return `<div class="rsc-box"><div class="fl">申請時の候補から選ぶ</div>${groups.map(({g,slots})=>
+    `<div class="rsc-group"><div class="rsc-head">${fmtGroupRange(g)}</div><div class="rsc-slots">${slots.map(v=>
+      `<button type="button" class="rsc-slot" aria-pressed="false" data-iso="${esc(v)}" onclick="pickRescheduleSlot(this)">${hm(v)}〜</button>`).join('')}</div></div>`).join('')}
+    <p class="fine">選ぶと下の「変更後の日時」に入ります。候補にない時間は下で直接入力できます。</p></div>`;
+}
+function pickRescheduleSlot(button){
+  const d=new Date(button.dataset.iso),pad2=n=>String(n).padStart(2,'0');
+  document.getElementById('iv-change-datetime').value=`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  document.querySelectorAll('.rsc-slot').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+  const err=document.getElementById('iv-change-error');err.textContent='';err.classList.remove('show');
+}
 function openInterviewReschedule(id){
   const interview=(DB.interviews||[]).find(item=>item.id===id);
   if(!interview||interview.status!=='fixed')return;
   const date=new Date(interview.confirmed_datetime);
   const local=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}T${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
   openSheet(`<h3>面談日時を変更</h3><p class="page-sub">${esc(ivInternName(interview))}さんと相談済みの日時を指定してください。相手の再承認は不要です。</p>
-    <p>現在：${fmtDT(interview.confirmed_datetime)}</p><label class="fl" for="iv-change-datetime">変更後の日時</label>
+    <p>現在：${fmtDT(interview.confirmed_datetime)}</p>${rescheduleCandidatesHTML(interview)}<label class="fl" for="iv-change-datetime">変更後の日時</label>
     <input type="datetime-local" id="iv-change-datetime" value="${esc(local)}"><div class="field-err" id="iv-change-error"></div>
     ${ivIsBooking(interview)?'<p class="fine">予約スケジュールの受付時間から指定してください。Googleカレンダーから変更をお知らせします。</p>':'<p class="fine">変更後、LINEなどで相手に日時を連絡してください。</p>'}
     <button class="btn pri block" style="margin-top:16px" onclick="submitInterviewReschedule('${id}',this)">変更内容を確認</button>`);

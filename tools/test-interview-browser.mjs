@@ -2,7 +2,8 @@ export async function runInterviewBrowserTests(page){
   const results=[];
   const day=new Date();day.setDate(day.getDate()+1);day.setHours(13,0,0,0);
   const original=day.toISOString(),changed=new Date(+day+3600000).toISOString();
-  let interview={id:'ui_interview',intern_name:'面談テストさん',status:'fixed',confirmed_datetime:original,choices:[original],created_at:new Date().toISOString(),note:'申請メモ'};
+  const third=new Date(+day+7200000).toISOString(),past=new Date(Date.now()-86400000).toISOString();
+  let interview={id:'ui_interview',intern_name:'面談テストさん',status:'fixed',confirmed_datetime:original,choices:[original,third,past],created_at:new Date().toISOString(),note:'申請メモ'};
   let fail=false;
   await page.route('**/api/interviews/ui_interview',async route=>{
     if(fail)return route.fulfill({status:409,json:{error:'この時間は面談できません。別の時間を選んでください'}});
@@ -15,6 +16,12 @@ export async function runInterviewBrowserTests(page){
     await page.evaluate(fixture=>{fixture.staff_id=ME.id;fixture.branch_id=ME.branch_id;DB.interviews=[...DB.interviews.filter(item=>item.id!==fixture.id),fixture];openInterview(fixture.id);},interview);
     await page.getByRole('button',{name:'日時を変更',exact:true}).click();
     const local=await page.locator('#iv-change-datetime').inputValue();
+    const chips=await page.locator('.rsc-slot').allTextContents();
+    check(JSON.stringify(chips)==='["15:00〜"]','申請時の候補だけが並ばない（現在の日時・過去は除く）：'+JSON.stringify(chips));
+    await page.locator('.rsc-slot').click();
+    check(await page.locator('#iv-change-datetime').inputValue()===local.slice(0,11)+'15:00','候補を押しても日時の欄に入らない');
+    check(await page.locator('.rsc-slot').getAttribute('aria-pressed')==='true','選んだ候補の表示が変わらない');
+    results.push({label:'日時変更で申請時の候補から選べる',ok:true});
     await page.getByLabel('変更後の日時',{exact:true}).fill(local.slice(0,11)+'14:00');
     await page.getByRole('button',{name:'変更内容を確認',exact:true}).click();
     await page.getByRole('button',{name:'変更する',exact:true}).click();

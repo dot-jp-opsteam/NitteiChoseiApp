@@ -83,19 +83,19 @@ OPStappyの作成・管理はスタッフログインを維持する。Tappyの�
 ## テスト（触ったら必ず走らせる）
 
 ```bash
-node tools/test-fmt.mjs        # 102件・約1秒。HTMLから関数を切り出して動かす
-node tools/e2e.mjs             # 553件・約3秒。実サーバーを8123番で起動して実APIを叩く
+node tools/test-fmt.mjs        # 127件・約1秒。HTMLから関数を切り出して動かす
+node tools/e2e.mjs             # 623件・約3秒。実サーバーを8123番で起動して実APIを叩く
 node tools/e2e.mjs --quiet     # 失敗したものだけ出す（ふだんはこちら）
 node tools/e2e.mjs --only 出欠  # 見出しに その語 を含む区画だけ出す
-node tools/test-stream.mjs     # SSE（27件）
+node tools/test-stream.mjs     # SSE（30件）
 node tools/test-ratelimit.mjs  # 公開ページの回数制限（23件）
 # 確認用ページ（tools/make-test-page.mjs）は今後作らない・走らせない（2026-10-05 の指示）
 node tools/record-demos.mjs    # demo/ の動画を撮り直す（要 Playwright と ffmpeg・約1分・8124番を使う）
 node tools/test-booking-editor.mjs # 予約編集（6件）。日付・時刻の操作と保存後の公開枠
 node tools/test-booking.mjs    # 予約スケジュールの枠の計算（31件）
-node tools/test-booking-e2e.mjs # 予約の通し（56件）。偽のGoogleを立てて8125番で起動
+node tools/test-booking-e2e.mjs # 予約の通し（91件）。偽のGoogleを立てて8125番で起動
 node tools/test-booking-e2e.mjs --serve  # 画面確認用に立てたままにする（URLが出る）
-node tools/test-tally.mjs      # 表のモデル（36件）。固定ID・未回答・テンプレート・集計・なぞり
+node tools/test-tally.mjs      # 表のモデル（39件）。固定ID・未回答・テンプレート・集計・なぞり
 node tools/test-tally-e2e.mjs  # 表の実API。認証・再送・同時更新・上限・回数制限（8129番）
 # tools/test-tally-browser.mjs の runTallyBrowserTests(page) をPlaywrightで実行：応答喪失後429/500・表と回答の同時変更を検査
 # tools/test-opstappy-browser.mjs の runOPStappyBrowserTests(browser)：即時テンプレート・軸の追加・既存回答保持・名前による集計の画面検査
