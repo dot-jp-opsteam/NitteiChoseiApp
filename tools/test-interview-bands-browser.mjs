@@ -113,6 +113,45 @@ export async function runInterviewBandBrowserTests(page){
     results.push({label:'変更に失敗したら帯を元の位置に戻す',ok:true});
     fail=false;
 
+
+    /* Googleの予定の帯のつまみ。30分の予定の上のつまみを下げても、帯が滑って飛ばず、30分より短くならない */
+    await page.evaluate(()=>{DB.interviews=DB.interviews.filter(item=>item.id!=='ui_band');closeSheet();renderQuiet();});
+    await page.waitForFunction(()=>!AVGOOGLE.loading&&document.querySelector('.avg-stage td[data-iso]'));
+    const dayIso=await page.evaluate(()=>document.querySelector('.avg-stage tbody tr td:nth-child(3)').dataset.iso);
+    const at=(h,m)=>{const x=new Date(dayIso);x.setHours(h,m,0,0);return x.toISOString();};
+    await page.route('**/api/availability/google-events/**',route=>route.fulfill({status:503,json:{error:'テストでは保存しない'}}));
+    await page.evaluate(([s,e])=>{AVGOOGLE={...AVGOOGLE,connected:true,loading:false,error:'',events:[{id:'g_band',calendar_id:'primary',title:'会議',start:s,end:e,blocking_start:s,blocking_end:e,ignored:false}]};avGoogleRefresh();},[at(13,0),at(13,30)]);
+    await page.locator('.avg-band:not(.avg-iv)').waitFor();
+    const geo=()=>page.evaluate(()=>{const e=document.querySelector('.avg-band:not(.avg-iv)');return {top:Math.round(parseFloat(e.style.top)),height:Math.round(parseFloat(e.style.height))};});
+    const original0=await geo(),unit0=await row();
+    const hold=async(selector,steps)=>{
+      const target=page.locator('.avg-band:not(.avg-iv) '+selector);await target.scrollIntoViewIfNeeded();
+      const box=await target.boundingBox(),x=box.x+box.width/2,y=box.y+box.height/2,seen=[];
+      await page.mouse.move(x,y);await page.mouse.down();
+      for(const k of steps){await page.mouse.move(x,y+unit0*k,{steps:3});seen.push(await geo());}
+      return seen;
+    };
+    let seen=await hold('.avg-resize-start',[0.5,1,2,3]);
+    check(seen.every(g=>g.top===original0.top&&g.height===original0.height),'30分の予定の上のつまみを下げると帯が滑る：'+JSON.stringify(seen));
+    await page.mouse.up();await page.waitForTimeout(300);
+    await page.waitForFunction(()=>!document.querySelector('.avg-band[style*="opacity"]'));
+    seen=await hold('.avg-resize-end',[-0.5,-1,-3]);
+    check(seen.every(g=>g.top===original0.top&&g.height===original0.height),'30分の予定の下のつまみを上げると帯が崩れる：'+JSON.stringify(seen));
+    await page.mouse.up();await page.waitForTimeout(300);
+    seen=await hold('.avg-resize-start',[-1,-2]);
+    check(seen[1].top===original0.top-unit0*2&&seen[1].height===original0.height+unit0*2,'上のつまみを上げて伸ばせない：'+JSON.stringify(seen));
+    await page.mouse.up();await page.waitForTimeout(300);
+    results.push({label:'Googleの予定の帯：つまみは30分より短くならず、帯が滑って飛ばない',ok:true});
+
+    /* 表の範囲（9:00〜24:00）の外へは出ない */
+    await page.evaluate(([s,e])=>{AVGOOGLE={...AVGOOGLE,events:[{id:'g_edge',calendar_id:'primary',title:'朝',start:s,end:e,blocking_start:s,blocking_end:e,ignored:false}]};avGoogleRefresh();},[at(9,0),at(9,30)]);
+    await page.waitForTimeout(200);
+    const edge0=await geo();
+    seen=await hold('.avg-resize-start',[-2,-5]);
+    check(seen.every(g=>g.top===edge0.top&&g.height===edge0.height),'9:00の予定の上のつまみを上げると表の外へ出る：'+JSON.stringify(seen));
+    await page.mouse.up();
+    results.push({label:'Googleの予定の帯：表の範囲の外へは出ない',ok:true});
+    await page.unroute('**/api/availability/google-events/**');
   }finally{await page.unroute('**/api/interviews/ui_band');}
   return results;
 }

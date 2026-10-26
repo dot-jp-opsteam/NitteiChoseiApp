@@ -3254,8 +3254,10 @@ function ensureSharedCal(y,m){
       SHARED_CAL.configured=!!d.configured;
       if(d.name)SHARED_CAL.name=d.name;
       if(d.calendarId)SHARED_CAL.calendarId=d.calendarId;
-      // 取れた予定が画面に出るように描き直す
-      if(SHARED_CAL.events[key].length)render();
+      /* 取れた予定が画面に出るように描き直す。
+         背景の読み込みなので、現れる動きを通さない renderQuiet() を使う。
+         render() だと起動のたびに画面がフェードで何度もやり直されて、ちらついて見える */
+      if(SHARED_CAL.events[key].length)renderQuiet();
     })
     .catch(()=>{SHARED_CAL.loading[key]=false;});
   return [];
@@ -3290,7 +3292,7 @@ function ensureMyCal(y,m){
       MY_CAL.events[key]=d.events||[];
       MY_CAL.events[key].forEach(e=>{MY_CAL.byId[e.id]=e;});
       MY_CAL.connected=!!d.connected;
-      if(MY_CAL.events[key].length)render();
+      if(MY_CAL.events[key].length)renderQuiet(); // 背景の読み込みは静かに（上の全体予定表と同じ理由）
     })
     .catch(()=>{MY_CAL.loading[key]=false;});
   return [];

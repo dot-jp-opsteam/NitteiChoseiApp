@@ -99,7 +99,8 @@ node tools/test-tally.mjs      # 表のモデル（39件）。固定ID・未回�
 node tools/test-tally-e2e.mjs  # 表の実API。認証・再送・同時更新・上限・回数制限（8129番）
 # tools/test-tally-browser.mjs の runTallyBrowserTests(page) をPlaywrightで実行：応答喪失後429/500・表と回答の同時変更を検査
 # tools/test-interview-browser.mjs の runInterviewBrowserTests(page)：日時変更の希望一覧・変更前の表示・Google予定の記憶の破棄
-# tools/test-interview-bands-browser.mjs の runInterviewBandBrowserTests(page)：受けられる時間の表の面談の帯（上下のつまみで伸縮・押して数字で指定。帯そのものは動かせない）。tools/test-tally-e2e.mjs --serve の8129番で実行
+# tools/test-interview-bands-browser.mjs の runInterviewBandBrowserTests(page)：受けられる時間の表の面談の帯（上下のつまみで伸縮・押して数字で指定。帯そのものは動かせない）と、Googleの予定の帯のつまみ（30分未満にならない・表の外へ出ない）。tools/test-tally-e2e.mjs --serve の8129番で実行
+# tools/test-boot-browser.mjs の runBootBrowserTests(browser)：起動時の描き直し（動き付きは1回だけ）。8129番で実行
 # tools/test-opstappy-browser.mjs の runOPStappyBrowserTests(browser)：即時テンプレート・軸の追加・既存回答保持・名前による集計の画面検査
 node tools/test-tally-e2e.mjs --serve # ダミーのスタッフと共有URLで画面確認。終了後も一時DBを残す
 node tools/test-login.mjs      # Googleでログインの通し（21件）。偽のGoogleを立てて8127番で起動

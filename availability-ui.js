@@ -193,7 +193,19 @@ function avGoogleResize(pointer,index,edge,rowHeight,band){
   const original=+new Date(edge==='start'?event.blocking_start:event.blocking_end);
   let moved=0;
   const originalTop=parseFloat(band.style.top),originalHeight=parseFloat(band.style.height);
-  const move=next=>{moved=Math.round(travel(next.clientY)/rowHeight)*1800000;const pixels=moved/1800000*rowHeight;band.style.opacity='.55';band.style.top=(originalTop+(edge==='start'?pixels:0))+'px';band.style.height=Math.max(18,originalHeight+(edge==='start'?-pixels:pixels))+'px';};
+  /* つまみが動かせる範囲。表の9:00〜24:00の中で、帯が30分（1マス）より短くならないところまで。
+     範囲を決めずに高さだけ下限で止めると、上のつまみを下げたとき高さは止まるのに上端だけ進み続け、
+     帯が下へ滑って飛んだように見える */
+  const gridTop=stage.querySelector('tbody tr td').getBoundingClientRect().top-stageTop;
+  const gridBottom=gridTop+stage.querySelectorAll('tbody tr:not(.bt-endrow)').length*rowHeight;
+  const minHeight=Math.min(rowHeight,originalHeight);
+  const low=Math.ceil((edge==='start'?gridTop-originalTop:minHeight-originalHeight)/rowHeight);
+  const high=Math.floor((edge==='start'?originalHeight-minHeight:gridBottom-originalTop-originalHeight)/rowHeight);
+  const move=next=>{
+    const steps=low>high?0:Math.min(Math.max(Math.round(travel(next.clientY)/rowHeight),low),high);
+    moved=steps*1800000;const pixels=steps*rowHeight;
+    band.style.opacity='.55';band.style.top=(originalTop+(edge==='start'?pixels:0))+'px';band.style.height=(originalHeight+(edge==='start'?-pixels:pixels))+'px';
+  };
   const cleanup=()=>{AVGOOGLE_DRAG=false;window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);band.style.opacity='';};
   const cancel=()=>{cleanup();avGoogleRefresh();};
   const finish=()=>{
