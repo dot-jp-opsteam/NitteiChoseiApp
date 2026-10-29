@@ -174,7 +174,8 @@ module.exports = function registerBookingRoutes(d) {
     return {
       title: c.title, duration: c.duration, color: c.color, description: c.description,
       location: c.location, phone: c.phone, questions: c.questions,
-      verifyEmail: !!(c.verifyEmail && mail.MAIL_ENABLED),
+      fields: c.fields || { name: 'required', email: 'required', affiliation: 'off', note: 'off' },
+      verifyEmail: needsCode(c),
       staff: { nickname: staff.nickname || '', avatar_url: staff.avatar_url || '' },
       window: { from: booking.ymdOf(new Date(win.from)), to: booking.ymdOf(new Date(win.to - 1)) },
     };
@@ -199,24 +200,42 @@ module.exports = function registerBookingRoutes(d) {
   /* ---------- 予約者の入力 ---------- */
   function readGuest(cfg, body) {
     const b = body || {};
-    const last = String(b.last_name || '').trim();
-    const first = String(b.first_name || '').trim();
-    const email = String(b.email || '').trim().toLowerCase();
+    const f = cfg.fields || { name: 'required', email: 'required', affiliation: 'off', note: 'off' };
+    /* 名前は1つの欄（name）で受ける。昔の画面から来る 姓・名（last_name / first_name）も読める */
+    let name = String(b.name || '').trim();
+    let last = '';
+    let first = '';
+    if (!name) {
+      last = String(b.last_name || '').trim();
+      first = String(b.first_name || '').trim();
+      name = [last, first].filter(Boolean).join(' ');
+    }
+    const email = f.email === 'off' ? '' : String(b.email || '').trim().toLowerCase();
+    const affiliation = f.affiliation === 'off' ? '' : String(b.affiliation || '').trim();
+    const note = f.note === 'off' ? '' : String(b.note || '').trim();
     const phone = String(b.phone || '').trim();
-    if (!last || !first) return { error: '姓と名を入力してください' };
-    if (last.length > 40 || first.length > 40) return { error: 'お名前が長すぎます' };
-    if (!isEmail(email)) return { error: 'メールアドレスを正しく入力してください' };
+    if (f.name === 'required' && !name) return { error: 'お名前を入力してください' };
+    if (name.length > 80) return { error: 'お名前が長すぎます' };
+    if (f.email === 'required' && !email) return { error: 'メールアドレスを入力してください' };
+    if (email && !isEmail(email)) return { error: 'メールアドレスを正しく入力してください' };
+    if (f.affiliation === 'required' && !affiliation) return { error: '所属を入力してください' };
+    if (affiliation.length > 100) return { error: '所属が長すぎます' };
+    if (f.note === 'required' && !note) return { error: '連絡事項を入力してください' };
+    if (note.length > 1000) return { error: '連絡事項が長すぎます' };
     if (cfg.phone === 'required' && !phone) return { error: '電話番号を入力してください' };
     if (phone && (phone.length > 30 || !/^[0-9+\-() ]+$/.test(phone))) return { error: '電話番号を正しく入力してください' };
     const raw = b.answers && typeof b.answers === 'object' ? b.answers : {};
     const answers = [];
+    if (affiliation) answers.push({ id: 'affiliation', label: '所属', value: affiliation });
+    if (note) answers.push({ id: 'note', label: '連絡事項', value: note });
     for (const q of cfg.questions) {
       const v = String(raw[q.id] == null ? '' : raw[q.id]).trim().slice(0, 1000);
       if (q.required && !v) return { error: `「${q.label}」に回答してください` };
       if (v) answers.push({ id: q.id, label: q.label, value: v });
     }
+    // 名前を使わない・空のままの任意欄は「ゲスト」として扱う（予約の一覧や予定に出す名前が要るため）
     return {
-      guest: { name: `${last} ${first}`, last, first, email, phone: cfg.phone === 'off' ? '' : phone, answers },
+      guest: { name: name || 'ゲスト', last, first, email, phone: cfg.phone === 'off' ? '' : phone, answers },
     };
   }
 
@@ -229,7 +248,7 @@ module.exports = function registerBookingRoutes(d) {
     for (const [k, v] of codes) if (v.exp < now) codes.delete(k);
   }
   function needsCode(cfg) {
-    return !!(cfg.verifyEmail && mail.MAIL_ENABLED);
+    return !!(cfg.verifyEmail && mail.MAIL_ENABLED && (!cfg.fields || cfg.fields.email !== 'off'));
   }
   function checkCode(page, email, code) {
     const key = `${page.id}|${email}`;
@@ -248,7 +267,7 @@ module.exports = function registerBookingRoutes(d) {
     const lines = [
       `${c.title}`,
       '',
-      `予約者：${iv.intern_name}（${iv.guest_email}）`,
+      `予約者：${iv.intern_name}${iv.guest_email ? `（${iv.guest_email}）` : ''}`,
       ...(iv.guest_phone ? [`電話番号：${iv.guest_phone}`] : []),
       ...(iv.answers || []).map((a) => `${a.label}：${a.value}`),
       '',
@@ -262,7 +281,8 @@ module.exports = function registerBookingRoutes(d) {
       description: lines.join('\n'),
       start: { dateTime: new Date(startMs).toISOString(), timeZone: 'Asia/Tokyo' },
       end: { dateTime: new Date(endMs).toISOString(), timeZone: 'Asia/Tokyo' },
-      attendees: [{ email: iv.guest_email, displayName: iv.intern_name }],
+      // メールアドレスを集めていない予約には、Googleの招待（メール）を出さない
+      ...(iv.guest_email ? { attendees: [{ email: iv.guest_email, displayName: iv.intern_name }] } : {}),
     };
     if ((c.location.type === 'place' || c.location.type === 'phone') && c.location.text) {
       ev.location = c.location.text;

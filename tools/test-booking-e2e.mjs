@@ -369,6 +369,45 @@ async function run(dbPath) {
   check('消したスケジュールのURLは404', (await api(null, 'GET', `/api/book/${token}`)).status, 404);
   const left = (await api(TOK.a, 'GET', '/api/db')).json.interviews.filter((iv) => iv.source === 'booking' && iv.status === 'fixed');
   check('入っていた予約は残る', left.length, 1);
+
+  console.log('\n─────── 入力項目の設定（使用しない／任意／必須） ───────');
+  /* 2026-10-29：名前だけ必須が初期設定。メールを集めなければ、Googleの招待（メール）も出さない */
+  const defaults = (await api(TOK.a, 'GET', '/api/booking-pages')).json.defaults;
+  check('新しいページの初期値は名前だけ必須', defaults.fields, { name: 'required', email: 'off', affiliation: 'off', note: 'off' });
+  const LATE = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [{ s: '13:00', e: '20:00' }]]));
+  const fcfg = { title: '名前だけの面談', duration: 30, weekly: LATE, minNoticeHours: 0, maxDays: 30, location: { type: 'none' }, fields: defaults.fields };
+  G.busy = [];
+  const fmade = await api(TOK.a, 'POST', '/api/booking-pages', { config: fcfg });
+  const ftoken = fmade.json.page.url.split('/b/')[1];
+  const finfo = await api(null, 'GET', `/api/book/${ftoken}`);
+  check('公開ページに項目の設定が出る', finfo.json.fields, { name: 'required', email: 'off', affiliation: 'off', note: 'off' });
+  check('名前が無ければ弾く', (await api(null, 'POST', `/api/book/${ftoken}`, { start: atT(13).toISOString() })).status, 400);
+  G.calls.length = 0;
+  const fb1 = await api(null, 'POST', `/api/book/${ftoken}`, { name: '山田 花子', email: 'ignored@example.com', start: atT(13).toISOString() });
+  check('名前だけで予約できる', fb1.status, 200);
+  check('使わない欄（メール）は保存しない', [fb1.json.booking.name, fb1.json.booking.email], ['山田 花子', '']);
+  const fins = G.calls.find((c) => c.method === 'POST' && c.path.endsWith('/events'));
+  check('メールを集めない予約にはGoogleの招待（attendees）を付けない', fins.body.attendees, undefined);
+  check('控えに本人専用の変更用リンクがある', /\/b\/manage\/[a-f0-9]{48}$/.test(fb1.json.booking.manage_url), true);
+
+  const upd = await api(TOK.a, 'PUT', `/api/booking-pages/${fmade.json.page.id}`, { config: { ...fcfg, fields: { name: 'required', email: 'optional', affiliation: 'required', note: 'optional' } } });
+  check('項目の設定を変えられる', upd.status, 200);
+  check('必須の所属が無ければ弾く', (await api(null, 'POST', `/api/book/${ftoken}`, { name: 'A', start: atT(14).toISOString() })).status, 400);
+  check('任意のメールが変な形なら弾く', (await api(null, 'POST', `/api/book/${ftoken}`, { name: 'A', affiliation: '大学', email: 'abc', start: atT(14).toISOString() })).status, 400);
+  G.calls.length = 0;
+  const fb2 = await api(null, 'POST', `/api/book/${ftoken}`, { name: '佐藤', affiliation: '東大', note: '資料あり', start: atT(14).toISOString() });
+  check('任意のメールを空のまま予約できる', fb2.status, 200);
+  const fins2 = G.calls.find((c) => c.method === 'POST' && c.path.endsWith('/events'));
+  check('所属と連絡事項が予定の説明に入る', [fins2.body.description.includes('所属：東大'), fins2.body.description.includes('連絡事項：資料あり')], [true, true]);
+  const fb3 = await api(null, 'POST', `/api/book/${ftoken}`, { name: '鈴木', affiliation: '京大', email: 'Suzuki@Example.com', start: atT(15).toISOString() });
+  check('任意のメールを入れれば小文字にして保存し、招待を付ける', [fb3.status, fb3.json.booking.email], [200, 'suzuki@example.com']);
+  await api(TOK.a, 'PUT', `/api/booking-pages/${fmade.json.page.id}`, { config: { ...fcfg, fields: { name: 'off', email: 'off', affiliation: 'off', note: 'off' } } });
+  const fb4 = await api(null, 'POST', `/api/book/${ftoken}`, { start: atT(16).toISOString() });
+  check('名前を使わないページでは名前なしでも予約でき「ゲスト」になる', [fb4.status, fb4.json.booking && fb4.json.booking.name], [200, 'ゲスト']);
+  // fields を持たない昔の作り方のページは、これまでどおりメールが必須
+  const lmade = await api(TOK.a, 'POST', '/api/booking-pages', { config: { title: '昔の形式', duration: 30, weekly: LATE, minNoticeHours: 0, maxDays: 30, location: { type: 'none' } } });
+  const ltoken = lmade.json.page.url.split('/b/')[1];
+  check('fields の無い昔のページはメールが必須のまま', (await api(null, 'POST', `/api/book/${ltoken}`, { name: '山田', start: atT(17).toISOString() })).status, 400);
 }
 
 /* 画面確認用：予約スケジュールを1本作り、URLを出して待つ */
