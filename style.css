@@ -2597,3 +2597,99 @@ button.hm-ev-card{cursor:pointer}
   .hm-more{grid-column:2;grid-row:2;justify-self:end}
   .hm-panel{padding:16px}
 }
+
+/* ---------- 予約スケジュールの作成・編集（bke-）画像02：全画面。左に設定、右に週の予定表 ---------- */
+.bke-page{position:fixed;inset:0;z-index:60;overflow-y:auto;background:#f6f8fb;color:#14284b}
+html.bke-open body{overflow:hidden}
+#scrim{z-index:70}
+.bke{min-height:100%;max-width:1180px;margin:0 auto;padding:0 0 24px}
+.bke-bar{display:flex;align-items:center;gap:12px;padding:16px 24px;background:#fff;border:1px solid #e1e6ee;border-top:0;border-radius:0 0 10px 10px}
+.bke-crumb{display:flex;align-items:center;gap:14px;font-size:17px;font-weight:600}
+.bke-crumb b{font-size:20px;font-weight:800;color:#14284b}
+.bke-crumb i{font-style:normal;color:#9aa4b2}
+.bke-back{display:none;align-items:center;gap:6px;border:0;background:none;font:inherit;font-size:16px;font-weight:700;color:#14284b;padding:8px 0;min-height:44px;cursor:pointer}
+.bke-back .ic{width:20px;height:20px}
+.bke-close{margin-left:auto;border:1px solid #d5dbe5;background:#fff;color:#14284b;border-radius:8px;font:inherit;font-weight:700;padding:8px 14px;min-height:40px;cursor:pointer}
+.bke-main{display:grid;grid-template-columns:272px minmax(0,1fr);gap:14px;padding:12px 0 0;align-items:start}
+.bke-side{background:#fff;border:1px solid #e1e6ee;border-radius:10px;padding:20px 14px 22px}
+.bke-title{display:block;width:100%;border:0;border-bottom:1px dashed transparent;background:none;font:inherit;font-size:21px;font-weight:800;color:#14284b;padding:4px 0;margin:0 0 18px}
+.bke-title:hover,.bke-title:focus{border-bottom-color:#b8c2d1;outline:0}
+.bke-lab{display:block;font-size:15px;font-weight:700;color:#14284b;margin:18px 0 8px}
+.bke-segs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.bke-seg{border:1px solid #d5dbe5;background:#fff;color:#14284b;border-radius:6px;font:inherit;font-size:15px;font-weight:600;min-height:44px;cursor:pointer}
+.bke-seg.on{background:#1a6fe0;border-color:#1a6fe0;color:#fff;font-weight:700}
+.bke-select,.bke-input{display:block;width:100%;margin-top:8px;border:1px solid #d5dbe5;border-radius:6px;background:#fff;font:inherit;font-size:16px;font-weight:600;color:#14284b;padding:10px 12px;min-height:46px}
+.bke-more{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;border-top:1px solid #e6eaf0;border-bottom:1px solid #e6eaf0;background:none;font:inherit;font-size:16px;font-weight:600;color:#14284b;padding:16px 2px;margin-top:24px;cursor:pointer;min-height:56px}
+.bke-more .ic{width:18px;height:18px;transition:transform .2s}
+.bke-more[aria-expanded="true"] .ic{transform:rotate(90deg)}
+.bke-details{padding:8px 0}
+.bke-details .bkp-sec{border-color:#e6eaf0}
+.bke-save{display:block;width:100%;margin-top:18px;border:0;border-radius:6px;background:#1a6fe0;color:#fff;font:inherit;font-size:17px;font-weight:700;min-height:50px;cursor:pointer}
+.bke-save:disabled{opacity:.6}
+.bke-sp-only{display:none}
+.bke-cal{background:#fff;border:1px solid #e1e6ee;border-radius:10px;padding:16px 12px 14px;min-width:0}
+/* 予定表の見出し（画像02） */
+.bke-cal .bkc{margin:0}
+.bke-cal .bkc-nav.bkc-pc{display:grid;grid-template-columns:1fr auto auto auto 1fr;align-items:center;gap:14px;margin:0 0 14px}
+.bke-cal .bkc-nav.bkc-pc .bkc-arrow:first-child{grid-column:2}
+.bke-cal .bkc-nav.bkc-pc b{grid-column:3;font-size:19px;font-weight:800;white-space:nowrap}
+.bke-cal .bkc-nav.bkc-pc .bkc-arrow:nth-of-type(2){grid-column:4}
+.bke-cal .bkc-legend{grid-column:5;justify-self:end;margin:0;font-size:13px;color:#4b5565}
+.bkc-sp{display:none}
+.bkc-arrow{border:0;background:none;color:#14284b;width:40px;height:40px;border-radius:8px;cursor:pointer;display:grid;place-items:center}
+.bkc-arrow:hover{background:#f1f4f8}.bkc-arrow .ic{width:20px;height:20px}
+.bke-cal .bkc-grid{border-color:#e1e6ee;border-radius:0;grid-template-columns:58px repeat(7,minmax(0,1fr))}
+.bke-cal .bkc-head{height:60px}
+.bke-cal .bkc-head span{font-size:15px}
+.bke-cal .bkc-head small{font-size:13px;font-weight:500;color:#4b5565}
+.bke-cal .bkc-head.sat span{color:#1a6fe0}
+.bke-cal .bkc-head.today span,.bke-cal .bkc-head.today small{color:#1a6fe0}
+.bke-cal .bkc-axis{margin-top:60px}
+.bke-cal .bkc-hl{font-size:13px;font-weight:500;color:#4b5565;right:8px}
+.bke-cal .bkc-rg{background:#d9e7fb;border:1.5px solid #3b82e6;color:#1b4f9c;font-weight:500;padding:6px 8px;font-size:13px;border-radius:4px}
+.bke-cal .bkc-rg b{font-weight:500}
+.bke-cal .bkc-ev{background:#e2e4e8;border:1px solid #c9ced6;color:#3d4450;font-weight:500;padding:6px 8px;font-size:13px;border-radius:4px}
+.bke-cal .bkc-ev b{font-weight:500}
+.bke-cal .bkc-help{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;color:#4b5565;margin:12px 4px 0}
+.bke-cal .bkc-help .ic{width:18px;height:18px}
+@media (max-width:760px){
+  .bke-page{background:#fff}
+  .bke{padding:0}
+  .bke-bar{border:0;border-bottom:1px solid #e6eaf0;border-radius:0;padding:8px 16px}
+  .bke-back{display:inline-flex}.bke-crumb,.bke-close{display:none}
+  .bke-main{display:flex;flex-direction:column;gap:0;padding:0}
+  .bke-side{display:contents}
+  .bke-title{order:1;margin:16px 16px 4px;width:calc(100% - 32px)}
+  .bke-side>.bke-lab{order:2;margin:10px 16px 8px}
+  .bke-segs{order:3;margin:0 16px}
+  .bke-side>.bke-select{order:4;margin:8px 16px 0;width:calc(100% - 32px)}
+  .bke-pc-only{display:none}
+  .bke-cal{order:5;border:0;border-radius:0;padding:14px 16px 0}
+  .bke-more{order:6;margin:8px 16px 0;width:calc(100% - 32px)}
+  .bke-details{order:7;padding:8px 16px}
+  .bke-sp-only{display:block}
+  #bkErr{order:8;margin:0 16px}
+  .bke-save{order:9;margin:14px 16px 24px;width:calc(100% - 32px)}
+  .bke-cal .bkc-pc{display:none!important}
+  .bkc-sp{display:grid;grid-template-columns:auto 1fr auto;align-items:center;margin:4px 0 10px}
+  .bkc-sp b{text-align:center;font-size:18px;font-weight:800}
+  .bke-cal .bkc-tabs{gap:6px}
+  .bke-cal .bkc-tab{border-radius:6px;min-height:54px}
+  .bke-cal .bkc-tab.on{background:#1a6fe0;border-color:#1a6fe0}
+  .bke-cal .bkc-addbtn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin:12px 0;border:1.5px solid #1a6fe0;background:#fff;color:#1a6fe0;border-radius:6px;font:inherit;font-size:16px;font-weight:700;min-height:46px;cursor:pointer}
+  .bke-cal .bkc-addbtn .ic{width:18px;height:18px}
+  .bke-cal .bkc-grid{grid-template-columns:50px 1fr;border:0;border-top:1px solid #e6eaf0}
+  .bke-cal .bkc-col.sel .bkc-head{display:none}
+  .bke-cal .bkc-axis{margin-top:0}
+  .bke-cal .bkc-help{display:none}
+}
+.bkc-body{background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--bkc-px,36px) - 1px),#e8ecf1 calc(var(--bkc-px,36px) - 1px),#e8ecf1 var(--bkc-px,36px))}
+.bke-cal .bkc-body,.bke-cal .bkc-grid{background-color:#fff}
+.bke-cal .bkc-col{border-left-color:#e8ecf1}
+.bkc-rg{display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start}
+.bke-cal .bkc-grid{padding-bottom:10px}
+@media (max-width:760px){
+  .bke-cal .bkc-grid{padding-top:10px}
+  .bke-cal .bkc-tab{background:#fff;border-color:#d5dbe5}
+  .bke-cal .bkc-tab span{color:#14284b}
+}

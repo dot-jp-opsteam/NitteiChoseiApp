@@ -129,6 +129,32 @@
     padding:12px 18px;border-radius:8px;opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:calc(100% - 32px);font-weight:700}
   #bkToast.bk-show{opacity:1;transform:translateX(-50%) translateY(0)}
   @media (prefers-reduced-motion:reduce){#bkToast{transition:none}}
+
+  /* 画像03に合わせた細部（2026-10-29 再調整） */
+  .bk-bar{min-height:64px}
+  .bk-brand{font-size:24px;letter-spacing:.01em}
+  .bk-bar2{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
+  .bk-bar2 .bk-back{margin:0;justify-self:start;color:var(--bk-ink)}
+  .bk-bar-t{font-size:19px;font-weight:800;text-align:center}
+  .bk-h1{font-size:32px}
+  .bk-sub{font-size:17px;font-weight:500}
+  .bk-weeknav .bk-wbtn span{color:var(--bk-ink);font-weight:600}
+  .bk-weeknav .bk-wbtn svg{color:var(--bk-blue)}
+  .bk-dbtn{border-radius:8px}
+  .bk-dbtn span{font-size:14px}
+  .bk-h2{font-size:20px}
+  .bk-slot{border-radius:6px;font-size:19px;font-weight:500;min-height:58px}
+  .bk-when{padding:18px 20px;margin-top:4px}
+  .bk-when .bk-meta{font-size:19px;font-weight:600}
+  .bk-when .bk-right{margin-top:0}
+  .bk-field label{font-size:17px}
+  .bk-badge.bk-req{font-size:12px;padding:2px 8px}
+  .bk-done-mark{width:76px;height:76px}
+  .bk-done-mark svg{width:40px;height:40px}
+  .bk-summary .bk-sumtitle{font-size:19px;margin-bottom:8px}
+  .bk-summary .bk-meta{font-size:17px;font-weight:500}
+  .bk-btn.bk-outline{border-radius:6px}
+  .bk-btn.bk-soft{border-radius:6px;font-weight:700}
   @media (max-width:380px){.bk-h1{font-size:24px}.bk-dbtn b{font-size:18px}.bk-slot{font-size:16px}}
 </style>
 </head>
@@ -180,6 +206,7 @@ function todayYmd(){return ymd(new Date());}
 function slotIso(day,time){return new Date(day+'T'+time+':00+09:00').toISOString();}
 function addMin(time,min){var p=time.split(':').map(Number);var t=p[0]*60+p[1]+min;return pad(Math.floor(t/60))+':'+pad(t%60);}
 function dayLabel(day){var d=parseYmd(day);return (d.getMonth()+1)+'月'+d.getDate()+'日('+DOW[d.getDay()]+')';}
+function shortDay(day){var d=parseYmd(day);return (d.getMonth()+1)+'月'+d.getDate()+'日（'+DOW[d.getDay()]+'）';}
 function longDay(day){var d=parseYmd(day);return d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日 '+DOW[d.getDay()]+'曜日';}
 function toast(msg){var t=document.getElementById('bkToast');t.textContent=msg;t.classList.add('bk-show');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('bk-show');},2600);}
 
@@ -205,6 +232,7 @@ const IC = {
   close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  monitor:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>',
   link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>',
 };
 
@@ -310,7 +338,6 @@ function pickHTML(){
     '<div class="bk-week" role="group" aria-label="日付">'+days+'</div>'+
     (sel?'<h2 class="bk-h2">'+(parseYmd(sel).getMonth()+1)+'月'+parseYmd(sel).getDate()+'日 ('+DOW[parseYmd(sel).getDay()]+')</h2>':'')+
     slots+
-    '<div class="bk-tz">日本標準時（GMT+09:00）・'+i.duration+'分</div>'+
     '<div class="bk-sticky"><button type="button" class="bk-btn bk-pri bk-block" '+(chosen?'':'disabled ')+'onclick="goNext()">'+(MODE==='manage'?'この日時に変更する':'次へ')+'</button></div>',
     MODE==='manage'?topBar(IC.cal+'<span>予約の変更</span>'):null);
 }
@@ -326,10 +353,9 @@ function formHTML(){
     return field('bkq_'+x.id,x.label,x.required?'required':'optional','<textarea id="bkq_'+x.id+'" maxlength="1000">'+esc((g.answers||{})[x.id]||'')+'</textarea>');
   }).join('');
   var emailOn=f.email!=='off';
-  var body='<button type="button" class="bk-back" onclick="backToPick()">'+IC.left+'戻る</button>'+
-    '<div class="bk-card2">'+
-      '<div class="bk-meta">'+IC.cal+'<div>'+longDay(F.day)+' '+F.time+'〜'+addMin(F.time,i.duration)+'</div></div>'+
-      (locationShort(i.location)?'<div class="bk-meta">'+IC.pin+'<div>'+esc(locationShort(i.location))+'</div></div>':'')+
+  var body='<div class="bk-card2 bk-when">'+
+      '<div class="bk-meta">'+IC.cal+'<div>'+shortDay(F.day)+' '+F.time+'</div></div>'+
+      (locationShort(i.location)?'<div class="bk-meta">'+(i.location.type==='meet'?IC.monitor:IC.pin)+'<div>'+esc(locationShort(i.location))+'</div></div>':'')+
       '<button type="button" class="bk-link-btn bk-right" onclick="backToPick()">日時を変更</button></div>'+
     '<div class="bk-banner bk-bad" id="bkFormErr" role="alert" style="display:none"></div>'+
     (f.name!=='off'?field('bkName','お名前',f.name,'<input id="bkName" autocomplete="name" maxlength="80" value="'+esc(g.name||'')+'">'):'')+
@@ -345,7 +371,7 @@ function formHTML(){
     q+
     '<div class="bk-sticky"><button type="button" class="bk-btn bk-pri bk-block" id="bkSubmit" onclick="submitBooking()">予約を確定する</button>'+
       '<p class="bk-tz bk-center">この操作で予約が確定します。</p></div>';
-  return shell(body,'<header class="bk-bar"><span class="bk-brand">OPS 日調</span><span class="bk-bar-r">'+IC.cal+'<span>'+esc(i.title)+'</span></span></header>');
+  return shell(body,'<header class="bk-bar bk-bar2"><button type="button" class="bk-back" onclick="backToPick()">'+IC.left+'戻る</button><span class="bk-bar-t">'+esc(i.title)+'</span><span></span></header>');
 }
 function formErr(msg){var e=document.getElementById('bkFormErr');if(!e)return;e.textContent=msg;e.style.display=msg?'block':'none';if(msg)e.scrollIntoView({block:'nearest'});}
 function val(id){var el=document.getElementById(id);return el?el.value.trim():'';}
@@ -412,12 +438,13 @@ async function submitBooking(){
 function summaryCard(b){
   var loc=b.location||{type:'none'};
   var place=loc.type==='meet'?'オンライン':locationShort(loc);
+  var st=new Date(b.start);
+  var when=isNaN(st)?b.label:(st.getMonth()+1)+'月'+st.getDate()+'日（'+DOW[st.getDay()]+'）'+pad(st.getHours())+':'+pad(st.getMinutes());
   return '<div class="bk-card2 bk-summary">'+
     '<div class="bk-sumtitle">'+esc(b.title)+'</div>'+
-    '<div class="bk-meta">'+IC.cal+'<div>'+esc(b.label)+'</div></div>'+
-    (place?'<div class="bk-meta">'+IC.pin+'<div>'+esc(place)+(loc.type==='meet'&&b.meet_url?'<div class="bk-fine"><a href="'+esc(b.meet_url)+'" target="_blank" rel="noopener">'+esc(b.meet_url)+'</a></div>':'')+'</div></div>':'')+
+    '<div class="bk-meta">'+IC.cal+'<div>'+esc(when)+'</div></div>'+
+    (place?'<div class="bk-meta">'+(loc.type==='meet'?IC.monitor:IC.pin)+'<div>'+esc(place)+(loc.type==='meet'&&b.meet_url?'<div class="bk-fine"><a href="'+esc(b.meet_url)+'" target="_blank" rel="noopener">'+esc(b.meet_url)+'</a></div>':'')+'</div></div>':'')+
     (b.name?'<div class="bk-meta">'+IC.person+'<div>'+esc(b.name)+' 様</div></div>':'')+
-    (b.staff?'<div class="bk-meta">'+IC.person+'<div>担当：'+esc(b.staff)+'</div></div>':'')+
   '</div>';
 }
 function doneHTML(){
@@ -426,7 +453,7 @@ function doneHTML(){
     summaryCard(b)+
     (b.email?'<p class="bk-fine bk-center">'+esc(b.email)+' にGoogleカレンダーの招待をお送りしました。</p>':'')+
     '<h2 class="bk-h2">変更・キャンセル用リンク</h2>'+
-    '<p class="bk-sub">このリンクを保存してください。リンクを知っている人だけが予約を変更できます。</p>'+
+    '<p class="bk-sub">このリンクを保存してください。</p>'+
     '<button type="button" class="bk-btn bk-outline bk-block" onclick="copyManage()">'+IC.link+'管理リンクをコピー</button>'+
     '<a class="bk-btn bk-soft bk-block" href="'+esc(b.manage_url)+'">予約を変更・キャンセル</a>'+
     '<p class="bk-tz bk-center">変更・キャンセルは予約の開始時刻まで可能です。</p>');

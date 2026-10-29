@@ -289,6 +289,7 @@ const ICON={
   'check-sq':'<rect pathLength="1" x="4" y="4" width="16" height="16" rx="2.5"/><path pathLength="1" d="m8.2 12.2 2.7 2.7 5-5.4"/>',
   gear:'<circle pathLength="1" cx="12" cy="12" r="3"/><path pathLength="1" d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   more:'<circle pathLength="1" cx="5.5" cy="12" r="1.3"/><circle pathLength="1" cx="12" cy="12" r="1.3"/><circle pathLength="1" cx="18.5" cy="12" r="1.3"/>',
+  info:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="M12 11v5.5"/><path pathLength="1" d="M12 7.6v.2"/>',
   history:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="M12 7v5l3.2 2"/>',
 };
 /* 大きさは指定しない。CSS側で 1em にしてあるので、置いた場所の文字サイズに合わせて伸び縮みする */
@@ -5515,8 +5516,8 @@ function openBookingEditor(id){
   if(!BKE.c.fields)BKE.c.fields={name:'required',email:'required',affiliation:'off',note:'off'};
   BKCOPY=null;
   bkcInit();
-  BKOPEN=new Set(p?['basic']:['basic','weekly']);
-  openSheet(bkEditorHTML());
+  BKOPEN=new Set();BKMORE=false;
+  bkShowEditor();
   if(!BKCALS)bkLoadCalendars();
 }
 async function bkLoadCalendars(){
@@ -5525,7 +5526,19 @@ async function bkLoadCalendars(){
   if(BKE)bkRedraw();
 }
 /* 編集シートを組み立て直す。入力はその場で BKE に入れているので、作り直しても消えない */
-function bkRedraw(){refreshSheet(()=>openSheet(bkEditorHTML()));}
+function bkRedraw(){if(document.getElementById('bkEditorPage')&&BKE)bkShowEditor();}
+/* 予約スケジュールの作成・編集は画面全体を使う（画像02）。中身が長くなっても、このページごと縦にスクロールする */
+let BKMORE=false;
+function bkShowEditor(){
+  let el=document.getElementById('bkEditorPage');
+  if(!el){el=document.createElement('div');el.id='bkEditorPage';el.className='bke-page';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');document.body.appendChild(el);}
+  const y=el.scrollTop;el.innerHTML=bkEditorHTML();el.hidden=false;el.scrollTop=y;
+  document.documentElement.classList.add('bke-open');
+}
+function bkCloseEditor(){
+  const el=document.getElementById('bkEditorPage');if(el)el.remove();
+  document.documentElement.classList.remove('bke-open');BKE=null;BKC=null;
+}
 function bkToggleSec(k){if(BKOPEN.has(k))BKOPEN.delete(k);else BKOPEN.add(k);bkRedraw();}
 function bkSec(k,title,sub,body){
   const open=BKOPEN.has(k);
@@ -5725,7 +5738,8 @@ function bkAddQuestion(){
    データは今までと同じ c.weekly（毎週）と c.overrides（その日だけ）。過去の予約や確定済みの面談には触れない。
    ========================================================= */
 let BKC=null; // {ws:週の月曜(ymd), sel:選んだ日, ev:{ymd:[{s,e,title}]}, evState, panel}
-const BKC_PX=36; // 1時間の高さ
+// 1時間の高さ。画像02に合わせ、PCは広め・スマホは詰める
+let BKC_PX=36;
 function bkcMonday(d){const x=new Date(d);x.setHours(0,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x;}
 function bkcAdd(k,n){const d=new Date(k+'T00:00:00');d.setDate(d.getDate()+n);return ymd(d);}
 function bkcInit(){
@@ -5787,7 +5801,7 @@ function bkcEventsFor(k){
   return out;
 }
 function bkcHours(){
-  let a=8*60,b=20*60;
+  let a=9*60,b=18*60;
   for(let i=0;i<7;i++){
     const k=bkcAdd(BKC.ws,i);
     bkcRanges(k).forEach(r=>{a=Math.min(a,bkcMin(r.s));b=Math.max(b,bkcMin(r.e)===0?1440:bkcMin(r.e));});
@@ -5797,6 +5811,7 @@ function bkcHours(){
 }
 const BKC_WD=['日','月','火','水','木','金','土'];
 function bkcHTML(){
+  BKC_PX=window.innerWidth<=760?34:58;
   const [h0,h1]=bkcHours();
   const H=(h1-h0)/60*BKC_PX;
   const today=ymd(new Date());
@@ -5813,20 +5828,31 @@ function bkcHTML(){
       const on=BKC.panel&&BKC.panel.mode==='edit'&&BKC.panel.k===k&&BKC.panel.kind===r.kind&&BKC.panel.i===r.i;
       return `<button type="button" class="bkc-rg${on?' on':''}" style="top:${(s-h0)/60*BKC_PX}px;height:${Math.max(18,(e-s)/60*BKC_PX)}px" onclick="bkcEdit('${k}','${r.kind}',${r.i})" aria-label="${bkcHM(s)}から${bkcHM(e)}の受付時間を編集"><b>${r.s} - ${r.e}</b><span>受付時間</span></button>`;
     }).join('');
-    return `<div class="bkc-col${k===BKC.sel?' sel':''}"><div class="bkc-head${k===today?' today':''}"><span>${BKC_WD[d.getDay()]}</span><small>${d.getMonth()+1}/${d.getDate()}</small></div>
-      <div class="bkc-body" style="height:${H}px" data-k="${k}" data-h0="${h0}" onpointerdown="bkcDown(event)">${evs}${rgs}</div></div>`;
+    return `<div class="bkc-col${k===BKC.sel?' sel':''}"><div class="bkc-head${k===today?' today':''}${d.getDay()===6?' sat':''}"><span>${BKC_WD[d.getDay()]}</span><small>${d.getMonth()+1}月${d.getDate()}日</small></div>
+      <div class="bkc-body" style="height:${H}px;--bkc-px:${BKC_PX}px" data-k="${k}" data-h0="${h0}" onpointerdown="bkcDown(event)">${evs}${rgs}</div></div>`;
   }).join('');
   const tabs=days.map(k=>{const d=new Date(k+'T00:00:00');return `<button type="button" class="bkc-tab${k===BKC.sel?' on':''}" onclick="bkcSel('${k}')" aria-pressed="${k===BKC.sel}"><span>${BKC_WD[d.getDay()]}</span><b>${d.getDate()}</b></button>`;}).join('');
+  const sd=new Date(BKC.sel+'T00:00:00');
+  const longDay=d=>`${d.getMonth()+1}月${d.getDate()}日（${BKC_WD[d.getDay()]}）`;
   return `<div class="bkc">
-    <div class="bkc-nav"><button type="button" class="btn sm iconly" onclick="bkcShift(-1)" aria-label="前の週">${ic('chevron-l')}</button><b>${wk}</b>
-      <button type="button" class="btn sm iconly" onclick="bkcShift(1)" aria-label="次の週">${ic('chevron')}</button>
+    <div class="bkc-nav bkc-pc"><button type="button" class="bkc-arrow" onclick="bkcShift(-1)" aria-label="前の週">${ic('chevron-l')}</button>
+      <b>${longDay(new Date(days[0]+'T00:00:00'))} – ${longDay(new Date(days[6]+'T00:00:00'))}</b>
+      <button type="button" class="bkc-arrow" onclick="bkcShift(1)" aria-label="次の週">${ic('chevron')}</button>
       <span class="bkc-legend"><i class="bkc-lg-o"></i>受付時間<i class="bkc-lg-g"></i>自分の予定</span></div>
+    <div class="bkc-nav bkc-sp"><button type="button" class="bkc-arrow" onclick="bkcStep(-1)" aria-label="前の日">${ic('chevron-l')}</button>
+      <b>${longDay(sd)}</b><button type="button" class="bkc-arrow" onclick="bkcStep(1)" aria-label="次の日">${ic('chevron')}</button></div>
     <div class="bkc-tabs" role="group" aria-label="日付">${tabs}</div>
-    <button type="button" class="btn pri bkc-addbtn" onclick="bkcOpenAdd()">${ic('plus')}受付時間を追加</button>
+    <button type="button" class="bkc-addbtn" onclick="bkcOpenAdd()">${ic('plus')}受付時間を追加</button>
     ${stateMsg?`<div class="bkc-msg">${esc(stateMsg)}</div>`:''}
     <div class="bkc-grid"><div class="bkc-axis" style="height:${H}px">${hourLabels.join('')}</div>${cols}</div>
-    <p class="bkc-help">ドラッグして受付時間を追加できます。青い時間をタップすると、変更・削除できます。受付時間のうち、自分の予定と重なる部分は予約できません。</p>
+    <p class="bkc-help">${ic('info')}ドラッグして受付時間を追加できます。</p>
     ${bkcPanelHTML()}</div>`;
+}
+/* スマホの日付の矢印：1日ずつ動かし、週をまたいだら週も切り替える */
+function bkcStep(n){
+  const k=bkcAdd(BKC.sel,n);
+  if(k<BKC.ws||k>=bkcAdd(BKC.ws,7)){BKC.ws=bkcAdd(BKC.ws,n<0?-7:7);BKC.loaded={};BKC.sel=k;BKC.panel=null;bkRedraw();bkcLoadEvents();return;}
+  bkcSel(k);
 }
 /* ---- マウスでなぞって追加（スマホなどの指の操作は、画面のスクロールを妨げないよう対象外） ---- */
 let BKC_DRAG=null;
@@ -5938,7 +5964,7 @@ function bkEditorHTML(){
     <label class="fl">色</label>
     <div class="bkp-colors">${ch.colors.map(col=>`<button class="bkp-swatch ${c.color===col?'on':''}" style="background:${col}" onclick="BKE.c.color='${col}';bkRedraw()" aria-label="色 ${col}"></button>`).join('')}</div>
     `;
-  const availability=`<div class="bkp-gcal">
+  const availability=false&&`<div class="bkp-gcal">
     <section class="bkp-gsection"><span class="bkp-gsectionicon">${ic('clock')}</span><div class="bkp-gbody">
       <h4>予約の長さ</h4><p>各予約の長さを設定してください。</p>
       <select class="bkp-gselect bkp-gduration" aria-label="予約の長さ" onchange="BKE.c.duration=Number(this.value);bkRedraw()">${ch.durations.map(m=>`<option value="${m}" ${c.duration===m?'selected':''}>${bkDurLabel(m)}</option>`).join('')}</select>
@@ -5990,21 +6016,41 @@ function bkEditorHTML(){
     :`<p class="fine" style="margin-top:0">アプリのメール送信が未設定のため、リマインダーは送れません。確認・変更・取り消しのお知らせはGoogleカレンダーから届きます。</p>`;
   const ovN=Object.keys(c.overrides).length;
   const page=BKE.id?bkFind(BKE.id):null;
-  return `<h3>${BKE.id?'予約スケジュールを編集':'予約スケジュールを作成'}</h3>
-    ${bkSec('basic','タイトル・色','',basic)}
-    ${availability}
+  const durSeg=(v,label)=>`<button type="button" class="bke-seg${c.duration===v?' on':''}" aria-pressed="${c.duration===v}" onclick="BKE.c.duration=${v};bkRedraw()">${label}</button>`;
+  const isOther=c.duration!==30&&c.duration!==60;
+  const locSel=`<select class="bke-select" aria-label="場所" onchange="BKE.c.location.type=this.value;bkRedraw()">${[['meet','オンライン'],['place','対面'],['phone','電話'],['none','指定しない']].map(([v,l])=>`<option value="${v}" ${c.location.type===v?'selected':''}>${l}</option>`).join('')}</select>
+    ${c.location.type==='place'||c.location.type==='phone'?`<input class="bke-input" maxlength="300" value="${esc(c.location.text)}" placeholder="${c.location.type==='place'?'例）東京支部 3階 会議室':'例）電話番号（任意）'}" oninput="BKE.c.location.text=this.value" aria-label="場所の詳細">`:''}`;
+  const repSel=`<select class="bke-select" aria-label="繰り返しの設定" onchange="bkChangeRepeat(this.value)"><option value="weekly" ${c.repeat!=='none'?'selected':''}>毎週</option><option value="none" ${c.repeat==='none'?'selected':''}>繰り返さない</option></select>`;
+  const more=`<div class="bke-details">
+    <div class="bke-sp-only"><label class="bke-lab">繰り返しの設定</label>${repSel}<label class="bke-lab">場所</label>${locSel}</div>
+    ${bkSec('basic','色','',`<div class="bkp-colors">${ch.colors.map(col=>`<button class="bkp-swatch ${c.color===col?'on':''}" style="background:${col}" onclick="BKE.c.color='${col}';bkRedraw()" aria-label="色 ${col}"></button>`).join('')}</div>`)}
     ${bkSec('window','予約期間',`${c.maxDays}日先まで・${c.minNoticeHours}時間前まで`,win)}
     ${c.repeat==='none'?'':bkSec('overrides','特定の日の空き状況',ovN?ovN+'日':'なし',bkOverridesHTML())}
     ${bkSec('booked','予約済みの予定の設定',`余白${c.bufferMin?c.bufferMin+'分':'なし'}・${c.maxPerDay?'1日'+c.maxPerDay+'件まで':'上限なし'}`,booked)}
     ${bkSec('cals','カレンダーの空き状況を確認',`${(c.calendars||[]).length}個`,bkCalendarsHTML())}
-    ${bkSec('page','予約ページ',{meet:'Google Meet',place:'対面',phone:'電話',none:'場所なし'}[c.location.type],pageSec)}
-    ${bkSec('form','予約フォーム',c.questions.length?`質問${c.questions.length}件`:'',formSec)}
+    ${bkSec('page','予約ページの説明','',`<textarea class="textarea-compact" maxlength="2000" placeholder="予約ページに表示する説明" oninput="BKE.c.description=this.value">${esc(c.description)}</textarea>`)}
+    ${bkSec('form','予約フォーム','',formSec)}
     ${bkSec('remind','予約の確認とリマインダー',mail&&c.reminders.length?c.reminders.map(m=>BK_REMIND_LABEL[m]).join('・'):'',remindSec)}
-    <div class="field-err" id="bkErr"></div>
-    <div class="btn-row" style="margin-top:18px">
-      ${page?`<a class="btn" href="${esc(page.url)}" target="_blank" rel="noopener">${ic('external')}予約ページを開く</a>`:''}
-      <button class="btn pri" style="flex:1" id="bkSaveBtn" onclick="bkSave()">保存</button>
-    </div>`;
+    ${page?`<a class="btn block" style="margin-top:12px" href="${esc(page.url)}" target="_blank" rel="noopener">${ic('external')}予約ページを開く</a>`:''}
+  </div>`;
+  return `<div class="bke">
+    <header class="bke-bar"><button type="button" class="bke-back" onclick="bkCloseEditor()">${ic('chevron-l')}予約スケジュール</button>
+      <span class="bke-crumb"><b>OPS 日調</b><i>/</i>${BKE.id?'予約スケジュールを編集':'予約スケジュールを作成'}</span>
+      <button type="button" class="bke-close" onclick="bkCloseEditor()">閉じる</button></header>
+    <div class="bke-main">
+      <aside class="bke-side">
+        <input id="bkTitle" class="bke-title" maxlength="80" placeholder="面談の予約" value="${esc(c.title)}" oninput="BKE.c.title=this.value" aria-label="タイトル">
+        <label class="bke-lab">1枠の所要時間</label>
+        <div class="bke-segs" role="group" aria-label="1枠の所要時間">${durSeg(30,'30分')}${durSeg(60,'60分')}<button type="button" class="bke-seg${isOther?' on':''}" aria-pressed="${isOther}" onclick="BKE.c.duration=${isOther?c.duration:90};bkRedraw()">その他</button></div>
+        ${isOther?`<select class="bke-select" aria-label="その他の所要時間" onchange="BKE.c.duration=Number(this.value);bkRedraw()">${ch.durations.filter(m=>m!==30&&m!==60).map(m=>`<option value="${m}" ${c.duration===m?'selected':''}>${bkDurLabel(m)}</option>`).join('')}</select>`:''}
+        <div class="bke-pc-only"><label class="bke-lab">繰り返しの設定</label>${repSel}<label class="bke-lab">場所</label>${locSel}</div>
+        <button type="button" class="bke-more" aria-expanded="${BKMORE}" onclick="BKMORE=!BKMORE;bkRedraw()">詳細設定${ic('chevron')}</button>
+        ${BKMORE?more:''}
+        <div class="field-err" id="bkErr"></div>
+        <button type="button" class="bke-save" id="bkSaveBtn" onclick="bkSave()">保存する</button>
+      </aside>
+      <section class="bke-cal">${bkcHTML()}</section>
+    </div></div>`;
 }
 function bkToggleReminder(m,on){
   const s=new Set(BKE.c.reminders);if(on)s.add(m);else s.delete(m);BKE.c.reminders=[...s].sort((a,b)=>b-a);
@@ -6032,9 +6078,9 @@ async function bkSave(){
     const r=await fsJSON(isNew?'/api/booking-pages':'/api/booking-pages/'+encodeURIComponent(BKE.id),
       {method:isNew?'POST':'PUT',body:JSON.stringify({config:BKE.c})});
     if(isNew)BKP.pages.push(r.page);else Object.assign(bkFind(BKE.id),r.page);
-    BKE=null;
+    bkCloseEditor();
     renderQuiet();
-    if(isNew)bkShowCreated(r.page);else{closeSheet();toast('保存しました');}
+    if(isNew)bkShowCreated(r.page);else toast('保存しました');
   }catch(e){err.textContent=e.message;err.classList.add('show');btn.disabled=false;}
 }
 function bkShowCreated(p){
