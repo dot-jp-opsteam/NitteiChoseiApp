@@ -36,8 +36,9 @@
         if(typeof input.startDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)||!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==input.startDate||!Number.isInteger(input.days)||input.days<1||input.days>31)return bad('開始日と日数を確認してください。');
         for(let i=0;i<input.days;i++){const at=new Date(d.getTime()+i*86400000);add('columns',tappy?(at.getUTCMonth()+1)+'/'+at.getUTCDate():at.getUTCFullYear()+'/'+(at.getUTCMonth()+1)+'/'+at.getUTCDate()+'（'+'日月火水木金土'[at.getUTCDay()]+'）');}
       }
-      if(tappy&&(e-s)/input.step+1>48)return bad('縦の項目は48件までです。');
-      for(let t=s;t<(tappy?e+1:e);t+=input.step)add('rows',tappy?fmt(t):fmt(t)+'–'+fmt(t+input.step));
+      if(tappy&&(e-s)/input.step>48)return bad('縦の項目は48件までです。');
+      /* 終了時刻は「最後の枠の終わり」。24:00 まででも、24:00 から始まる枠は作らない（2026-10-29） */
+      for(let t=s;t<e;t+=input.step)add('rows',tappy?fmt(t):fmt(t)+'–'+fmt(t+input.step));
     }else if(input.kind==='timetable'){
       if(!Number.isInteger(input.periods)||input.periods<1||input.periods>10)return bad('コマ数は1〜10にしてください。');
       const weekdays=tappy?['Mon','Tue','Wed','Thu','Fri','Sat','Sun']:['月','火','水','木','金','土','日'];
