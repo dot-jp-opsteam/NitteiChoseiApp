@@ -762,6 +762,12 @@ async function testAttendance() {
       && appHtml.includes('onclick="openCreateMenu()">${ic(\'plus\')}日程調整を作る</button>')
       && !appHtml.includes('onclick="openRequestForm()"') && !appHtml.includes("hex('openRequestForm()'")
       && !appHtml.includes('タスクを追加'), true);
+  /* 2026-10-29：更新履歴。未読の青い点は、端末＋ログインユーザーごとに最新の版を覚えて出し分ける */
+  check('更新履歴は左メニューにあり、既読は端末＋ユーザーごとに保存する',
+    appHtml.includes('onclick="openChangelog()"') && appHtml.includes("'ops_changelog_seen_v1_'+(ME&&ME.id||'')")
+      && appHtml.includes('class="cl-dot"') && appHtml.includes('const CHANGELOG=['), true);
+  check('空き時間を聞くページは回答内容の確認→送信する／修正する→空き時間を送信しました',
+    ['回答内容の確認', '送信する', '修正する', '空き時間を送信しました'].every((t) => fs.readFileSync(path.join(ROOT, 'free.html'), 'utf8').includes(t)), true);
   check('旧「新しく送る」の入口は残っていない',
     appHtml.includes('新しく送る</button>') || appHtml.includes('openSendPicker('), false);
   /* 「参加を確認する」は機能ごと撤去した（2026-08-19）。

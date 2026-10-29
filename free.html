@@ -362,23 +362,23 @@ function backToForm(){
 }
 function viewConfirm(){
   var sum=applySummary();
-  return '<div class="applyhead"><h1 class="page">内容の確認</h1>'
+  return '<div class="applyhead"><h1 class="page">回答内容の確認</h1>'
       +'<span class="brand">'+esc(sum.branch)+'</span></div>'
-    +'<p class="page-sub">まだ送信していません。下の内容でよければ「この内容で送る」を押してください。</p>'
+    +'<p class="page-sub">まだ送信していません。内容でよければ「送信する」を押してください。修正しても入力内容は残ります。</p>'
     +'<div class="card"><div class="cb">'
       +summaryCardHTML(sum,AVAIL_NOTE_SELF)
       +'<button class="btn pri block" style="margin-top:22px" id="applybtn"'
         +(APPLY.sending?' disabled':'')+' onclick="submitApply()">'
-        +(APPLY.sending?'送信しています…':'この内容で送る')+'</button>'
+        +(APPLY.sending?'送信しています…':'送信する')+'</button>'
       +'<button class="btn ghost block" style="margin-top:8px"'
-        +(APPLY.sending?' disabled':'')+' onclick="backToForm()">書き直す</button>'
+        +(APPLY.sending?' disabled':'')+' onclick="backToForm()">修正する</button>'
     +'</div></div>';
 }
 
 /* ---------- 送ったあとの控え ---------- */
 function viewDone(){
   var r=APPLY.receipt||{groups:[]};
-  return '<div class="applyhead"><h1 class="page">送信しました</h1>'
+  return '<div class="applyhead"><h1 class="page">空き時間を送信しました</h1>'
       +'<span class="brand">'+esc(r.branch||'')+'</span></div>'
     +'<div class="card"><div class="cb">'
       +'<div class="hint" style="margin-bottom:16px">'+ic('check')+'<span><b>'

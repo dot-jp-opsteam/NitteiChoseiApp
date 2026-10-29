@@ -1816,6 +1816,8 @@ function buildNav(){
       <span class="si">${ic('trash')}</span><span class="sl">削除リスト</span></button>
     ${ME.role!=='intern'?`<button class="sb-item" data-tab="guide" onclick="sbGo('guide')" title="このアプリの使い方（説明書）">
       <span class="si">${ic('bulb')}</span><span class="sl">使い方</span></button>`:''}
+    <button class="sb-item" id="sbChangelog" onclick="openChangelog()" title="アプリの更新履歴">
+      <span class="si">${ic('refresh')}</span><span class="sl">更新履歴</span>${changelogUnread()?'<span class="cl-dot" role="img" aria-label="未読の更新があります"></span>':''}</button>
     <button class="sb-item" id="sbTheme" onclick="toggleTheme()" title="${themeSwitchLabel()}">
       <span class="si">${ic(currentTheme()==='light'?'moon':'sun')}</span>
       <span class="sl">${themeSwitchLabel()}</span></button>`;
@@ -2236,6 +2238,40 @@ function viewHomeStaff(){
   </div>`;
 }
 
+/* =========================================================
+   更新履歴（2026-10-29）。左メニュー下部。未読のときだけ小さな青い点。
+   履歴は版管理した静的データ（新しい更新を公開したら、先頭に1件足す）。
+   既読は「端末＋ログインユーザーごと」に、見た最新の版を localStorage に保存する
+   （共有の端末で別の人が使っても、既読が混ざらない）。履歴を表示できたときだけ既読にする。
+   ========================================================= */
+const CHANGELOG=[
+  {v:'2026-10-29',items:[
+    'ホームを新しくしました。進行中の日程調整・今日の予定・面談申請リンクを1画面で確認できます。',
+    '面談申請リンクを、所要時間（30分・60分・その他）を選んでコピーできるようにしました。',
+    '面談の確定画面で、所要時間が候補に収まるか・その日の自分の予定を確認できるようにしました。予定が重なる場合は、確認のうえ確定できます。',
+    '予約スケジュールの受付時間を、予定表を見ながら設定できるようにしました。',
+    '予約ページをスマホで使いやすい3画面（日時→入力→完了）に変えました。聞く項目（名前・メール・所属・連絡事項）は、使用しない／任意／必須から選べます。',
+    'OPStappyの回答画面を、入力とみんなの予定の切り替え表示にしました。作成画面の初期設定は、曜日×時刻（9:00〜24:00・30分）です。',
+    '空き時間を聞くページに、送信前の確認画面を整えました。',
+  ]},
+];
+const CHANGELOG_KEY=()=>'ops_changelog_seen_v1_'+(ME&&ME.id||'');
+function changelogUnread(){
+  try{return localStorage.getItem(CHANGELOG_KEY())!==CHANGELOG[0].v;}catch(e){return true;}
+}
+function openChangelog(){
+  let html;
+  try{
+    html=`<h3>更新履歴</h3>`+CHANGELOG.map(c=>`<section class="cl-ver"><h4>${esc(c.v.replace(/^(\d+)-(\d+)-(\d+)$/,(m,y,mo,d)=>`${y}年${+mo}月${+d}日`))}</h4><ul>${c.items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></section>`).join('');
+  }catch(e){
+    openSheet('<h3>更新履歴</h3><p class="page-sub">更新履歴を表示できませんでした。時間をおいてもう一度お試しください。</p>');
+    return;
+  }
+  openSheet(html);
+  try{localStorage.setItem(CHANGELOG_KEY(),CHANGELOG[0].v);}catch(e){}
+  const d=document.querySelector('#sbChangelog .cl-dot');if(d)d.remove();
+}
+
 function openSystemSettings(){
   openSheet(`<h3>システム設定</h3>
     <dl class="kv" style="margin-top:14px">
@@ -2621,14 +2657,11 @@ function viewGuide(){
         'Googleカレンダーと連携していれば、確定した面談が自分のカレンダーに入ります。'])}
       ${video('apply')}
       ${open('copyInternInviteLinkQuick()','リンクをコピーする')}`},
-    {id:'attend',icon:'calendar-check',title:'候補日を送る（出欠を聞く）',body:`
+    {id:'attend',icon:'calendar-check',title:'出欠確認（これまでの案件）',body:`
       ${steps([
-        '左メニューの「候補日を送る」を押し、件名と候補の日時を入れます。',
-        '送る相手を選ぶか、共有用のURLを作って送ります。',
-        '日時の入力を減らすには「自分の空き時間から候補を選ぶ」で期間と必要な空き時間を指定し、送りたい候補を選びます。送信前に時刻を変更・削除できます。',
-        '相手は候補ごとに ○ △ × で答えます。集計は「面談一覧・時間」に並ぶ日程調整の行を開くと見られます。',
-        'いちばん都合の良い候補を選んで日程を確定します。'])}
-      ${video('attend')}`},
+        '候補日を送る新しい作成は終了しました。これまでに送った案件と、共有URL・回答はそのまま使えます。',
+        '左メニューの「出欠確認」から、送った案件の回答を確認し、日程を確定できます。',
+        '新しく日程を聞くときは、予約スケジュール・OPStappy・空き時間を聞く、のいずれかを使います。'])}`},
     {id:'free',icon:'clock',title:'空き時間を聞く',body:`
       ${steps([
         '左メニューの「空き時間を聞く」を押し、件名を入れて<b>URLを作る</b>を押します。',

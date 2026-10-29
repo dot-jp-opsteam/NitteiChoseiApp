@@ -2466,3 +2466,10 @@ button.hm-ev-card{cursor:pointer}
 }
 .tly-surface.tly-create2 .tly-preview-cell{background:transparent;min-height:34px;height:34px}
 .tly-create2 .tly-owner{color:#4b5a75;font-size:13px;font-weight:600;margin:8px 0 0}
+
+/* ---------- 更新履歴（cl-） ---------- */
+.cl-dot{width:9px;height:9px;border-radius:50%;background:#2f7bf0;margin-left:auto;flex:none}
+.cl-ver{margin:14px 0}
+.cl-ver h4{margin:0 0 6px;font-size:17px;font-weight:800}
+.cl-ver ul{margin:0;padding-left:20px}
+.cl-ver li{margin:6px 0;font-size:15px;font-weight:600;line-height:1.6}
