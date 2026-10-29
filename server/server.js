@@ -3159,10 +3159,16 @@ app.get('/api/apply/:token/slots', limitPublicRead, async (req, res) => {
    画面側（index.html の ivMode / fsSegments）は、これが無ければ古い読み方で表示する */
 const CHOICE_MODE = 'slot';
 
+/* 申請リンクで指定できる面談の長さ（分）。確定時の長さ（30分単位・30〜240分）と同じ範囲 */
+function validRequestDuration(v) {
+  const n = typeof v === 'string' && /^\d{1,3}$/.test(v) ? Number(v) : v;
+  return Number.isInteger(n) && n >= 30 && n <= 240 && n % 30 === 0;
+}
+
 /* 本名だけで面談を申請する。
    アカウントを作らないので、intern_id は空にして名前を data に持たせる */
 app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
-  const { name, staff_id, choices, note, all_day, choice_mode: choiceMode } = req.body || {};
+  const { name, staff_id, choices, note, all_day, choice_mode: choiceMode, duration_min: reqDuration } = req.body || {};
   const internName = String(name || '').trim();
   if (!internName) return res.status(400).json({ error: 'お名前を入力してください' });
   if (internName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
@@ -3205,6 +3211,9 @@ app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
       choices: list,
       all_day: allDay,
       ...(choiceMode === CHOICE_MODE ? { choice_mode: CHOICE_MODE } : {}),
+      /* リンクで指定された面談の長さ。この申請に固定して保存し、あとで設定が変わっても動かさない。
+         許可値（30分単位で30〜240）以外・指定なしは保存しない（従来どおり30分として扱う） */
+      ...(validRequestDuration(reqDuration) ? { request_duration_min: Number(reqDuration) } : {}),
       // 旧項目にも入れておく（この変更を巻き戻しても申請が読めるようにする保険）
       choice1: list[0], choice2: list[1] || null, choice3: list[2] || null,
       confirmed_datetime: null,
@@ -3377,7 +3386,7 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '面談を変更する権限がありません' });
   }
-  const { status, confirmed_datetime, duration_min } = req.body || {};
+  const { status, confirmed_datetime, duration_min, allow_overlap } = req.body || {};
   if (!['fixed', 'failed', 'applied'].includes(status)) {
     return res.status(400).json({ error: '指定された状態が不正です' });
   }
@@ -3418,7 +3427,10 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
         const otherStart = new Date(interview.confirmed_datetime).getTime();
         return startMs < otherStart + (Number(interview.duration_min) || 30) * 60000 && endMs > otherStart;
       });
-      if (blocked || overlaps) return res.status(409).json({ error: 'この時間は面談できません。別の時間を選んでください' });
+      /* 自分の予定・受けられない時間と重なっても、スタッフ本人が承知のうえなら確定できる
+         （allow_overlap）。他の確定済み面談との二重確定だけは、常に断る */
+      if (overlaps) return res.status(409).json({ error: 'この時間は面談できません。別の時間を選んでください' });
+      if (blocked && allow_overlap !== true) return res.status(409).json({ error: '別の予定と重なっています。この日時で確定しますか？', code: 'overlap' });
     }
     const next = {
       ...old, status,

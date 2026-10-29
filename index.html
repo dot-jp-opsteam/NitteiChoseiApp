@@ -1674,7 +1674,7 @@ function bindReveal(root){
    ホバーが無い端末（スマホなど）では出さない
    ========================================================= */
 const DEMOS={
-  attend:{src:'/demo/attend',title:'候補日を送る',note:'こちらが決めた候補日に、相手が ○ △ × で答えます'},
+  attend:{src:'/demo/attend',title:'出欠確認',note:'こちらが決めた候補日に、相手が ○ △ × で答えます'},
   free:{src:'/demo/free',title:'空き時間を聞く',note:'相手が空いている時間を、カレンダーから自由に選びます'},
   apply:{src:'/demo/apply',title:'面談申請リンク',note:'学生が名前・担当・希望日時を入れて面談を申し込みます'},
 };
@@ -1743,8 +1743,8 @@ const NAV={
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
     {id:'booking',label:'予約スケジュール',ic:'alarm'},
     {id:'tally',label:'OPStappy',ic:'calendar'},
-    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
     {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
+    {id:'requests',label:'出欠確認',ic:'calendar-check'},
   ],
   // 支部管理者はスタッフとしても面談を担当するため、スタッフのタブにユーザー管理を足した構成
   branch_admin:[
@@ -1752,8 +1752,8 @@ const NAV={
     {id:'interviews',label:'面談一覧・時間',ic:'list'},
     {id:'booking',label:'予約スケジュール',ic:'alarm'},
     {id:'tally',label:'OPStappy',ic:'calendar'},
-    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},
     {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},
+    {id:'requests',label:'出欠確認',ic:'calendar-check'},
     {id:'users',label:'ユーザー',ic:'users'},
   ],
   admin:[
@@ -2084,34 +2084,8 @@ function viewHome(){
       hex("go('requests')",'calendar-check','日程調整','スタッフからの日程調整',unread),
     ])+eventsSection();
   }
-  // 支部管理者はスタッフと同じ画面に、自支部のユーザー管理を足したもの
-  if(ME.role==='staff'||ME.role==='branch_admin'){
-    const pend=(DB.interviews||[]).filter(i=>i.staff_id===ME.id&&i.status==='applied').length;
-    const items=[];
-    if(ME.role==='branch_admin')items.push(hex("go('users')",'users','ユーザー管理','スタッフ追加・権限'));
-    const unread=myRequests().filter(requestNeedsAction).length;
-    const sentUnconfirmed=sentUnconfirmedAttendCount();
-    /* 所属部署はプロフィールの「ほかの設定」へ移した。
-       「受けられる時間」の入口は「この日は受けられない時間」を初期表示にしている。
-       曜日ごとの受付時間（面談を受けられる時間）は 2026-10-06 に使うのをやめた。
-       全員・全曜日 09:00〜24:00 で、外したい時間を「受けられない時間」で×にする。
-       カレンダー連携は左メニューだけに置く（ホームにもプロフィールにも出さない） */
-    /* 2列で並ぶので、回答を見る「面談一覧・時間」を左上に置き、作る2つを続ける */
-    items.push(
-      hex("go('interviews')",'list','面談一覧・時間','面談・日程調整・空き時間の回答',pend+unread,sentUnconfirmed>0),
-      hex('openRequestForm()','calendar-check','候補日を送る','候補日を出して都合を聞く',0,false,'attend'),
-      hex('openFreeslotForm()','clock','空き時間を聞く','URLで空いている時間を集める',0,false,'free'),
-      hex("go('tally')",'calendar','OPStappy','みんなの空き時間を表で集計'),
-      hex("go('avset')",'alarm','受けられる時間','受けられない時間を外す'),
-    );
-    /* インターン生に渡す面談申請リンク。控えめな帯だと見落とされたので（2026-10-09 の指示）、
-       色の縁が付いた大きな入口（.cta）にして、その場でコピーできるボタンも付ける */
-    const linkBtn=internInviteCard();
-    /* 「明日の面談」がいちばん時間に追われる知らせなので、締切より上に置く */
-    return hi+interviewHomeReminder()+dueNotice+
-      (pend?`<div class="hint">${ic('bell')}<span><b>${pend}件</b> の面談申請が確定待ちです。</span></div>`:'')+
-      linkBtn+hexgrid(items)+eventsSection();
-  }
+  // 支部管理者はスタッフと同じ画面（ユーザー管理は左メニューにある）
+  if(ME.role==='staff'||ME.role==='branch_admin')return viewHomeStaff();
   // admin
   return hi+dueNotice+hexgrid([
     hex("go('tally')",'calendar','OPStappy','みんなの空き時間を表で集計'),
@@ -2121,6 +2095,147 @@ function viewHome(){
     hex('openSystemSettings()','settings','システム設定','連携状況の確認'),
   ])+eventsSection();
 }
+
+/* =========================================================
+   スタッフのホーム（2026-10-29 刷新。画像 01-home-approved）
+   上＝日付と「日程調整を作る」／3つの件数／左＝進行中の日程調整・右＝今日の予定／下＝面談申請リンク。
+   進行中の一覧だけが中で縦スクロールする（件数が多いとき）。今日の予定には独立スクロールを付けない
+   ========================================================= */
+let HM_LOADED=false;
+function homeLoadLists(){
+  if(HM_LOADED)return;
+  HM_LOADED=true;
+  fsJSON('/api/freeslots').then(d=>{FSLIST=d.list||[];if(currentTab==='home')renderQuiet();}).catch(()=>{});
+  tlyJSON('/api/tally-boards').then(d=>{TLYLIST=d.boards;if(currentTab==='home')renderQuiet();}).catch(()=>{});
+}
+/* 面談申請リンクの所要時間。選んだ値は端末に覚えさせるだけ（配ったリンクは変わらない：
+   リンクそのものに ?d=分 を付けて渡すため） */
+const HM_DUR_KEY='ops.home.dur';
+function hmDurLoad(){
+  try{const v=JSON.parse(localStorage.getItem(HM_DUR_KEY)||'null');
+    if(v&&(v.k==='30'||v.k==='60'||v.k==='other')&&Number.isInteger(v.m)&&v.m>=30&&v.m<=240&&v.m%30===0)return v;}catch(e){}
+  return {k:'30',m:90};
+}
+let HM_DUR=hmDurLoad();
+function hmDurMinutes(){return HM_DUR.k==='30'?30:HM_DUR.k==='60'?60:HM_DUR.m;}
+function hmSaveDur(){try{localStorage.setItem(HM_DUR_KEY,JSON.stringify(HM_DUR));}catch(e){}}
+function hmSetDur(k){HM_DUR.k=k;hmSaveDur();renderQuiet();}
+function hmSetOther(m){HM_DUR.m=Number(m);HM_DUR.k='other';hmSaveDur();}
+async function hmCopyApplyLink(btn){
+  const min=hmDurMinutes();
+  if(btn)btn.disabled=true;
+  try{
+    const res=await api('/api/staff/intern-invite-url');
+    const data=await res.json();
+    if(!res.ok||!data.url)throw new Error('failed');
+    const url=data.url+(data.url.includes('?')?'&':'?')+'d='+min;
+    try{await navigator.clipboard.writeText(url);}
+    catch(e){const t=document.createElement('textarea');t.value=url;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}
+    toast(`面談申請リンク（${min}分）をコピーしました`);
+  }catch(e){
+    toast('リンクをコピーできませんでした。時間をおいてもう一度お試しください');
+  }finally{if(btn)btn.disabled=false;}
+}
+/* 日程調整を作る。予約スケジュールをいちばん上、次にOPStappy、空き時間の順 */
+function openCreateMenu(){
+  const item=(act,icn,t,d)=>`<button type="button" class="hm-pick" onclick="closeSheet();${act}">
+    <span class="hm-pick-i">${ic(icn)}</span><span><b>${t}</b><small>${d}</small></span>${ic('chevron')}</button>`;
+  openSheet(`<h3>日程調整を作る</h3>
+    <div class="hm-picks">
+      ${item("go('booking');openBookingEditor()",'alarm','予約スケジュール','相手が空き枠を選んで、その場で予約が確定します')}
+      ${item("go('tally');openTallyEditor()",'calendar','OPStappy','みんなの空き時間を、ひとつの表に集めます')}
+      ${item('openFreeslotForm()','clock','空き時間を聞く','URLを送って、相手の空いている時間を教えてもらいます')}
+    </div>`);
+}
+const HM_WD='日月火水木金土';
+function hmDateLabel(d){return `${d.getMonth()+1}月${d.getDate()}日（${HM_WD[d.getDay()]}）`;}
+/* 進行中の日程調整（確定待ちの面談・未確定の出欠・空き時間・OPStappy）を1つの一覧にそろえる */
+function hmOngoing(){
+  const rows=[];
+  (DB.interviews||[]).filter(i=>i.staff_id===ME.id&&i.status==='applied'&&!ivIsBooking(i)).forEach(iv=>{
+    rows.push({t:new Date(iv.created_at).getTime()||0,icn:'users',title:`${ivInternName(iv)}さんの面談申請`,
+      sub:'希望の中から開始時刻を選んで確定します',meta:`申請 ${fmtRel(iv.created_at)}`,
+      badge:'日程を確定',cls:'warn',act:`openInterview('${iv.id}')`});
+  });
+  sentRequests().filter(r=>isAttend(r)&&!r.confirmed).forEach(r=>{
+    rows.push({t:new Date(r.created_at).getTime()||0,icn:'calendar-check',title:r.subject||'日程調整',
+      sub:'複数の候補への回答を待っています',meta:`${attendResponses(r).length}人が回答`,
+      badge:'回答待ち',cls:'info',act:`openRequestDetail('${r.id}')`});
+  });
+  (FSLIST||[]).forEach(f=>{
+    rows.push({t:new Date(f.created_at).getTime()||0,icn:'clock',title:f.title,sub:'空き時間を聞いています',
+      meta:`${f.count}人が回答`,badge:f.count?'回答あり':'回答待ち',cls:f.count?'ok':'info',act:`openFreeslotDetail('${esc(f.id)}')`});
+  });
+  (TLYLIST||[]).filter(b=>b.active).forEach(b=>{
+    rows.push({t:new Date(b.created_at||0).getTime()||0,icn:'calendar',title:b.config.title,sub:'OPStappy',
+      meta:`${b.count}人が登録`,badge:'受付中',cls:'info',act:"go('tally')"});
+  });
+  return rows.sort((a,b)=>b.t-a.t);
+}
+/* 今日の予定＝アプリの面談＋自分のGoogleカレンダー（連携している1つ）。
+   Googleに登録した面談は同じ予定が2つ並ばないよう、Google側を外す */
+function hmToday(){
+  const now=new Date();const key=ymd(now);
+  const ivs=(DB.interviews||[]).filter(i=>i.staff_id===ME.id&&i.status==='fixed'&&i.confirmed_datetime&&ymd(new Date(i.confirmed_datetime))===key);
+  const dup=new Set();ivs.forEach(i=>{if(i.googleEventId)dup.add(i.googleEventId);});
+  const items=ivs.map(iv=>({t:new Date(iv.confirmed_datetime).getTime(),time:hm(iv.confirmed_datetime),
+    title:`${ivInternName(iv)}さんの面談`,place:ivIsBooking(iv)&&iv.location?iv.location:'',src:'面談',act:`openInterview('${iv.id}')`}));
+  const cal=ensureMyCal(now.getFullYear(),now.getMonth());
+  cal.forEach(e=>{
+    if(dup.has(e.id))return;
+    if(e.allDay){if(String(e.start).slice(0,10)!==key)return;items.push({t:-1,time:'終日',title:e.title||'タイトルなし',place:e.location||'',src:'マイカレンダー',act:''});return;}
+    if(ymd(new Date(e.start))!==key)return;
+    items.push({t:new Date(e.start).getTime(),time:hm(e.start),title:e.title||'タイトルなし',place:e.location||'',src:'マイカレンダー',act:''});
+  });
+  return items.sort((a,b)=>a.t-b.t);
+}
+function viewHomeStaff(){
+  homeLoadLists();
+  const now=new Date();
+  const pend=(DB.interviews||[]).filter(i=>i.staff_id===ME.id&&i.status==='applied'&&!ivIsBooking(i)).length;
+  const waiting=sentUnconfirmedAttendCount();
+  const today=hmToday();
+  const todayIv=(DB.interviews||[]).filter(i=>i.staff_id===ME.id&&i.status==='fixed'&&i.confirmed_datetime&&ymd(new Date(i.confirmed_datetime))===ymd(now)).length;
+  const card=(cls,icn,label,n,act)=>`<button type="button" class="hm-stat ${cls}" onclick="${act}">
+    <span class="hm-stat-i">${ic(icn)}</span><span class="hm-stat-t"><small>${label}</small><b>${n}<em>件</em></b></span>${ic('chevron')}</button>`;
+  const ongoing=hmOngoing();
+  const list=ongoing.length?ongoing.map(r=>`<button type="button" class="hm-row" onclick="${r.act}">
+      <span class="hm-row-i">${ic(r.icn)}</span>
+      <span class="hm-row-m"><b>${esc(r.title)}</b><small>${esc(r.sub)}</small><small class="hm-row-meta">${esc(r.meta)}</small></span>
+      <span class="hm-badge ${r.cls}">${r.badge}</span></button>`).join('')
+    :`<p class="hm-empty">進行中の日程調整はありません。上の「日程調整を作る」から始められます。</p>`;
+  const tl=today.length?today.map(e=>{
+    const tag=e.act?'button':'div';
+    return `<div class="hm-ev"><span class="hm-ev-t">${esc(e.time)}</span><span class="hm-ev-dot"></span>
+      <${tag}${e.act?` type="button" onclick="${e.act}"`:''} class="hm-ev-card"><b>${esc(e.title)}</b>
+      ${e.place?`<small>${ic('pin')}${esc(e.place)}</small>`:''}<small>${ic('calendar')}${esc(e.src)}</small></${tag}></div>`;
+  }).join(''):`<p class="hm-empty">今日の予定はありません。</p>`;
+  const dur=(k,label)=>`<button type="button" class="hm-seg${HM_DUR.k===k?' on':''}" aria-pressed="${HM_DUR.k===k}" onclick="hmSetDur('${k}')">${label}</button>`;
+  const other=HM_DUR.k==='other'?`<select class="hm-other" aria-label="その他の所要時間" onchange="hmSetOther(this.value)">${[30,60,90,120,150,180,210,240].map(m=>`<option value="${m}"${HM_DUR.m===m?' selected':''}>${m}分</option>`).join('')}</select>`:'';
+  return `<div class="hm">
+    <div class="hm-top"><h1>${hmDateLabel(now)}</h1>
+      <button type="button" class="hm-create" onclick="openCreateMenu()">${ic('plus')}日程調整を作る</button></div>
+    <p class="hm-lead">予定を確認して、日程調整を進めましょう。</p>
+    ${interviewHomeReminder()}${dueHomeNotice()}
+    <div class="hm-stats">
+      ${card('s1','alarm','確定待ち',pend,"go('interviews')")}
+      ${card('s2','mail','回答待ち',waiting,"go('interviews')")}
+      ${card('s3','calendar','今日の面談',todayIv,"go('interviews')")}
+    </div>
+    <div class="hm-cols">
+      <section class="hm-panel hm-ongoing"><div class="hm-ph"><h2>進行中の日程調整</h2><button type="button" onclick="go('interviews')">すべて見る${ic('chevron')}</button></div>
+        <div class="hm-list">${list}</div></section>
+      <section class="hm-panel hm-today"><div class="hm-ph"><h2>今日の予定</h2><button type="button" onclick="setCalFull(true)">すべて見る${ic('chevron')}</button></div>
+        <div class="hm-tl">${tl}</div></section>
+    </div>
+    <section class="hm-link" data-demo="apply"><span class="hm-link-i">${ic('link')}</span>
+      <div class="hm-link-t"><b>面談申請リンク</b><small>時間を選んで共有。</small></div>
+      <div class="hm-link-d"><span class="hm-link-lab">所要時間</span><div class="hm-segs" role="group" aria-label="所要時間">${dur('30','30分')}${dur('60','60分')}${dur('other','その他')}</div>${other}</div>
+      <button type="button" class="hm-copy" onclick="hmCopyApplyLink(this)">${ic('copy')}リンクをコピー</button>
+    </section>
+  </div>`;
+}
+
 function openSystemSettings(){
   openSheet(`<h3>システム設定</h3>
     <dl class="kv" style="margin-top:14px">
@@ -2513,8 +2628,7 @@ function viewGuide(){
         '日時の入力を減らすには「自分の空き時間から候補を選ぶ」で期間と必要な空き時間を指定し、送りたい候補を選びます。送信前に時刻を変更・削除できます。',
         '相手は候補ごとに ○ △ × で答えます。集計は「面談一覧・時間」に並ぶ日程調整の行を開くと見られます。',
         'いちばん都合の良い候補を選んで日程を確定します。'])}
-      ${video('attend')}
-      ${open('openRequestForm()','候補日を送る')}`},
+      ${video('attend')}`},
     {id:'free',icon:'clock',title:'空き時間を聞く',body:`
       ${steps([
         '左メニューの「空き時間を聞く」を押し、件名を入れて<b>URLを作る</b>を押します。',
@@ -2635,7 +2749,6 @@ function viewStaffInterviews(){
   return `<h1 class="page">面談一覧・時間</h1>
     <p class="page-sub">面談・日程調整・空き時間の回答を、ここで1つの一覧にまとめて見られます。${need?`対応が要るものが <b>${need}件</b> あります。`:''}</p>
     ${canSend?`<div class="btn-row" style="margin:12px 0 4px">
-      <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('calendar')}候補日を送る</button>
       <button class="btn pri" style="flex:1" onclick="openFreeslotForm()">${ic('clock')}空き時間を聞く</button>
     </div>`:''}
     <div class="chipfilter" style="margin-top:12px">${chip('all','すべて')}${chip('iv','面談')}${chip('req','日程調整')}${chip('free','空き時間')}</div>
@@ -2754,9 +2867,45 @@ function ivGroupAt(id,n){
 }
 /* 1文字打つたびに、確定ボタンの可否と注意書きを切り替える。
    ここで openInterview を呼び直すと入力中のカーソルが飛ぶので、該当箇所だけ書き換える */
+/* 選んだ開始時刻から、リンクで指定された所要時間が候補の中に収まるか。
+   収まらなくても確定はできる（相手の画面には所要時間を出していないため）。管理側だけの目安 */
+function ivFitNote(iv,g,val,n){
+  return `<div id="ivfit${n}">${ivFitInner(iv,g,val)}</div>`;
+}
+function ivFitInner(iv,g,val){
+  const dur=ivRequestDuration(iv);
+  const slot=ivSlotFor(g,val);
+  if(!slot||dur<=30)return '';
+  const last=g.slots.slice().sort((a,b)=>new Date(a)-new Date(b)).pop();
+  const end=new Date(last).getTime()+SLOT_MS;
+  const fits=new Date(slot).getTime()+dur*60000<=end;
+  return `<div class="ivfit ${fits?'ok':'ng'}">${ic(fits?'check':'alert')}<span>${dur}分の面談は、この開始時刻だと候補の${fits?'中に収まります':'終わりを過ぎます'}</span></div>`;
+}
+/* その日の自分の予定（確定済みの面談とGoogleカレンダー）。時間を決める材料として候補の下に出す */
+function ivDayAgenda(g,exceptId){
+  const key=g.key||slotYmd(g.slots[0]);
+  const d0=new Date(key+'T00:00:00');
+  if(isNaN(d0))return '';
+  const items=[];
+  (DB.interviews||[]).forEach(o=>{
+    if(o.id===exceptId||o.staff_id!==ME.id||o.status!=='fixed'||!o.confirmed_datetime||ymd(new Date(o.confirmed_datetime))!==key)return;
+    items.push({t:new Date(o.confirmed_datetime).getTime(),time:hm(o.confirmed_datetime),title:`${ivInternName(o)}さんの面談`});
+  });
+  const dayEvents=ensureMyCal(d0.getFullYear(),d0.getMonth());
+  dayEvents.forEach(e=>{
+    if(e.allDay){if(String(e.start).slice(0,10)===key)items.push({t:-1,time:'終日',title:e.title||'タイトルなし'});return;}
+    if(ymd(new Date(e.start))===key)items.push({t:new Date(e.start).getTime(),time:`${hm(e.start)}〜${e.end?hm(e.end):''}`,title:e.title||'タイトルなし'});
+  });
+  items.sort((a,b)=>a.t-b.t);
+  return `<div class="ivday"><div class="ivday-h">この日の自分の予定</div>${items.length
+    ?items.map(x=>`<div class="ivday-r"><span>${esc(x.time)}</span><b>${esc(x.title)}</b></div>`).join('')
+    :'<div class="ivday-r"><span>予定はありません</span></div>'}</div>`;
+}
 function ivTimeChange(id,n,val){
   IV_TIME[n]=val;
   const g=ivGroupAt(id,n);
+  const fitEl=document.getElementById('ivfit'+n);
+  if(fitEl)fitEl.innerHTML=ivFitInner((DB.interviews||[]).find(x=>x.id===id),g,val);
   const slot=ivSlotFor(g,val);
   const btn=document.getElementById('ivok'+n);
   if(btn)btn.disabled=!slot;
@@ -2810,7 +2959,7 @@ function openInterview(id){
         ${g.allDay?'<span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">終日OK</span>':''}
         <span class="cchev">${ic('chevron')}</span></div>
       <div class="cwrap"><div class="cbody">${iv.status==='applied'
-        ? `<div class="cpick">
+        ? `${ivFitNote(iv,g,val,n)}${ivDayAgenda(g,iv.id)}<div class="cpick">
             <input type="time" class="tin" id="ivt${n}" step="1800" value="${esc(val)}"
               oninput="ivTimeChange('${id}',${n},this.value)"><span class="tlab">開始</span>
           </div>
@@ -2868,7 +3017,7 @@ function openInterview(id){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span class="av ${accOf(intern?.id||iv.id)}" style="width:40px;height:40px">${esc(initials(internName))}</span>
       <div><h3 style="margin:0">${esc(internName)}</h3>
-        <div class="rs" style="color:var(--sub);font-size:13px">${branchName(ivInternBranch(iv))} ・ 申請 ${fmtRel(iv.created_at)}</div></div>
+        <div class="rs" style="color:var(--sub);font-size:13px">${branchName(ivInternBranch(iv))} ・ 申請 ${fmtRel(iv.created_at)}${iv.status==='applied'?` ・ 所要時間 ${ivRequestDuration(iv)}分`:''}</div></div>
       <span class="pill ${s.c}" style="margin-left:auto">${s.t}</span>
     </div>
     <div style="height:12px"></div>
@@ -2887,13 +3036,51 @@ function applyInterview(next){
   DB.interviews=(DB.interviews||[]).map(x=>x.id===next.id?next:x);
   sessionStorage.setItem(DB_KEY,JSON.stringify(DB));
 }
-async function confirmInterview(id,dt){
+/* 申請リンクで指定された面談の長さ（分）。指定の無い従来の申請は30分 */
+function ivRequestDuration(iv){const n=Number(iv&&iv.request_duration_min);return Number.isInteger(n)&&n>=30&&n<=240&&n%30===0?n:30;}
+/* 自分の予定のうち、[dt, dt+分) と重なるもの（面談とGoogleカレンダー）。確定前の注意に使う */
+function ivOverlaps(dt,min,exceptId){
+  const s0=new Date(dt).getTime(),e0=s0+min*60000;
+  const out=[];
+  (DB.interviews||[]).forEach(o=>{
+    if(o.id===exceptId||o.staff_id!==ME.id||o.status!=='fixed'||!o.confirmed_datetime)return;
+    const os=new Date(o.confirmed_datetime).getTime(),oe=os+(Number(o.duration_min)||30)*60000;
+    if(s0<oe&&e0>os)out.push({t:os,label:`${hm(o.confirmed_datetime)}〜${hm(new Date(oe).toISOString())} ${ivInternName(o)}さんの面談`});
+  });
+  const seen=new Set();
+  Object.values(MY_CAL.events||{}).forEach(list=>(list||[]).forEach(e=>{
+    if(!e||seen.has(e.id)||e.allDay)return;seen.add(e.id);
+    const es=new Date(e.start).getTime(),ee=e.end?new Date(e.end).getTime():es+3600000;
+    if(s0<ee&&e0>es)out.push({t:es,label:`${hm(e.start)}〜${hm(e.end||new Date(ee).toISOString())} ${e.title||'タイトルなし'}`});
+  }));
+  return out.sort((a,b)=>a.t-b.t).map(x=>x.label);
+}
+async function confirmInterview(id,dt,allowOverlap=false){
   const iv=(DB.interviews||[]).find(x=>x.id===id);
   if(!iv)return;
-  const next=await apiPatch(`/api/interviews/${encodeURIComponent(id)}`,
-    {status:'fixed',confirmed_datetime:dt},'interview');
-  if(!next)return;
-  applyInterview(next);
+  const dur=ivRequestDuration(iv);
+  const body={status:'fixed',confirmed_datetime:dt,...(dur>30?{duration_min:dur}:{}),...(allowOverlap?{allow_overlap:true}:{})};
+  let res,d;
+  try{
+    res=await api(`/api/interviews/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(body)});
+    d=await res.json().catch(()=>({}));
+  }catch(e){
+    setSaveError('保存できていません。通信状況をご確認ください。');
+    return;
+  }
+  /* 予定が重なっていても、確認したうえなら確定できる（公開の予約枠には影響しない） */
+  if(res.status===409&&d.code==='overlap'){
+    const names=ivOverlaps(dt,dur,id);
+    const ok=await confirmSheet('別の予定と重なっています',
+      `${names.length?names.join('\n')+'\n\n':''}この日時で確定しますか？`,'この日時で確定',false);
+    if(ok)return confirmInterview(id,dt,true);
+    openInterview(id);
+    return;
+  }
+  if(!res.ok){setSaveError(d.error||'保存できませんでした。');return;}
+  if(d.notification)DB.notifications=[...(DB.notifications||[]),d.notification];
+  setSaveError(null);
+  applyInterview(d.interview);
   updateBell();
   ivConfirmedSheet(iv,dt);
 }
@@ -5104,10 +5291,7 @@ function requestsPanel(){
     <label><input type="radio" name="reqTab" ${REQTAB==='done'?'checked':''} onchange="setReqTab('done')">
       <span class="segb">回答済み</span></label>
   </div>`;
-  return `${canSend?`<div class="btn-row" style="margin-bottom:16px">
-      <button class="btn pri" style="flex:1" onclick="openRequestForm()">${ic('calendar')}候補日を送る</button>
-    </div>`:''}
-    ${tabs}
+  return `${tabs}
     <div class="rq-list-space">${REQTAB==='sent'?requestList(sent,'sent')
       :REQTAB==='done'?requestList(done,'done'):requestList(inbox,'inbox')}</div>
     ${canSend?`<button type="button" class="rq-fab" onclick="toggleSentRequests()"

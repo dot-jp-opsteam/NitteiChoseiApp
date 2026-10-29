@@ -83,6 +83,12 @@
 
 // URLは /i/<合言葉> の形。末尾スラッシュが付いていても拾えるようにする
 var TOKEN = (location.pathname.split('/').filter(Boolean)[1] || '');
+/* リンクで指定された面談の長さ（?d=60 など。分）。画面には出さず、送るときにそのまま添える。
+   サーバーが許可値かどうかを確かめるので、ここでは数字の形だけ見る */
+var REQ_DURATION = (function(){
+  var m = /[?&]d=(\d{1,3})(?:&|$)/.exec(location.search || '');
+  return m ? Number(m[1]) : null;
+})();
 
 var APPLY = {
   name: '',          // 入力された本名
@@ -977,7 +983,7 @@ function submitApply(){
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name:sum.name,staff_id:APPLY.fixedStaff?undefined:APPLY.staff,choices:choices,
-      all_day:allDay,note:sum.note,choice_mode:'slot'}),
+      all_day:allDay,note:sum.note,choice_mode:'slot',duration_min:REQ_DURATION===null?undefined:REQ_DURATION}),
   }).then(function(data){
     APPLY.sending=false;
     /* 控えは送った時点の内容で固める。あとから画面を触っても変わらないようにするため。
