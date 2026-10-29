@@ -2473,3 +2473,127 @@ button.hm-ev-card{cursor:pointer}
 .cl-ver h4{margin:0 0 6px;font-size:17px;font-weight:800}
 .cl-ver ul{margin:0;padding-left:20px}
 .cl-ver li{margin:6px 0;font-size:15px;font-weight:600;line-height:1.6}
+
+/* ---------- 画像01に合わせた左メニュー（ライト）とホームの細部（2026-10-29 再調整） ---------- */
+:root[data-theme="light"]{
+  --sb-bg:#f7f9f8; --sb-ink:#14284b; --sb-sub:#3d4f6b; --sb-mut:#6b7a90;
+  --sb-line:#e3e8ec; --sb-hover:#edf3f1; --sb-active-bg:#e5efeb; --sb-active-ink:#14284b; --sb-accent:#0b5a4e;
+}
+/* 左下の本人欄・公式リンクは「設定」へ移した（画像に無いため） */
+#sidebar .sb-foot{display:none}
+#sidebar .sb-top .mark{display:none}
+#sidebar .sb-brand{font-size:30px;font-weight:800;letter-spacing:.01em;color:#0b4f45;line-height:1}
+:root:not([data-theme="light"]) #sidebar .sb-brand{color:var(--sb-ink)}
+#sidebar .sb-brand small{display:none}
+#sidebar .sb-top{padding:26px 22px 26px;min-height:84px}
+#sidebar .sb-nav,#sidebar .sb-act{padding:0 12px;gap:6px}
+#sidebar .sb-item{font-size:16px;font-weight:600;padding:12px 14px;border-radius:8px;min-height:48px}
+#sidebar .sb-item .si{width:24px;font-size:22px}
+#sidebar .sb-item.active{font-weight:700}
+#sidebar .sb-item::before{width:4px;border-radius:2px;background:var(--sb-accent)}
+#sidebar .sb-item.active::before{height:30px}
+#sidebar .sb-sep{margin:auto 22px 12px;border-top:1px solid var(--sb-line);height:0}
+#sidebar .sb-act{margin-bottom:12px}
+#sidebar .cl-dot{margin-left:12px}
+.sb-badge{margin-left:auto;min-width:20px;height:20px;border-radius:10px;background:#d64545;color:#fff;font-size:12px;font-weight:800;display:inline-grid;place-items:center;padding:0 5px}
+.sb-badge.hidden{display:none}
+.set-list{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.set-list .sb-item{display:flex;align-items:center;gap:12px;width:100%;border:0;background:none;color:var(--ink);font:inherit;font-size:16px;font-weight:600;padding:12px;border-radius:8px;cursor:pointer;min-height:48px;text-align:left}
+.set-list .sb-item:hover{background:var(--panel2)}
+.set-list .si{width:24px;display:grid;place-items:center}
+.set-count{margin-left:auto;background:#d64545;color:#fff;border-radius:10px;font-size:12px;font-weight:800;padding:1px 7px}
+.set-links{display:flex;gap:16px;margin-top:14px;padding:0 12px}
+.set-links a{font-size:14px;font-weight:600;color:var(--sub)}
+.set-links .ic{width:12px;height:12px;margin-left:3px}
+
+/* ホームは白地・全幅。上に「ホーム」の見出し帯 */
+#app>main:has(.hm){max-width:none;padding:0;min-height:100vh}
+:root[data-theme="light"] #app>main:has(.hm){background:#fff}
+.hm{max-width:none}
+.hm-head{border-bottom:1px solid #e6eaee;padding:26px 32px 24px}
+:root:not([data-theme="light"]) .hm-head{border-color:var(--line)}
+.hm-head h1{margin:0;font-size:26px;font-weight:800;color:var(--hm-navy)}
+.hm-body{max-width:1240px;padding:26px 32px 32px}
+.hm-top{gap:28px;margin:0}
+.hm-date{margin:0;font-size:40px;font-weight:800;color:var(--hm-navy);letter-spacing:.01em}
+.hm-create{font-size:19px;padding:13px 26px;border-radius:6px;min-height:56px}
+.hm-create .ic{width:22px;height:22px}
+.hm-lead{font-size:17px;font-weight:500;margin:10px 0 24px}
+.hm-stats{gap:18px;margin-bottom:22px}
+.hm-stat{border-radius:8px;padding:22px 22px;min-height:116px;gap:26px}
+.hm-stat-i{width:70px;height:70px}
+.hm-stat-i .ic{width:32px;height:32px}
+.hm-stat-t small{font-size:16px;font-weight:600}
+.hm-stat-t b{font-size:34px}
+.hm-stat-t em{font-size:22px}
+.hm-cols{gap:18px;margin-bottom:22px}
+.hm-panel{border-radius:8px;padding:22px 24px}
+.hm-ph{margin-bottom:12px}
+.hm-ph h2{font-size:22px}
+.hm-ph button{font-size:15px;font-weight:600}
+.hm-list{max-height:min(46vh,372px)}
+.hm-row{display:flex;align-items:center;gap:22px;border-top:1px solid var(--hm-line);padding:18px 6px;cursor:pointer}
+.hm-row:first-child{border-top:0}
+.hm-row:focus-visible{outline:3px solid #8ab4f8;outline-offset:-3px}
+.hm-row-i{width:62px;height:62px;border-radius:8px;background:#f1f3f5}
+.hm-row-i .ic{width:28px;height:28px}
+.hm-row-m b{font-size:18px}
+.hm-row-m small{font-size:15px;font-weight:500}
+.hm-row-meta{display:flex;flex-wrap:wrap;gap:6px 32px;margin-top:6px;font-size:14px;font-weight:500;color:var(--hm-mut)}
+.hm-row-meta span{display:inline-flex;align-items:center;gap:8px}
+.hm-row-meta .ic{width:17px;height:17px}
+.hm-badge{align-self:flex-start;margin-top:4px;font-size:13px;padding:5px 12px}
+.hm-badge.ok{background:#d8f0e6;color:#0b5a4e}
+.hm-more{align-self:flex-start;border:0;background:none;color:var(--hm-navy);padding:4px 6px;cursor:pointer;border-radius:6px;min-width:36px;min-height:32px}
+.hm-more .ic{width:22px;height:22px}
+.hm-more:hover{background:#f1f3f5}
+/* 今日の予定：左に時刻、縦の線と丸、右に予定のカード */
+.hm-tl{position:relative;gap:22px}
+.hm-tl::before{content:"";position:absolute;left:84px;top:14px;bottom:14px;width:2px;background:#cfd8de}
+.hm-ev{grid-template-columns:66px 16px minmax(0,1fr);gap:12px}
+.hm-ev-t{font-size:18px;font-weight:600;padding-top:14px}
+.hm-ev-dot{position:relative;z-index:1;width:12px;height:12px;margin:19px 0 0 2px}
+.hm-ev-card{padding:16px 20px;border-radius:8px;gap:8px}
+.hm-ev-card b{font-size:18px}
+.hm-ev-card small{font-size:14px;font-weight:500}
+.hm-ev-card .ic{width:17px;height:17px}
+.hm-link{border-radius:8px;padding:18px 24px;gap:22px}
+.hm-link-i{width:60px;height:60px;border-radius:8px;background:#f1f3f5}
+.hm-link-i .ic{width:28px;height:28px}
+.hm-link-t b{font-size:20px}
+.hm-link-t small{font-size:15px;font-weight:500}
+.hm-link-lab{font-size:16px;font-weight:600}
+.hm-seg{font-size:17px;padding:14px 40px;min-height:56px}
+.hm-copy{font-size:19px;padding:15px 34px;min-height:60px;border-radius:6px}
+.hm-copy .ic{width:24px;height:24px}
+@media (max-width:860px){
+  .hm-head{padding:18px 16px 16px}
+  .hm-head h1{font-size:22px}
+  .hm-body{padding:18px 16px 28px}
+  .hm-date{font-size:30px}
+  .hm-create{font-size:16px;min-height:48px;padding:10px 18px}
+  .hm-stat{min-height:84px;gap:16px;padding:14px 16px}
+  .hm-stat-i{width:52px;height:52px}
+  .hm-row{gap:12px;padding:14px 2px}
+  .hm-row-i{width:46px;height:46px}
+  .hm-row-meta{gap:4px 16px}
+  .hm-seg{padding:12px 8px}
+  .hm-tl::before{left:76px}
+  .hm-ev{grid-template-columns:58px 16px minmax(0,1fr)}
+}
+.hm-body{max-width:none}
+/* 画像01には開閉ボタンが無い。畳んだ状態からは戻せるよう、畳んでいるときだけ出す */
+@media (min-width:861px){:root:not([data-sb="collapsed"]) #sidebar .sb-toggle{display:none}}
+@media (max-width:860px){
+  .hm-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .hm-stat{flex-direction:column;align-items:flex-start;gap:6px;min-height:0;padding:12px}
+  .hm-stat>.ic{display:none}
+  .hm-stat-i{width:40px;height:40px}.hm-stat-i .ic{width:22px;height:22px}
+  .hm-stat-t small{font-size:13px}.hm-stat-t b{font-size:26px}.hm-stat-t em{font-size:15px}
+  .hm-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 8px;align-items:start}
+  .hm-row-i{display:none}
+  .hm-row-m{grid-column:1/2;grid-row:1/3}
+  .hm-badge{grid-column:2;grid-row:1;margin-top:0}
+  .hm-more{grid-column:2;grid-row:2;justify-self:end}
+  .hm-panel{padding:16px}
+}

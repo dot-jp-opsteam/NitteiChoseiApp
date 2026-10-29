@@ -655,7 +655,8 @@ async function testAttendance() {
   /* 2026-10-05：予約スケジュールを「面談一覧・時間」の直後に足した */
   check('スタッフの左メニューは「面談一覧・時間」「予約スケジュール」「OPStappy」＋作成フォームを開く2つ',
     /* 2026-10-29：「候補日を送る」の新規作成入口を外し、過去の案件を見る「出欠確認」を残した */
-    appHtml.includes("{id:'interviews',label:'面談一覧・時間',ic:'list'},\n    {id:'booking',label:'予約スケジュール',ic:'alarm'},\n    {id:'tally',label:'OPStappy',ic:'calendar'},\n    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'},\n    {id:'requests',label:'出欠確認',ic:'calendar-check'}")
+    /* 2026-10-29 再調整：画像01の並び（ホーム・面談・空き時間を聞く・OPStappy・予約スケジュール・出欠確認） */
+    appHtml.includes("{id:'home',label:'ホーム',ic:'home'},\n    {id:'interviews',label:'面談',ic:'users'},\n    {id:'freeform',label:'空き時間を聞く',ic:'calendar',run:'openFreeslotForm',demo:'free'},\n    {id:'tally',label:'OPStappy',ic:'doc'},\n    {id:'booking',label:'予約スケジュール',ic:'calendar'},\n    {id:'requests',label:'出欠確認',ic:'check-sq'}")
       && !appHtml.includes("label:'候補日を送る'")
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
       && appHtml.includes('<h1 class="page">日程調整</h1>')
@@ -672,8 +673,9 @@ async function testAttendance() {
       && !appHtml.includes('name="ivHub"') && !appHtml.includes("sec('iv','list','面談'")
       && appHtml.includes("if(tab==='interviews')loadFreeslots();"), true);
   /* 2026-10-09：スタッフ向けの説明書「使い方」を左メニューに足した */
-  check('左メニューに「使い方」があり、説明書の画面が開ける',
-    appHtml.includes(`onclick="sbGo('guide')"`)
+  /* 2026-10-29：左メニュー下段は画像01どおり3つ。「使い方」は「設定」の中から開く */
+  check('「設定」に「使い方」があり、説明書の画面が開ける',
+    appHtml.includes(`onclick="closeSheet();sbGo('guide')"`) && appHtml.includes('onclick="openAppSettings()"')
       && appHtml.includes("if(t==='guide')return viewGuide();")
       && appHtml.includes('<h1 class="page">使い方</h1>'), true);
   /* 2026-10-09：面談申請リンクを目立たせた。ホームに、色の縁の入口とコピーボタン。
