@@ -49,7 +49,7 @@
        これより明るくすると1.6pxの細い枠が光って見え、中の文字より目立ってしまう */
     --hex-line:#2f7d78;
     /* 左端の縦メニューの幅。data-sb で切り替える */
-    --sb-w:236px;
+    --sb-w:212px;
     /* 左端の縦メニューの色。ダークでは本体と同じ配色をそのまま使う。
        ライトだけメニューを濃いエメラルドにするため、変数で切り出してある */
     --sb-bg:var(--glass); --sb-ink:var(--ink); --sb-sub:var(--sub); --sb-mut:var(--mut);
@@ -2746,3 +2746,154 @@ html.bke-open body{overflow:hidden}
   .tly-c2-top .tly-c2-brand{color:#1b63c6}
 }
 .tly-c2-brand{color:#14284b}
+
+/* ---------- 大きさの調整（2026-10-29）：画面全体が大きく威圧感があったため、文字・余白・部品を一段小さくする ---------- */
+/* 左メニュー */
+#sidebar .sb-brand{font-size:24px}
+#sidebar .sb-top{padding:20px 18px;min-height:68px}
+#sidebar .sb-nav,#sidebar .sb-act{padding:0 10px;gap:2px}
+#sidebar .sb-item{font-size:14px;padding:9px 12px;min-height:40px}
+#sidebar .sb-item .si{width:20px;font-size:18px}
+#sidebar .sb-item.active::before{height:24px}
+.set-list .sb-item{font-size:15px;padding:10px 12px;min-height:44px}
+/* ホーム */
+.hm-head{padding:18px 28px 16px}
+.hm-head h1{font-size:20px}
+.hm-body{padding:20px 28px 28px}
+.hm-top{gap:18px}
+.hm-date{font-size:28px}
+.hm-create{font-size:15px;padding:9px 18px;min-height:42px}
+.hm-create .ic{width:17px;height:17px}
+.hm-lead{font-size:14px;font-weight:600;margin:6px 0 16px}
+.hm-stats{gap:14px;margin-bottom:16px}
+.hm-stat{padding:14px 16px;min-height:80px;gap:16px}
+.hm-stat-i{width:48px;height:48px}
+.hm-stat-i .ic{width:22px;height:22px}
+.hm-stat-t small{font-size:13px;font-weight:700}
+.hm-stat-t b{font-size:26px}
+.hm-stat-t em{font-size:15px}
+.hm-cols{gap:14px;margin-bottom:16px}
+.hm-panel{padding:16px 18px}
+.hm-ph{margin-bottom:8px}
+.hm-ph h2{font-size:17px}
+.hm-ph button{font-size:13px;font-weight:700;min-height:32px}
+.hm-row{gap:14px;padding:12px 4px}
+.hm-row-i{width:44px;height:44px}
+.hm-row-i .ic{width:21px;height:21px}
+.hm-row-m b{font-size:15px}
+.hm-row-m small{font-size:13px;font-weight:600}
+.hm-row-meta{gap:4px 22px;margin-top:4px;font-size:13px;font-weight:600}
+.hm-row-meta .ic{width:14px;height:14px}
+.hm-badge{font-size:12px;padding:3px 9px}
+.hm-more .ic{width:18px;height:18px}
+.hm-tl{gap:14px}
+.hm-tl::before{left:70px;top:10px;bottom:10px}
+.hm-ev{grid-template-columns:54px 14px minmax(0,1fr);gap:10px}
+.hm-ev-t{font-size:14px;font-weight:700;padding-top:10px}
+.hm-ev-dot{width:10px;height:10px;margin:14px 0 0 2px}
+.hm-ev-card{padding:10px 14px;gap:4px}
+.hm-ev-card b{font-size:15px}
+.hm-ev-card small{font-size:13px;font-weight:600}
+.hm-ev-card .ic{width:14px;height:14px}
+.hm-empty{font-size:13px}
+.hm-link{padding:12px 18px;gap:16px}
+.hm-link-i{width:44px;height:44px}
+.hm-link-i .ic{width:21px;height:21px}
+.hm-link-t b{font-size:16px}
+.hm-link-t small{font-size:13px;font-weight:600}
+.hm-link-lab{font-size:13px;font-weight:700}
+.hm-seg{font-size:14px;padding:8px 24px;min-height:40px}
+.hm-other{font-size:14px;min-height:40px;padding:6px 10px}
+.hm-copy{font-size:15px;padding:9px 22px;min-height:42px}
+.hm-copy .ic{width:17px;height:17px}
+@media (max-width:860px){
+  .hm-head{padding:14px 16px 12px}
+  .hm-head h1{font-size:18px}
+  .hm-body{padding:14px 16px 24px}
+  .hm-date{font-size:24px}
+  .hm-create{font-size:14px;min-height:40px;padding:8px 14px}
+  .hm-stat{padding:10px}
+  .hm-stat-i{width:34px;height:34px}.hm-stat-i .ic{width:18px;height:18px}
+  .hm-stat-t small{font-size:12px}.hm-stat-t b{font-size:22px}.hm-stat-t em{font-size:13px}
+  .hm-panel{padding:14px}
+  .hm-seg{padding:8px}
+  .hm-tl::before{left:62px}
+  .hm-ev{grid-template-columns:46px 14px minmax(0,1fr)}
+}
+/* 予約スケジュールの作成 */
+.bke{max-width:1120px}
+.bke-bar{padding:10px 20px}
+.bke-crumb{font-size:14px;gap:10px}
+.bke-crumb b{font-size:16px}
+.bke-close{min-height:36px;padding:6px 12px;font-size:14px}
+.bke-main{grid-template-columns:250px minmax(0,1fr);gap:12px}
+.bke-side{padding:16px 14px 18px}
+.bke-title{font-size:18px;margin:0 0 10px}
+.bke-lab{font-size:13px;margin:14px 0 6px}
+.bke-seg{font-size:14px;min-height:38px}
+.bke-select,.bke-input{font-size:14px;padding:7px 10px;min-height:40px;margin-top:6px}
+.bke-more{font-size:14px;padding:12px 2px;margin-top:18px;min-height:46px}
+.bke-save{font-size:15px;min-height:44px;margin-top:14px}
+.bke-cal{padding:12px 10px}
+.bke-cal .bkc-nav.bkc-pc{margin:0 0 10px;gap:10px}
+.bke-cal .bkc-nav.bkc-pc b{font-size:16px}
+.bkc-arrow{width:34px;height:34px}.bkc-arrow .ic{width:18px;height:18px}
+.bke-cal .bkc-head{height:48px}
+.bke-cal .bkc-axis{margin-top:48px}
+.bke-cal .bkc-head span{font-size:14px}
+.bke-cal .bkc-head small{font-size:12px;font-weight:600}
+.bke-cal .bkc-hl{font-size:12px;font-weight:600}
+.bke-cal .bkc-rg,.bke-cal .bkc-ev{font-size:12px;padding:4px 6px}
+.bke-cal .bkc-help{font-size:13px;font-weight:600}
+@media (max-width:760px){
+  .bke-bar{padding:6px 16px}
+  .bke-title{margin:12px 16px 2px}
+  .bkc-sp b{font-size:16px}
+  .bke-cal .bkc-tab{min-height:48px}
+  .bke-cal .bkc-addbtn{font-size:14px;min-height:42px}
+}
+/* OPStappy 公開ページ */
+.tly-app.tly-p2 .tly-brand{font-size:19px}
+.tly-app.tly-p2 .tly-event-intro h1{font-size:24px}
+.tly-app.tly-p2 .tly-lead{font-size:15px;font-weight:600}
+.tly-app.tly-p2 .tly-switch{font-size:15px}
+.tly-app.tly-p2 .tly-namerow span{font-size:15px;min-width:44px}
+.tly-app.tly-p2 .tly-namerow input{min-height:44px;font-size:16px}
+.tly-app.tly-p2 .tly-hint{font-size:13px;font-weight:600;margin:10px 0 8px}
+.tly-app.tly-p2 .tly-table thead th{font-size:13px;padding:7px 2px}
+.tly-app.tly-p2 .tly-table .tly-corner,.tly-app.tly-p2 .tly-table tbody th{font-size:12px;font-weight:600}
+.tly-app.tly-p2 .tly-table tbody th{height:36px}
+.tly-app.tly-p2 .tly-cell{min-height:36px;height:36px;line-height:36px;font-size:14px}
+.tly-app.tly-p2 .tly-choice.tly-selected{font-size:16px}
+.tly-app.tly-p2 .tly-choice-count{font-size:17px;margin:12px 0 4px}
+.tly-app.tly-p2 .tly-choice-count b{font-size:24px}
+.tly-notelabel{font-size:14px;font-weight:700}
+.tly-app.tly-p2 .tly-notebox summary{font-size:14px;padding:10px 40px 10px 12px;min-height:44px}
+.tly-app.tly-p2 .btn.pri.tly-send,.tly-app.tly-p2 #submit,.tly-app.tly-p2 #open-answer{font-size:16px;min-height:48px}
+.tly-app.tly-p2 .tly-count{font-size:14px;font-weight:600}
+.tly-app.tly-p2 .tly-members h2{font-size:18px}
+.tly-app.tly-p2 .tly-members>.tly-muted{font-size:13px}
+.tly-app.tly-p2 .tly-surface .tly-name,.tly-app.tly-p2 .tly-name{font-size:15px;min-height:42px;gap:10px}
+.tly-app.tly-p2 .tly-name::before{width:22px;height:22px;font-size:14px}
+.tly-app.tly-p2 .tly-page-btn{min-height:40px;font-size:13px}
+.tly-app.tly-p2 .tly-public-actions .pri,.tly-app.tly-p2 .tly-public-actions .ghost{min-height:46px;font-size:15px}
+/* OPStappy 作成画面 */
+.tly-c2-top{padding:8px 18px}
+.tly-c2-brand{font-size:17px}
+.tly-c2-h{font-size:22px;margin:12px 18px 8px}
+@media (min-width:761px){.tly-create2 .tly-c2-h{margin:12px 0 10px}}
+.tly-c2-card{padding:12px;margin-bottom:12px}
+.tly-c2-card h2,.tly-create2 .tly-preview h2{font-size:16px;margin:0 0 6px}
+.tly-create2 .tly-field{font-size:13px;margin:8px 0 4px}
+.tly-create2 .tly-field input,.tly-create2 .tly-field textarea,.tly-create2 .tly-field select{min-height:40px;font-size:15px;padding:6px 10px;margin-top:4px}
+.tly-create2 .tly-modes .btn{min-height:40px;font-size:14px}
+.tly-create2 .tly-weekdays .tly-check{min-height:40px;font-size:14px}
+.tly-c2-more>summary{font-size:14px;padding:10px 12px;min-height:42px}
+.tly-create2 .tly-preview{padding:12px}
+.tly-c2-sub{font-size:13px;font-weight:600}
+.tly-create2 .tly-preview .tly-table thead th{font-size:13px;padding:6px 2px}
+.tly-create2 .tly-preview .tly-table tbody th{font-size:12px;height:30px}
+.tly-surface.tly-create2 .tly-preview-cell{min-height:30px;height:30px}
+.tly-create2 .tly-create-footer .pri{min-height:46px;font-size:15px}
+@media (max-width:760px){.tly-c2-h{font-size:20px}}
+.tly-app.tly-p2 #answer-heading,.tly-app.tly-p2 #summary-heading{font-size:15px}
