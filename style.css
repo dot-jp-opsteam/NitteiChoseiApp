@@ -2693,3 +2693,56 @@ html.bke-open body{overflow:hidden}
   .bke-cal .bkc-tab{background:#fff;border-color:#d5dbe5}
   .bke-cal .bkc-tab span{color:#14284b}
 }
+
+/* ---------- OPStappy 公開ページ：画像04/05の細部（2026-10-29 再調整） ---------- */
+.tly-app.tly-p2 .tly-header{border-bottom:0}
+.tly-app.tly-p2 .tly-header-inner{padding:14px 16px 0}
+.tly-app.tly-p2 .tly-brand{font-size:24px;color:#1b63c6}
+.tly-app.tly-p2 .tly-staff-link{display:none}
+.tly-app.tly-p2 .tly-event-intro h1{font-size:34px;letter-spacing:.01em;margin:2px 0 6px}
+.tly-app.tly-p2 .tly-viewbar{margin:0 0 14px}
+.tly-app.tly-p2 .tly-lead{font-size:18px;font-weight:500;color:#3d4b63}
+.tly-app.tly-p2 .tly-switch{font-size:18px;color:#1b63c6}
+.tly-app.tly-p2 .tly-namerow span{font-size:18px;min-width:52px}
+.tly-app.tly-p2 .tly-namerow input{min-height:52px;font-size:18px;border-radius:8px}
+.tly-app.tly-p2 .tly-hint{font-size:15px;font-weight:500;color:#3d4b63;margin:12px 0 10px}
+.tly-app.tly-p2 .tly-table thead th{background:#dcebfb;font-size:15px;font-weight:600;padding:9px 2px}
+.tly-app.tly-p2 .tly-table .tly-corner,.tly-app.tly-p2 .tly-table tbody th{background:#f3f6fa;font-weight:500;font-size:14px}
+.tly-app.tly-p2 .tly-table tbody tr:nth-child(even) td{background:#edf4fd}
+.tly-app.tly-p2 .tly-choice.tly-selected{background:#1b63c6;border-radius:3px;box-shadow:inset 0 0 0 1px #fff}
+.tly-app.tly-p2 .tly-choice-count{font-size:21px;font-weight:800;margin:16px 0 4px}
+.tly-app.tly-p2 .tly-choice-count b{color:#1b63c6;font-size:32px;margin-right:2px}
+.tly-notelabel{margin:6px 0 6px;font-size:17px;font-weight:600;color:#14284b}
+.tly-app.tly-p2 .tly-notebox{margin:0 0 12px}
+.tly-app.tly-p2 .tly-notebox summary{position:relative;color:#8a96ad;font-weight:500;border-radius:8px;padding-right:44px}
+.tly-app.tly-p2 .tly-notebox summary::after{content:"";position:absolute;right:18px;top:50%;width:10px;height:10px;border-right:2px solid #3d4b63;border-bottom:2px solid #3d4b63;transform:translateY(-70%) rotate(45deg)}
+.tly-app.tly-p2 .tly-notebox[open] summary::after{transform:translateY(-30%) rotate(-135deg)}
+.tly-app.tly-p2 .btn.pri.tly-send{background:#1b63c6;border-radius:6px;font-size:19px;min-height:56px}
+.tly-app.tly-p2 .tly-count{font-size:17px;font-weight:500;color:#3d4b63;margin:0 0 12px}
+.tly-app.tly-p2 .tly-members h2{font-size:24px}
+.tly-app.tly-p2 .tly-members>.tly-muted{font-size:15px;color:#3d4b63;margin:2px 0 8px}
+.tly-app.tly-p2 .tly-member-row{border-bottom:1px solid #e3e8f0}
+.tly-app.tly-p2 .tly-person-view{border:0;background:none;color:#5a6a85;font-size:13px;text-decoration:underline;min-height:36px}
+.tly-app.tly-p2 .tly-select-all{background:none;border:0;color:#1b63c6;font-weight:700;padding:10px 0}
+.tly-app.tly-p2 #open-answer{background:#1b63c6;color:#fff;border-radius:6px;min-height:56px;font-size:18px;margin-top:16px}
+.tly-app.tly-p2 #refresh{background:none;border:0;color:#1b63c6;min-height:40px;font-size:15px;font-weight:700;text-decoration:underline}
+.tly-app.tly-p2 #submit{background:#1b63c6;color:#fff;border:0;border-radius:6px;font-size:19px;min-height:56px}
+.tly-app.tly-p2 #answer-card,.tly-app.tly-p2 #summary-card,.tly-app.tly-p2 .tly-public-content{background:#fff}
+/* 画像05：集計には上の切り替え帯も最多候補の太枠も無い（最多はいちばん濃い青で分かる） */
+.tly-app.tly-p2 #summary-card .tly-viewbar{display:none}
+.tly-app.tly-p2 .tly-best{outline:0}
+/* 画像06/07：作成画面 */
+.tly-create2 .tly-preview{border:1px solid #e3e8f0;border-radius:12px;padding:16px;background:#fff}
+.tly-c2-sub{margin:-4px 0 10px;font-size:14px;font-weight:500;color:#4b5a75}
+@media (min-width:761px){
+  .tly-create2{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);grid-template-rows:auto auto auto 1fr;column-gap:18px;padding:0 18px 18px}
+  .tly-create2 .tly-c2-top{grid-column:1/-1;margin:0 -18px}
+  .tly-create2 .tly-c2-h{grid-column:1/-1;margin:16px 0 14px}
+  .tly-create2 .tly-create-body{display:contents}
+  .tly-create2 .tly-settings{grid-column:1;grid-row:3}
+  .tly-create2 .tly-preview{grid-column:2;grid-row:3/5;align-self:start}
+  .tly-create2 .tly-create-footer{grid-column:1;grid-row:4;position:static;border:0;padding:0;align-self:start;background:none}
+  .tly-create2 .tly-create-footer .pri{max-width:none}
+  .tly-c2-top .tly-c2-brand{color:#1b63c6}
+}
+.tly-c2-brand{color:#14284b}

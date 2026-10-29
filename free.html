@@ -49,9 +49,65 @@
     padding:1px 6px;border-radius:5px;background:var(--brand-soft);color:var(--brand-d)}
   /* 選んだ時間は補足ではなく本体なので、日付と同じ濃い本文色にする */
   .selsummary .sr .st .stime{font-size:13px;color:var(--ink)}
+
+  /* ---------- 画像08に合わせた見た目（2026-10-29）。白地・7日分が横に収まる表・青い選択 ---------- */
+  body.fp2{background:#eef1f5}
+  .fp2 #aurora{display:none}
+  .fp2 main{max-width:560px;margin:0 auto;padding:0}
+  .fp2 .fp-card{background:#fff;min-height:100vh;padding:22px 20px 32px;color:#14284b}
+  @media (min-width:600px){.fp2 main{padding:24px 0}.fp2 .fp-card{min-height:0;border:1px solid #dde3ec;border-radius:6px}}
+  .fp-brand{font-size:21px;font-weight:900;color:#14284b;margin:0 0 22px;letter-spacing:.01em}
+  .fp-brand small{font-size:15px;font-weight:800;margin-left:4px}
+  .fp-h1{font-size:30px;font-weight:900;margin:0 0 6px;line-height:1.3;color:#14284b}
+  .fp-sub{font-size:17px;font-weight:500;margin:0 0 18px;color:#14284b}
+  .fp-lab{display:block;font-size:16px;font-weight:800;margin:0 0 8px}
+  .fp2 .fp-name{width:100%;border:1px solid #cfd6e0;border-radius:6px;padding:11px 14px;font:inherit;font-size:18px;font-weight:500;color:#14284b;background:#fff;min-height:50px}
+  .fp2 .weekpager{margin:20px 0 6px}
+  .fp2 .weekpager .pg{border:0;background:none;color:#1a6fe0;font-size:17px;font-weight:700;padding:8px 0;min-height:44px}
+  .fp2 .weekpager .pg:disabled{color:#a7b1c0}
+  .fp2 .weekpager .wm{font-size:17px}
+  .fp-hint{text-align:center;font-size:14px;font-weight:500;color:#3d4b63;margin:0 0 8px}
+  .fp2 .booktable-wrap{overflow:visible;border:1px solid #dde3ec;border-radius:0}
+  .fp2 .booktable{min-width:0;table-layout:fixed;width:100%;border-collapse:collapse}
+  .fp2 .booktable th,.fp2 .booktable td{border:1px solid #e1e6ed}
+  .fp2 .bt-corner{width:62px;background:#f6f8fb}
+  .fp2 .booktable thead th.bt-h{background:#fff;color:#14284b;font-size:18px;font-weight:800;padding:8px 0 2px;line-height:1.1}
+  .fp2 .booktable thead th.bt-h small{display:block;font-size:13px;font-weight:600;margin-top:2px}
+  .fp2 .booktable thead th.bt-h.sun,.fp2 .booktable thead th.bt-h.sat{color:#14284b}
+  .fp2 .booktable thead th.bt-h small,.fp2 .booktable thead th.bt-h.sun small,.fp2 .booktable thead th.bt-h.sat small,.fp2 .booktable thead th.bt-h.today small{color:#14284b}
+  .fp2 .booktable thead .bt-all{background:#fff;padding:2px 0 6px}
+  .fp2 .allday{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;font-weight:600;color:#14284b;padding:2px 0}
+  .fp2 .allday .box{width:15px;height:15px;margin:0;border:1.5px solid #6b7686;border-radius:3px;background:#fff}
+  .fp2 .allday.on .box{background:#1a6fe0;border-color:#1a6fe0}
+  .fp2 .bt-t{background:#f6f8fb;font-size:14px;font-weight:500;color:#14284b;text-align:center}
+  .fp2 .bt-c{height:36px;font-size:0;background:#fff}
+  .fp2 tbody tr:nth-child(odd) .bt-c.ok{background:#f3f5f8}
+  .fp2 .bt-c.off{background:#e9ecf1;font-size:0}
+  .fp2 .bt-c.ok.sel{background:#1a6fe0}
+  .fp2 .bt-c.ok.sel .bt-num{font-size:18px;color:#fff;font-weight:800}
+  .fp-more{margin:24px 0 18px}
+  .fp-more summary{list-style:none;position:relative;cursor:pointer;border:1px solid #cfd6e0;border-radius:6px;padding:13px 44px 13px 16px;font-size:17px;font-weight:700;min-height:52px}
+  .fp-more summary::-webkit-details-marker{display:none}
+  .fp-more summary::after{content:"";position:absolute;right:20px;top:50%;width:10px;height:10px;border-right:2px solid #14284b;border-bottom:2px solid #14284b;transform:translateY(-70%) rotate(45deg)}
+  .fp-more[open] summary::after{transform:translateY(-30%) rotate(-135deg)}
+  .fp-more textarea{width:100%;margin-top:8px;border:1px solid #cfd6e0;border-radius:6px;padding:10px 12px;font:inherit;font-size:16px;min-height:90px}
+  .fp-btn{display:block;width:100%;border:0;border-radius:6px;background:#1a6fe0;color:#fff;font:inherit;font-size:19px;font-weight:800;min-height:58px;cursor:pointer;letter-spacing:.06em}
+  .fp-btn:disabled{opacity:.5;cursor:default}
+  .fp-btn.line{background:#fff;color:#1a6fe0;border:1.5px solid #1a6fe0;margin-top:16px}
+  .fp-note{text-align:center;font-size:14px;font-weight:500;color:#3d4b63;margin:14px 0 0}
+  .fp-block{border-bottom:1px solid #e1e6ed;padding:0 0 16px;margin:0 0 18px}
+  .fp-block .fp-val{font-size:20px;font-weight:500}
+  .fp-h2{font-size:20px;font-weight:800;margin:0 0 6px}
+  .fp-day{border-bottom:1px solid #e1e6ed;padding:16px 0}
+  .fp-day b{display:block;font-size:22px;font-weight:800}
+  .fp-day span{display:block;font-size:20px;font-weight:500;margin-top:4px}
+  .fp-day em{font-style:normal;font-size:13px;font-weight:700;margin-left:8px;padding:1px 8px;border-radius:4px;background:#e8f0fe;color:#1a6fe0}
+  .fp-comment{white-space:pre-wrap;font-size:17px;margin:6px 0 0}
+  .fp-done{display:flex;align-items:center;gap:10px;margin:0 0 14px}
+  .fp-done i{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:#1a6fe0;color:#fff;font-style:normal;font-weight:900;font-size:22px}
 </style>
 </head>
-<body>
+<body class="fp2">
 
 <!-- 背景のオーロラ。アプリ本体と同じ装飾なので、中身は空のspan3枚でよい -->
 <div id="aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span></div>
@@ -268,33 +324,20 @@ function viewApply(){
   // まとまりの数え直し。同じ固まりの枠にはすべて同じ番号が付く
   syncAllDay();
   var groups=applyGroups();
-
-  return '<div class="applyhead"><h1 class="page">日程調整</h1>'
-      +'<span class="brand">'+esc(BRANCH_NAME)+'</span></div>'
-    +(APPLY.title?'<p class="page-sub">'+esc(APPLY.title)+'</p>':'')
-    +'<div class="card"><div class="cb">'
-      /* 必須の赤い＊は、まだ入っていないあいだだけ出す。
-         入れ終わった欄からは消えるので、残りどこを埋めればよいかがひと目で分かる */
-      +'<label class="fl">お名前<span class="req" id="reqname"'+(reqHidden(APPLY.name))+'>*</span></label>'
-      +'<input type="text" id="applyname" autocomplete="name" maxlength="50" placeholder="例：山田 太郎"'
-        +' value="'+esc(APPLY.name)+'" oninput="APPLY.name=this.value;syncReq()">'
-      +'<p class="fine" style="margin-top:6px">受け取った人が本人を確かめるために使います。本名でご記入ください。</p>'
-      /* 選び方の案内。表が出てから読むのでは遅いので、表より前に置く。
-         色を付けた囲み（.hint）ではなく本文と同じ黒字にしてある。
-         囲みにすると「補足」に見えて読み飛ばされるため */
-      +'<div class="guide">下のカレンダーから、<b>空いている時間帯</b>を選択してください。<br>'
-        +'選べる時間が多いほど日程が決まりやすくなります。</div>'
-      +weekBlock(groups)
-      +'<div class="divider"></div>'
-      +'<label class="fl">その他（任意）</label>'
-      +'<textarea placeholder="伝えたいことがあれば記入してください（例：オンラインを希望します）"'
-        +' style="min-height:90px" oninput="APPLY.note=this.value">'+esc(APPLY.note)+'</textarea>'
-      +'<button class="btn pri block" style="margin-top:20px" id="applybtn"'
-        +(groups.length?'':' disabled')+' onclick="goConfirm()">'
-        +(groups.length?'この'+groups.length+'件の内容を確認する':'枠を選んでください')
-      +'</button>'
-      +'<p class="fine" style="margin-top:8px;text-align:center">この時点ではまだ送信されません。次の画面で内容を確かめてから送ります。</p>'
-    +'</div></div>';
+  return '<div class="fp-card">'
+    +'<p class="fp-brand">OPS<small>日程調整</small></p>'
+    +'<h1 class="fp-h1">'+esc(APPLY.title||'空き時間の入力')+'</h1>'
+    +'<p class="fp-sub">空いている時間を選んでください</p>'
+    +'<label class="fp-lab" for="applyname">お名前</label>'
+    +'<input type="text" id="applyname" class="fp-name" autocomplete="name" maxlength="50" placeholder="例：山田 太郎"'
+      +' value="'+esc(APPLY.name)+'" oninput="APPLY.name=this.value;syncReq()"><span id="reqname" hidden></span>'
+    +weekBlock(groups)
+    /* コメントは任意なので畳んでおく（画像08） */
+    +'<details class="fp-more"'+(APPLY.note?' open':'')+'><summary>コメントを追加（任意）</summary>'
+      +'<textarea aria-label="コメント（任意）" placeholder="伝えたいことがあれば記入してください" oninput="APPLY.note=this.value">'+esc(APPLY.note)+'</textarea></details>'
+    +'<button class="fp-btn" id="applybtn"'+(groups.length?'':' disabled')+' onclick="goConfirm()">'
+      +(groups.length?'回答内容を確認する':'空いている時間を選んでください')+'</button>'
+  +'</div>';
 }
 
 /* ---------- 送る内容のまとめ ----------
@@ -360,36 +403,39 @@ function backToForm(){
   render();
   window.scrollTo(0,0);
 }
+function fpDaysHTML(sum){
+  return sum.groups.map(function(g){
+    return '<div class="fp-day"><b>'+esc(String(g.day).replace(/\((.)\)/,'（$1）'))+(g.allDay?'<em>終日</em>':'')+'</b><span>'+esc(g.time)+'</span></div>';
+  }).join('');
+}
 function viewConfirm(){
   var sum=applySummary();
-  return '<div class="applyhead"><h1 class="page">回答内容の確認</h1>'
-      +'<span class="brand">'+esc(sum.branch)+'</span></div>'
-    +'<p class="page-sub">まだ送信していません。内容でよければ「送信する」を押してください。修正しても入力内容は残ります。</p>'
-    +'<div class="card"><div class="cb">'
-      +summaryCardHTML(sum,AVAIL_NOTE_SELF)
-      +'<button class="btn pri block" style="margin-top:22px" id="applybtn"'
-        +(APPLY.sending?' disabled':'')+' onclick="submitApply()">'
-        +(APPLY.sending?'送信しています…':'送信する')+'</button>'
-      +'<button class="btn ghost block" style="margin-top:8px"'
-        +(APPLY.sending?' disabled':'')+' onclick="backToForm()">修正する</button>'
-    +'</div></div>';
+  return '<div class="fp-card">'
+    +'<p class="fp-brand">OPS<small>日程調整</small></p>'
+    +'<h1 class="fp-h1" style="margin-bottom:22px">回答内容の確認</h1>'
+    +'<div class="fp-block"><p class="fp-lab">お名前</p><p class="fp-val" style="margin:0">'+esc(sum.name)+'</p></div>'
+    +'<p class="fp-h2">空いている時間</p>'
+    +fpDaysHTML(sum)
+    +(sum.note?'<div class="fp-day"><p class="fp-lab" style="margin:0">コメント</p><p class="fp-comment">'+esc(sum.note)+'</p></div>':'')
+    +'<div style="height:24px"></div>'
+    +'<button class="fp-btn" id="applybtn"'+(APPLY.sending?' disabled':'')+' onclick="submitApply()">'
+      +(APPLY.sending?'送信しています…':'送信する')+'</button>'
+    +'<button class="fp-btn line"'+(APPLY.sending?' disabled':'')+' onclick="backToForm()">修正する</button>'
+    +'<p class="fp-note">修正しても入力内容は残ります</p>'
+  +'</div>';
 }
 
 /* ---------- 送ったあとの控え ---------- */
 function viewDone(){
   var r=APPLY.receipt||{groups:[]};
-  return '<div class="applyhead"><h1 class="page">空き時間を送信しました</h1>'
-      +'<span class="brand">'+esc(r.branch||'')+'</span></div>'
-    +'<div class="card"><div class="cb">'
-      +'<div class="hint" style="margin-bottom:16px">'+ic('check')+'<span><b>'
-        +esc(r.staffName)+'</b>さんに届きました。日程が決まりましたら、あらためてご連絡します。</span></div>'
-      +'<label class="fl">送った内容（控え）</label>'
-      +'<p class="fine" style="margin:2px 0 12px">送信日時：'+esc(r.sentAt)+'</p>'
-      +summaryCardHTML(r,AVAIL_NOTE_SENT)
-      +'<button class="btn block" style="margin-top:20px" onclick="copyReceipt()">この内容をコピーする</button>'
-      +'<p class="fine" style="margin-top:8px">コピーしてLINEなどに貼っておくと、あとから確かめられます。'
-        +'この画面は閉じていただいて構いません。</p>'
-    +'</div></div>';
+  return '<div class="fp-card">'
+    +'<p class="fp-brand">OPS<small>日程調整</small></p>'
+    +'<div class="fp-done"><i>✓</i><h1 class="fp-h1" style="margin:0">空き時間を送信しました</h1></div>'
+    +'<p class="fp-sub">'+esc(r.staffName||'担当者')+'さんに届きました。</p>'
+    +'<p class="fp-h2">送信した時間帯</p>'
+    +fpDaysHTML(r)
+    +(r.note?'<div class="fp-day"><p class="fp-lab" style="margin:0">コメント</p><p class="fp-comment">'+esc(r.note)+'</p></div>':'')
+  +'</div>';
 }
 /* 控えを文にして書き出す。LINEにそのまま貼れる形にしてある */
 function receiptText(){
@@ -434,28 +480,20 @@ function copyReceipt(){
 function weekBlock(groups){
   var pager='<div class="weekpager">'
     +'<button class="pg" onclick="setApplyWeek(-1)"'+(APPLY.weekOffset<=0?' disabled':'')+'>'
-      +ic('chevron-l')+'前の1週間</button>'
+      +ic('chevron-l')+'前の週</button>'
     +'<span class="wm">'+esc(monthLabel())+'</span>'
     +'<button class="pg" onclick="setApplyWeek(1)"'
-      +(APPLY.grid&&!APPLY.grid.hasNext?' disabled':'')+'>次の1週間'+ic('chevron')+'</button>'
+      +(APPLY.grid&&!APPLY.grid.hasNext?' disabled':'')+'>次の週'+ic('chevron')+'</button>'
     +'</div>';
-
   var body;
   if(APPLY.loadError){
-    body='<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
-      +'<p>'+esc(APPLY.loadError)+'</p></div>';
+    body='<div class="empty" style="padding:28px"><p>'+esc(APPLY.loadError)+'</p></div>';
   }else if(APPLY.loading||!APPLY.grid){
-    body='<div class="empty" style="padding:28px"><div class="ei">'+ic('slot-empty')+'</div>'
-      +'<p>空いている枠を調べています…</p></div>';
+    body='<div class="empty" style="padding:28px"><p>空いている枠を調べています…</p></div>';
   }else{
     body=gridTable();
   }
-
-  return '<div class="divider"></div>'+pager
-    +'<label class="fl"><span id="slotlabel">空いている時間を選ぶ（'+groups.length+'件選択中）</span>'
-      +'<span class="fl-sub">タップで1つ、押したまま上下になぞるとまとめて選べます。マス1つは30分（21:00〜22:00 なら2マス）</span></label>'
-    +body
-    +'<p class="fine" style="margin-top:8px">'+esc(AVAIL_NOTE_SELF)+'</p>';
+  return pager+'<p class="fp-hint">タップで選択・長押ししてなぞるとまとめて選択</p>'+body;
 }
 
 /* 表に出ている7日ぶんが何月なのか。今日始まりなので月をまたぐことが多い。
@@ -465,7 +503,7 @@ function monthLabel(){
   var days=APPLY.grid&&APPLY.grid.days;
   if(!days||!days.length)return '';
   var a=parseYmd(days[0]),b=parseYmd(days[days.length-1]);
-  var head=a.getFullYear()+'年'+(a.getMonth()+1)+'月';
+  var head=(a.getFullYear()===new Date().getFullYear()?'':a.getFullYear()+'年')+(a.getMonth()+1)+'月';
   if(a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth())return head;
   return head+'〜'+(a.getFullYear()===b.getFullYear()?'':b.getFullYear()+'年')+(b.getMonth()+1)+'月';
 }
@@ -490,11 +528,11 @@ function gridTable(){
      空きが1つも無い日は押せないようにしておく */
   var allDayCells=g.days.map(function(key,di){
     var open=g.grid[di].filter(function(c){return c.state==='ok';}).length;
-    if(!open)return '<th class="bt-all"><span class="allday off">—</span></th>';
+    if(!open)return '<th class="bt-all"><span class="allday off"><span class="box"></span>終日</span></th>';
     return '<th class="bt-all"><button type="button" class="allday'
       +(APPLY.allDay[key]?' on':'')+'" data-day="'+esc(key)+'"'
       +' aria-pressed="'+(APPLY.allDay[key]?'true':'false')+'"'
-      +' onclick="toggleAllDay('+di+')"><span class="box"></span>終日OK</button></th>';
+      +' onclick="toggleAllDay('+di+')"><span class="box"></span>終日</button></th>';
   }).join('');
 
   var picked=new Set();
@@ -503,14 +541,14 @@ function gridTable(){
   var bodyRows=g.times.map(function(label,ti){
     var cells=g.grid.map(function(dayCol){
       var c=dayCol[ti];
-      if(c.state==='off')return '<td class="bt-c off">×</td>';
+      if(c.state==='off')return '<td class="bt-c off" aria-label="選べません"></td>';
       var on=picked.has(c.iso);
       return '<td class="bt-c ok '+(on?'sel':'')+'" data-iso="'+esc(c.iso)+'"'
         +' onpointerdown="applyPointerDown(event,\''+esc(c.iso)+'\')"'
         +' title="タップ、または長押ししてから同じ日の中で上下になぞって選択">'
-        +(on?'<span class="bt-num">✓</span>':'○')+'</td>';
+        +(on?'<span class="bt-num">✓</span>':'')+'</td>';
     }).join('');
-    return '<tr><th class="bt-t bt-line"><span class="bt-tl">'+esc(label)+'</span></th>'+cells+'</tr>';
+    return '<tr><th class="bt-t bt-line"><span class="bt-tl">'+esc(String(label).replace(/^0/,''))+'</span></th>'+cells+'</tr>';
   }).join('')
     /* いちばん下の線の時刻。マスは無く、線の横に終わりの時刻だけを出す */
     +'<tr class="bt-endrow"><th class="bt-t bt-line"><span class="bt-tl">'+esc(gridEndLabel(g))+'</span></th>'
@@ -749,7 +787,7 @@ function refreshApplyLive(){
       td.classList.add('sel');
       td.innerHTML='<span class="bt-num">✓</span>';
     }else if(td.classList.contains('sel')){
-      td.classList.remove('sel');td.textContent='○';
+      td.classList.remove('sel');td.textContent='';
     }
   });
   // 「終日OK」の押された状態も合わせる
@@ -762,7 +800,7 @@ function refreshApplyLive(){
   if(slab)slab.textContent='空いている時間を選ぶ（'+groups.length+'件選択中）';
   var btn=document.getElementById('applybtn');
   if(btn){btn.disabled=!groups.length;
-    btn.textContent=groups.length?'この'+groups.length+'件の内容を確認する':'枠を選んでください';}
+    btn.textContent=groups.length?'回答内容を確認する':'空いている時間を選んでください';}
 }
 function applyDragEnd(){
   document.removeEventListener('pointermove',applyDragMove);

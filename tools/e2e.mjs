@@ -2384,9 +2384,11 @@ async function run() {
       check('担当スタッフの選択欄は無い', freeHtml.includes('担当スタッフ'), false);
       // 空いている時間を知るだけなので、希望順を並べ替える枠は出さない
       check('「選んだ希望日時」の並べ替えは無い', freeHtml.includes('選んだ希望日時'), false);
+      /* 2026-10-29：画像08に合わせ、説明は「空いている時間を選んでください」と表の上の1行、
+         コメントは畳んだ「コメントを追加（任意）」にした */
       check('カレンダーで選ぶ旨の説明がある',
-        freeHtml.includes('下のカレンダーから、<b>空いている時間帯</b>を選択してください。'), true);
-      check('その他（任意）の欄がある', freeHtml.includes('その他（任意）'), true);
+        freeHtml.includes('空いている時間を選んでください') && freeHtml.includes('タップで選択・長押ししてなぞるとまとめて選択'), true);
+      check('コメント（任意）の欄がある', freeHtml.includes('コメントを追加（任意）'), true);
       check('公開APIを叩いている', freeHtml.includes('/api/free/'), true);
     }
 
