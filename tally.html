@@ -6,24 +6,18 @@
 <script>try{document.documentElement.dataset.theme=localStorage.getItem('ops_theme_v1')==='dark'?'dark':'light';}catch(e){}</script>
 <script src="/tally-model.js" defer></script><script src="/tally-ui.js" defer></script>
 </head>
-<body class="tly-app tly-surface tly-p2">
+<body class="tly-app tly-surface">
 <header class="tly-header"><div class="tly-header-inner"><a class="tly-brand" href="/">OPStappy</a><a href="/" class="tly-staff-link">スタッフ画面</a><button id="theme" type="button" hidden>テーマ切替</button></div></header>
 <main class="tly-page">
-<section class="tly-event-intro"><div class="tly-intro-inner"><h1 id="title">読み込んでいます…</h1><p id="description" class="tly-pre"></p><div id="board-status" class="tly-status" role="status"></div><div id="own-links"></div></div></section>
-<div id="form-status" class="tly-status tly-flash" role="status" aria-live="polite"></div>
-<div id="receipt"></div>
+<section class="tly-event-intro"><div class="tly-intro-inner"><h1 id="title">読み込んでいます…</h1><p id="description" class="tly-pre"></p><div id="board-status" class="tly-status" role="status"></div><a class="tly-link" href="#summary-card">みんなの予定を見る ↓</a><div id="own-links"></div></div></section>
 <div class="tly-public-content">
-<section class="tly-card tly-view" id="answer-card" hidden>
-<form id="answer-form">
-<div class="tly-viewbar"><p id="answer-heading" class="tly-lead">参加できる時間を選んでください</p><button class="tly-switch" id="to-summary" type="button">みんなの予定 ›</button></div>
-<label class="tly-namerow" for="name"><span>名前</span><input id="name" name="name" required maxlength="80" autocomplete="name" placeholder="名前を入力"></label>
-<p class="tly-hint">タップで選択・長押ししてなぞると複数選択</p>
-<div id="editor"></div><p id="choice-status" class="tly-choice-count" aria-live="polite"></p>
-<p class="tly-notelabel">コメント（任意）</p><details class="tly-notebox"><summary>コメントを入力（任意）</summary><textarea id="note" name="note" rows="3" maxlength="500" aria-label="コメント（任意）"></textarea></details>
-<div class="tly-actions"><button class="btn pri tly-send" id="submit" type="submit">回答を送る</button></div>
-</form></section>
-<section class="tly-summary-section tly-view" id="summary-card" hidden><div class="tly-viewbar"><p class="tly-lead" id="summary-heading">みんなの予定</p><button class="tly-switch" id="to-input" type="button">自分の空き時間を入力 ›</button></div><div id="summary"></div><div id="inspect" class="tly-status" role="status"></div></section>
-<div id="summary-actions" class="tly-actions tly-public-actions"><button class="btn pri" id="open-answer" type="button" hidden>自分の空き時間を入力</button><button class="btn ghost" id="refresh" type="button">集計を更新</button></div>
+<section class="tly-card" id="answer-card" hidden><h2 id="answer-heading">あなたの予定を登録</h2><p class="tly-muted">このURLを知っている人に名前・空き時間・コメントが表示されます。</p>
+<form id="answer-form"><h2>1. 都合の良い日程をタップしてください。</h2><p class="tly-muted">参加できるマスを選んでください。タップ・クリック・キーボードで選択できます。押したままなぞるとまとめて選べます（スマホは少し長押し）。全マス未選択でも回答できます。</p><div id="editor"></div><p id="choice-status" class="tly-muted" aria-live="polite"></p>
+<div class="tly-answer-meta"><section><h2>2. 名前を入力してください。</h2><label class="tly-field" for="name">名前（必須）<input id="name" name="name" required maxlength="80" autocomplete="name"></label></section><section><h2>3. コメントがあれば入力してください。</h2><label class="tly-field" for="note">コメント（任意）<textarea id="note" name="note" rows="3" maxlength="500"></textarea></label></section></div>
+<div id="form-status" class="tly-status" role="status" aria-live="polite"></div><div class="tly-actions"><button class="btn pri" id="submit" type="submit">予定登録</button><button class="btn ghost" id="hide-answer" type="button">閉じる</button></div></form><div id="receipt"></div></section>
+<div id="summary-actions" class="tly-actions tly-public-actions"><button class="btn pri" id="open-answer" type="button" hidden>あなたの予定を登録</button><button class="btn ghost" id="refresh" type="button">集計を更新</button></div>
+<section class="tly-summary-section" id="summary-card" hidden><div id="summary"></div><div id="inspect" class="tly-status" role="status"></div></section>
+<p class="tly-public-help">名前をタップすると集計対象を切り替えられます。共有URLからログインせずに登録できます。</p>
 </div>
 </main>
 <script>
@@ -31,7 +25,7 @@
 const $=id=>document.getElementById(id),M=()=>window.TallyModel,U=()=>window.TallyUI;
 const publicActions=$('summary-actions');
 const match=/^\/t\/(?:manage\/([a-f0-9]{48})|([a-f0-9]{32}))\/?$/.exec(location.pathname);
-let view='input',editToken=match?.[1]||null,boardToken=match?.[2]||null,board=null,responses=[],ownResponse=null,formBoard=null,editor=null,selectedIds=null,pending=null,saved=false,busy=false,refreshing=false,ownLinks=[];
+let editToken=match?.[1]||null,boardToken=match?.[2]||null,board=null,responses=[],ownResponse=null,formBoard=null,editor=null,selectedIds=null,pending=null,saved=false,busy=false,refreshing=false,ownLinks=[];
 const draftKey=()=> 'ops_tally_draft_'+boardToken,myKey=()=> 'ops_tally_my_'+boardToken;
 const read=key=>{try{return JSON.parse(localStorage.getItem(key));}catch{return null;}};
 const store=(key,value)=>{try{localStorage.setItem(key,JSON.stringify(value));}catch{}};
@@ -39,16 +33,13 @@ function random(){const bytes=new Uint8Array(24);crypto.getRandomValues(bytes);r
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const data=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(data.error||'通信に失敗しました');e.status=r.status;e.code=data.code;throw e;}return data;}
 function status(text,actions=[]){$('form-status').replaceChildren(document.createTextNode(text));for(const [label,action] of actions){const b=document.createElement('button');b.type='button';b.className='btn';b.textContent=label;b.onclick=action;$('form-status').append(document.createElement('br'),b);}}
 function draft(){if(!formBoard)return;store(draftKey(),{name:$('name').value,note:$('note').value,selected:editor?.getSelected()||[],pending});}
-/* 入力とみんなの予定は切り替えて見せる（上下に両方を積まない）。回答前でも集計へ切り替えられる */
-function show(v){view=board&&!board.active?'summary':v;$('answer-card').hidden=view!=='input';$('summary-card').hidden=view!=='summary';const oa=$('open-answer');oa.hidden=!board||!board.active||!!editToken||view!=='summary';oa.textContent=(saved||ownLinks.length)?'自分の回答を編集':'自分の空き時間を入力';$('to-input').hidden=!board||!board.active||saved||!!editToken;if(view==='input'&&!saved&&!editToken&&$('name'))window.scrollTo(0,0);}
-function bands(config,selected){const set=new Set(selected);let n=0;for(const c of config.columns.filter(x=>x.active)){let on=false;for(const r of config.rows.filter(x=>x.active)){const hit=set.has(M().cellId(r.id,c.id));if(hit&&!on)n++;on=hit;}}return n;}
-function drawHeader(){document.title=board.config.title+' | OPStappy';$('title').textContent=board.config.title;$('description').textContent=board.config.description;$('board-status').textContent=board.active?'':'回答の受付は停止しています。集計は引き続き確認できます。';}
-function drawSummary(){if(selectedIds!==null)selectedIds=selectedIds.filter(id=>responses.some(p=>p.id===id));U().renderSummary($('summary'),board.config,responses,{selectedIds:selectedIds===null?undefined:selectedIds,onFilter:ids=>selectedIds=ids,onInspect:inspect,actions:publicActions,shareUrl:location.origin+'/t/'+board.token});$('inspect').textContent='';show(view);}
+function drawHeader(){document.title=board.config.title+' | OPStappy';$('title').textContent=board.config.title;$('description').textContent=board.config.description;$('board-status').textContent=board.active?'空いているマスを選んで、あなたの予定を登録してください。':'回答の受付は停止しています。集計は引き続き確認できます。';$('open-answer').hidden=!!editToken||!board.active;}
+function drawSummary(){if(selectedIds!==null)selectedIds=selectedIds.filter(id=>responses.some(p=>p.id===id));U().renderSummary($('summary'),board.config,responses,{selectedIds:selectedIds===null?undefined:selectedIds,onFilter:ids=>selectedIds=ids,onInspect:inspect,actions:publicActions,shareUrl:location.origin+'/t/'+board.token});$('summary-card').hidden=false;$('inspect').textContent='';}
 function inspect(id){const c=M().tally(board.config,responses,selectedIds).cells[id];const names=ids=>ids.map(id=>{const p=responses.find(p=>p.id===id);return p.name+' #'+(responses.indexOf(p)+1);}).join('、')||'なし';$('inspect').textContent=U().cellLabel(board.config,id)+'\n○ 参加できる: '+names(c.yes)+'\n× 参加できない: '+names(c.no)+'\n未回答: '+names(c.unknown);}
 function drawOwnLinks(){const holder=$('own-links');holder.replaceChildren();for(const item of ownLinks){if(!/^[a-f0-9]{48}$/.test(item.token))continue;const a=document.createElement('a');a.className='tly-link';a.href='/t/manage/'+item.token;a.textContent=(item.name||'自分')+'の回答を編集する';holder.append(a);}}
 function installEditor(config,selected){editor?.destroy();editor=U().renderEditor($('editor'),config,{selected,onChange(){choice();draft();}});choice();}
-function choice(){const n=bands(board.config,editor.getSelected());const cs=$('choice-status');if(n){cs.replaceChildren();const b=document.createElement('b');b.textContent=String(n);cs.append(b,document.createTextNode('つの時間帯を選択'));}else cs.textContent='今回は参加できる時間がありません（このまま回答できます）';}
-function openForm(){show('input');if(!saved)$('name').focus({preventScroll:true});}
+function choice(){const n=editor.getSelected().length;$('choice-status').textContent=n?n+'マス選択中':'今回は参加できる時間がありません（このまま回答できます）';}
+function openForm(){$('answer-card').hidden=false;$('answer-card').scrollIntoView({block:'start'});if(!saved)$('name').focus({preventScroll:true});}
 function receipt(token,name,message='回答を保存しました。'){const holder=$('receipt');holder.replaceChildren();const h=document.createElement('h3');h.textContent=message;const p=document.createElement('p');p.className='tly-muted';p.textContent='本人専用の編集リンクです。必ず控えてください。このリンクを知っている人は、あなたの回答を変更できます。';const a=document.createElement('a');a.className='tly-link';a.href='/t/manage/'+token;a.textContent=location.origin+'/t/manage/'+token;const copy=document.createElement('button');copy.type='button';copy.className='btn';copy.textContent='編集リンクをコピー';copy.onclick=async()=>{try{await navigator.clipboard.writeText(a.href);status('編集リンクをコピーしました。');}catch{const range=document.createRange();range.selectNodeContents(a);getSelection().removeAllRanges();getSelection().addRange(range);status('表示したリンクを選択してコピーしてください。');}};holder.append(h,p,a,copy);if(!ownLinks.some(x=>x.token===token))ownLinks.push({token,name});store(myKey(),ownLinks);drawOwnLinks();}
 async function refresh(){if(!boardToken||refreshing)return;refreshing=true;try{const data=await api('/api/tally/'+boardToken);board=data.board;responses=data.responses;drawHeader();drawSummary();}catch(e){$('board-status').textContent=e.message;}finally{refreshing=false;}}
 async function reloadForm(staleResponse=false){try{
@@ -69,7 +60,7 @@ async function submit(event){event.preventDefault();if(busy||saved)return;if(!pe
   pending=null;saved=true;store(draftKey(),null);$('submit').textContent='保存済み';
   receipt(token,payload.name,wasPending?'前回の送信を確認しました。':'回答を保存しました。');
   status(changed?'前回送信した内容が保存されています。送信後に入力した変更は未保存です。上の編集リンクから変更してください。':'保存した回答は、本人専用リンクから変更できます。');
-  await refresh();show('summary');window.scrollTo(0,0);
+  $('answer-card').hidden=false;await refresh();
  }catch(e){
   // 未確認の送信の再試行では、HTTPエラーでも元のキーを失わない。
   // 最初の送信が4xxで拒否された場合だけ、未保存と確定して入力をやり直せる。
@@ -84,11 +75,11 @@ async function boot(){if(!match){$('title').textContent='リンクを確認し�
  const raw=read(myKey());ownLinks=Array.isArray(raw)?raw.filter(x=>x&&typeof x.token==='string'&&typeof x.name==='string'):[];drawOwnLinks();
  const savedDraft=editToken?null:read(draftKey());pending=savedDraft?.pending&&typeof savedDraft.pending.payload?.editToken==='string'?savedDraft.pending:null;
  $('name').value=ownResponse?.name||savedDraft?.name||'';$('note').value=ownResponse?.note||savedDraft?.note||'';
- installEditor(board.config,ownResponse?.selected||savedDraft?.selected||[]);view=board.active&&!ownLinks.length?'input':'summary';drawHeader();drawSummary();
- if(editToken){show('input');$('answer-heading').textContent='自分の回答を編集';$('submit').textContent='変更を保存';await refresh();}
- if(pending){show('input');$('submit').textContent='前回の送信結果を確認する';status('前回の送信結果が未確認です。同じ送信キーで保存済みか確認します。');}
+ installEditor(board.config,ownResponse?.selected||savedDraft?.selected||[]);drawHeader();drawSummary();
+ if(editToken){$('answer-card').hidden=false;$('answer-heading').textContent='自分の回答を編集';$('submit').textContent='変更を保存';await refresh();}
+ if(pending){$('answer-card').hidden=false;$('submit').textContent='前回の送信結果を確認する';status('前回の送信結果が未確認です。同じ送信キーで保存済みか確認します。');}
  }catch(e){$('title').textContent='表を開けませんでした';$('board-status').textContent=e.message;}}
-$('answer-form').addEventListener('submit',submit);$('name').addEventListener('input',draft);$('note').addEventListener('input',draft);$('open-answer').onclick=()=>{const own=ownLinks[ownLinks.length-1];if(own&&/^[a-f0-9]{48}$/.test(own.token)){location.href='/t/manage/'+own.token;return;}if(saved){const a=document.querySelector('#receipt a');if(a){location.href=a.href;return;}}openForm();};$('to-input').onclick=openForm;$('to-summary').onclick=()=>{show('summary');refresh();window.scrollTo(0,0);};$('refresh').onclick=refresh;
+$('answer-form').addEventListener('submit',submit);$('name').addEventListener('input',draft);$('note').addEventListener('input',draft);$('open-answer').onclick=openForm;$('hide-answer').onclick=()=>{$('answer-card').hidden=true;$('summary-card').scrollIntoView({block:'start'});};$('refresh').onclick=refresh;
 $('theme').onclick=()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;try{localStorage.setItem('ops_theme_v1',theme);}catch{}};
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refresh();});window.addEventListener('focus',()=>refresh());window.addEventListener('DOMContentLoaded',boot);
 </script>

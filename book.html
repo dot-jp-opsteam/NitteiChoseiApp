@@ -14,166 +14,155 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"
-  href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;800&display=swap">
+  href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
 <!-- 予約スケジュールの予約ページ（/b/<合言葉>）と、予約の変更・キャンセル（/b/manage/<合言葉>）。
      Googleカレンダーの予約ページに見た目と動きを合わせるため、アプリ本体の style.css は読まない
      （外部サイトに埋め込まれることもあるので、アプリの装飾が混ざらないほうがよい）。
      クラス名はすべて bk- で始める（短い名前の衝突を避けるため） -->
 <style>
   :root{
-    --bk-blue:#1565d8; --bk-blue-d:#0f52b3; --bk-blue-soft:#e8f0fe;
-    --bk-ink:#172033; --bk-sub:#4b5565; --bk-line:#d5dae3; --bk-bg:#f4f6fa;
-    --bk-panel:#ffffff; --bk-bad:#c5221f; --bk-bad-soft:#fce8e6; --bk-ok:#188038; --bk-ok-soft:#e6f4ea;
+    --bk-blue:#1a73e8; --bk-blue-d:#1765cc; --bk-blue-soft:#e8f0fe;
+    --bk-ink:#202124; --bk-sub:#5f6368; --bk-line:#dadce0; --bk-bg:#f8f9fa;
+    --bk-panel:#ffffff; --bk-bad:#d93025; --bk-bad-soft:#fce8e6; --bk-ok:#188038; --bk-ok-soft:#e6f4ea;
+    --bk-accent:#039be5;
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bk-bg);color:var(--bk-ink);
-    font-family:"Noto Sans JP",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.55;font-weight:500}
-  button,input,textarea{font-family:inherit}
-  a{color:var(--bk-blue)}
-  /* 画面全体で縦にスクロールする。中身が小さな枠の中だけで動くことはない */
-  .bk-app{max-width:520px;margin:0 auto;min-height:100vh;background:var(--bk-panel);display:flex;flex-direction:column}
-  @media (min-width:600px){.bk-app{margin:24px auto;min-height:0;border:1px solid var(--bk-line);border-radius:14px;overflow:hidden}}
-  .bk-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--bk-line)}
-  .bk-brand{color:var(--bk-blue);font-size:20px;font-weight:800}
-  .bk-bar-r{display:flex;align-items:center;gap:8px;color:var(--bk-sub);font-size:14px;font-weight:700;min-width:0}
-  .bk-bar-r span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .bk-bar-r svg{width:18px;height:18px;flex:none}
-  .bk-body{padding:20px 18px 28px;flex:1}
-  .bk-h1{font-size:28px;font-weight:800;margin:0 0 6px;line-height:1.3;word-break:break-word}
-  .bk-h2{font-size:18px;font-weight:800;margin:22px 0 10px}
-  .bk-sub{color:var(--bk-sub);font-size:15px;font-weight:600;margin:0 0 14px}
-  .bk-desc{white-space:pre-wrap;margin:0 0 16px;word-break:break-word;font-size:15px}
-  .bk-center{text-align:center}
-  .bk-tz{color:var(--bk-sub);font-size:13px;font-weight:600;margin:14px 0 0}
-  .bk-fine{color:var(--bk-sub);font-size:13px;font-weight:600;margin:4px 0}
-  .bk-note{color:var(--bk-sub);font-size:15px;font-weight:600;padding:18px 0}
-  .bk-meta{display:flex;gap:10px;align-items:flex-start;margin:8px 0;font-weight:600}
-  .bk-meta svg{flex:none;width:20px;height:20px;color:var(--bk-sub);margin-top:2px}
+    font-family:"Noto Sans JP",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.5}
+  button{font-family:inherit}
+  .bk-wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+  .bk-card{background:var(--bk-panel);border:1px solid var(--bk-line);border-radius:12px;overflow:hidden;
+    display:grid;grid-template-columns:320px 1fr;min-height:560px}
+  .bk-side{border-right:1px solid var(--bk-line);padding:24px}
+  .bk-main{padding:24px;min-width:0}
+  .bk-avatar{width:48px;height:48px;border-radius:50%;background:var(--bk-accent);color:#fff;display:flex;
+    align-items:center;justify-content:center;font-weight:700;font-size:20px;overflow:hidden}
+  .bk-avatar img{width:100%;height:100%;object-fit:cover}
+  .bk-host{color:var(--bk-sub);margin-top:12px;font-size:14px}
+  .bk-title{font-size:24px;font-weight:500;margin:4px 0 16px;line-height:1.3;word-break:break-word}
+  .bk-meta{display:flex;gap:12px;align-items:flex-start;color:var(--bk-ink);margin:10px 0}
+  .bk-meta svg{flex:none;width:20px;height:20px;color:var(--bk-sub);margin-top:1px}
+  .bk-meta .bk-fine{color:var(--bk-sub);font-size:12px}
+  .bk-desc{white-space:pre-wrap;color:var(--bk-ink);margin:16px 0 0;word-break:break-word}
+  .bk-h2{font-size:20px;font-weight:500;margin:0 0 4px}
+  .bk-tz{color:var(--bk-sub);font-size:12px;margin-bottom:16px}
 
-  /* 1週間ぶんの日付を横に収める（横スクロールなし） */
-  .bk-weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:18px 0 10px}
-  .bk-weeknav b{font-size:17px;font-weight:800}
-  .bk-wbtn{display:inline-flex;align-items:center;gap:2px;border:0;background:none;color:var(--bk-blue);font-size:14px;font-weight:700;cursor:pointer;padding:10px 4px;min-height:44px}
-  .bk-wbtn svg{width:20px;height:20px}
-  .bk-wbtn:disabled{color:#a3abb8;cursor:default}
-  .bk-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
-  .bk-dbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:1px solid var(--bk-line);border-radius:10px;background:#fff;color:var(--bk-ink);padding:8px 0;cursor:pointer;min-height:64px}
-  .bk-dbtn span{font-size:13px;font-weight:700;color:var(--bk-sub)}
-  .bk-dbtn b{font-size:20px;font-weight:800}
-  .bk-dbtn.bk-sat span{color:#2b62b8}.bk-dbtn.bk-sun span{color:#c5221f}
-  .bk-dbtn.bk-nodate{background:#f1f3f7}
-  .bk-dbtn.bk-nodate b,.bk-dbtn.bk-nodate span{color:#8a93a3}
-  .bk-dbtn.bk-sel{background:var(--bk-blue);border-color:var(--bk-blue)}
-  .bk-dbtn.bk-sel span,.bk-dbtn.bk-sel b{color:#fff}
-  .bk-dbtn:disabled{opacity:.4;cursor:default}
-  .bk-slots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-  .bk-slot{border:1.5px solid var(--bk-blue);background:#fff;color:var(--bk-blue);border-radius:8px;padding:14px 4px;font-size:18px;font-weight:700;cursor:pointer;min-height:52px}
-  .bk-slot.bk-sel{background:var(--bk-blue);color:#fff}
-  .bk-slot:focus-visible,.bk-dbtn:focus-visible,.bk-btn:focus-visible{outline:3px solid #8ab4f8;outline-offset:2px}
-  .bk-empty{border:1px dashed var(--bk-line);border-radius:10px;padding:24px 16px;text-align:center;color:var(--bk-sub);font-weight:600}
-  .bk-link-btn{border:0;background:none;color:var(--bk-blue);font-size:15px;font-weight:700;cursor:pointer;padding:10px 6px;text-decoration:underline}
-  .bk-right{display:block;margin:4px 0 0 auto}
-  .bk-back{display:inline-flex;align-items:center;gap:4px;border:0;background:none;color:var(--bk-blue);font-size:15px;font-weight:700;cursor:pointer;padding:6px 0;margin-bottom:12px;min-height:44px}
-  .bk-back svg{width:20px;height:20px}
+  /* 月のミニカレンダー */
+  .bk-mini{margin-top:24px;user-select:none}
+  .bk-mini-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .bk-mini-head b{font-weight:500}
+  .bk-mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+  .bk-mini-grid .bk-dow{font-size:11px;color:var(--bk-sub);padding:4px 0}
+  .bk-day{border:0;background:transparent;border-radius:50%;width:34px;height:34px;margin:0 auto;font-size:12px;
+    color:#b0b3b8;cursor:default;display:flex;align-items:center;justify-content:center}
+  .bk-day.bk-has{color:var(--bk-blue);font-weight:700;background:var(--bk-blue-soft);cursor:pointer}
+  .bk-day.bk-has:hover{background:#d2e3fc}
+  .bk-day.bk-today{box-shadow:inset 0 0 0 1px var(--bk-blue)}
+  .bk-day.bk-sel{background:var(--bk-blue);color:#fff}
+  .bk-day.bk-out{visibility:hidden}
+  .bk-icon-btn{border:0;background:transparent;width:36px;height:36px;border-radius:50%;cursor:pointer;color:var(--bk-sub);
+    display:inline-flex;align-items:center;justify-content:center}
+  .bk-icon-btn:hover:not(:disabled){background:#f1f3f4}
+  .bk-icon-btn:disabled{opacity:.3;cursor:default}
+  .bk-icon-btn svg{width:20px;height:20px}
+
+  /* 週の表示 */
+  .bk-weekbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .bk-today-btn{border:1px solid var(--bk-line);background:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;color:var(--bk-ink)}
+  .bk-today-btn:hover{background:#f1f3f4}
+  .bk-range{font-size:16px;margin-left:4px}
+  .bk-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+  .bk-col-head{text-align:center;padding-bottom:8px;border-bottom:1px solid var(--bk-line);margin-bottom:10px}
+  .bk-col-head .bk-dw{font-size:11px;color:var(--bk-sub)}
+  .bk-col-head .bk-dn{font-size:22px;line-height:1.4}
+  .bk-col-head.bk-today .bk-dn{color:var(--bk-blue);font-weight:700}
+  .bk-col-body{display:flex;flex-direction:column;gap:8px}
+  .bk-slot{border:1px solid var(--bk-line);background:#fff;color:var(--bk-blue);border-radius:6px;padding:9px 4px;
+    font-size:14px;font-weight:500;cursor:pointer;text-align:center}
+  .bk-slot:hover{border-color:var(--bk-blue);background:var(--bk-blue-soft)}
+  .bk-slot:focus-visible{outline:2px solid var(--bk-blue);outline-offset:1px}
+  .bk-none{color:#9aa0a6;font-size:12px;text-align:center;padding-top:6px}
+  .bk-empty{border:1px dashed var(--bk-line);border-radius:8px;padding:28px 16px;text-align:center;color:var(--bk-sub);margin-top:8px}
+  .bk-link-btn{border:0;background:transparent;color:var(--bk-blue);font-weight:500;cursor:pointer;padding:8px 12px;border-radius:6px;font-size:14px}
+  .bk-link-btn:hover{background:var(--bk-blue-soft)}
   .bk-loading{color:var(--bk-sub);padding:40px 0;text-align:center}
 
-  /* 下に張り付くボタン。画面全体のスクロールのまま、いつでも押せる */
-  .bk-sticky{position:sticky;bottom:0;background:linear-gradient(to top,#fff 78%,rgba(255,255,255,0));padding:18px 0 8px;margin-top:10px}
-  .bk-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:14px 20px;font-size:17px;font-weight:700;cursor:pointer;text-decoration:none;min-height:52px}
-  .bk-block{display:flex;width:100%}
+  /* スマホ：選んだ日の枠を並べる */
+  .bk-daylist{display:none}
+  .bk-daylist-head{font-weight:500;margin:20px 0 10px}
+  .bk-daylist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+
+  /* 予約フォーム（重ねて出す） */
+  .bk-scrim{position:fixed;inset:0;background:rgba(32,33,36,.6);display:none;align-items:center;justify-content:center;
+    padding:16px;z-index:50}
+  .bk-scrim.bk-open{display:flex}
+  .bk-dialog{background:#fff;border-radius:12px;width:100%;max-width:520px;max-height:calc(100vh - 32px);overflow:auto;
+    box-shadow:0 8px 28px rgba(0,0,0,.28)}
+  .bk-dialog-head{padding:20px 24px 8px;display:flex;align-items:flex-start;gap:8px}
+  .bk-dialog-head h3{font-size:20px;font-weight:500;margin:0;flex:1}
+  .bk-dialog-body{padding:4px 24px 8px}
+  .bk-dialog-foot{padding:12px 24px 20px;display:flex;justify-content:flex-end;gap:8px}
+  .bk-summary{background:var(--bk-bg);border-radius:8px;padding:12px 14px;margin-bottom:16px}
+  .bk-summary .bk-meta{margin:4px 0}
+  .bk-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .bk-field{margin-bottom:14px}
+  .bk-field label{display:block;font-size:12px;color:var(--bk-sub);margin-bottom:4px}
+  .bk-field label .bk-req{color:var(--bk-bad);margin-left:2px}
+  .bk-field input,.bk-field textarea{width:100%;border:1px solid var(--bk-line);border-radius:6px;padding:10px 12px;
+    font-family:inherit;font-size:16px;color:var(--bk-ink);background:#fff}
+  .bk-field textarea{min-height:72px;resize:vertical}
+  .bk-field input:focus,.bk-field textarea:focus{outline:2px solid var(--bk-blue);outline-offset:-1px;border-color:var(--bk-blue)}
+  .bk-inline{display:flex;gap:8px}
+  .bk-inline input{flex:1}
+  .bk-err{color:var(--bk-bad);font-size:13px;margin:4px 0 0;display:none}
+  .bk-err.bk-show{display:block}
+  .bk-banner{border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px}
+  .bk-banner.bk-bad{background:var(--bk-bad-soft);color:var(--bk-bad)}
+  .bk-banner.bk-info{background:var(--bk-blue-soft);color:var(--bk-blue-d)}
+  .bk-btn{border:0;border-radius:6px;padding:9px 20px;font-size:14px;font-weight:500;cursor:pointer}
   .bk-btn.bk-pri{background:var(--bk-blue);color:#fff}
   .bk-btn.bk-pri:hover:not(:disabled){background:var(--bk-blue-d)}
   .bk-btn.bk-ghost{background:transparent;color:var(--bk-blue)}
-  .bk-btn.bk-outline{background:#fff;color:var(--bk-blue);border:1.5px solid var(--bk-blue);margin-top:10px}
-  .bk-btn.bk-soft{background:var(--bk-bg);color:var(--bk-ink);border:1px solid var(--bk-line);margin-top:10px}
-  .bk-btn.bk-line{background:#fff;color:var(--bk-blue);border:1px solid var(--bk-line);font-size:14px;padding:10px 12px;min-height:44px;white-space:nowrap}
-  .bk-btn svg{width:20px;height:20px}
-  .bk-btn:disabled{opacity:.45;cursor:default}
-  .bk-cancel-link{display:block;margin:18px auto 0;border:0;background:none;color:var(--bk-bad);font-size:15px;font-weight:700;text-decoration:underline;cursor:pointer;padding:10px}
-
-  /* 入力 */
-  .bk-card2{background:var(--bk-bg);border:1px solid var(--bk-line);border-radius:12px;padding:12px 14px;margin:6px 0 18px}
-  .bk-summary .bk-sumtitle{font-size:18px;font-weight:800;margin-bottom:4px}
-  .bk-field{margin-bottom:16px}
-  .bk-field label{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;margin-bottom:6px}
-  .bk-badge{font-size:12px;font-weight:800;border-radius:4px;padding:1px 6px;background:#eceff4;color:var(--bk-sub)}
-  .bk-badge.bk-req{background:var(--bk-bad-soft);color:var(--bk-bad)}
-  .bk-field input,.bk-field textarea{width:100%;border:1px solid var(--bk-line);border-radius:10px;padding:13px 14px;font-size:17px;color:var(--bk-ink);background:#fff;font-weight:500}
-  .bk-field textarea{min-height:88px;resize:vertical}
-  .bk-field input:focus,.bk-field textarea:focus{outline:2px solid var(--bk-blue);outline-offset:-1px;border-color:var(--bk-blue)}
-  .bk-inline{display:flex;gap:8px}.bk-inline input{flex:1;min-width:0}
-  .bk-banner{border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px;font-weight:700}
-  .bk-banner.bk-bad{background:var(--bk-bad-soft);color:var(--bk-bad)}
+  .bk-btn.bk-ghost:hover{background:var(--bk-blue-soft)}
+  .bk-btn.bk-danger{background:transparent;color:var(--bk-bad);border:1px solid var(--bk-line)}
+  .bk-btn.bk-danger:hover{background:var(--bk-bad-soft)}
+  .bk-btn.bk-line{background:#fff;color:var(--bk-blue);border:1px solid var(--bk-line)}
+  .bk-btn:disabled{opacity:.5;cursor:default}
 
   /* 完了・予約の確認 */
-  .bk-done{padding:12px 0 4px}
-  .bk-done-mark{width:64px;height:64px;border-radius:50%;background:var(--bk-blue);color:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+  .bk-done{max-width:560px;margin:40px auto;background:#fff;border:1px solid var(--bk-line);border-radius:12px;padding:32px 28px}
+  .bk-done-mark{width:48px;height:48px;border-radius:50%;background:var(--bk-ok-soft);color:var(--bk-ok);display:flex;align-items:center;justify-content:center;margin-bottom:12px}
   .bk-done-mark.bk-x{background:var(--bk-bad-soft);color:var(--bk-bad)}
-  .bk-done-mark svg{width:34px;height:34px}
-  .bk-closed{max-width:520px;margin:60px auto;text-align:center;color:var(--bk-sub);background:#fff;border:1px solid var(--bk-line);border-radius:12px;padding:40px 24px}
-  .bk-closed h2{color:var(--bk-ink);font-weight:800}
+  .bk-done-mark svg{width:28px;height:28px}
+  .bk-done h2{font-size:22px;font-weight:500;margin:0 0 6px}
+  .bk-done .bk-lead{color:var(--bk-sub);margin:0 0 20px}
+  .bk-done .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+  .bk-manage-link{word-break:break-all;font-size:12px;color:var(--bk-sub);background:var(--bk-bg);border-radius:6px;padding:8px 10px;margin-top:8px}
+  .bk-foot{text-align:center;color:#9aa0a6;font-size:12px;margin:16px 0 32px}
+  .bk-closed{max-width:560px;margin:60px auto;text-align:center;color:var(--bk-sub);background:#fff;border:1px solid var(--bk-line);border-radius:12px;padding:40px 24px}
+  .bk-closed h2{color:var(--bk-ink);font-weight:500}
 
-  /* ダイアログ（日時変更・キャンセルの確認） */
-  .bk-scrim{position:fixed;inset:0;background:rgba(23,32,51,.6);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
-  .bk-scrim.bk-open{display:flex}
-  .bk-dialog{background:#fff;border-radius:14px;width:100%;max-width:480px;max-height:calc(100vh - 32px);overflow:auto}
-  .bk-dialog-head{padding:18px 20px 6px;display:flex;align-items:flex-start;gap:8px}
-  .bk-dialog-head h3{font-size:20px;font-weight:800;margin:0;flex:1}
-  .bk-dialog-body{padding:4px 20px 8px}
-  .bk-dialog-foot{padding:12px 20px 20px;display:flex;justify-content:flex-end;gap:8px}
-  .bk-summary2{background:var(--bk-bg);border-radius:10px;padding:10px 14px;margin:4px 0 12px;font-weight:600}
-  .bk-icon-btn{border:0;background:transparent;width:44px;height:44px;border-radius:50%;cursor:pointer;color:var(--bk-sub);display:inline-flex;align-items:center;justify-content:center}
-  .bk-icon-btn svg{width:20px;height:20px}
-
-  #bkToast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#222a3a;color:#fff;
-    padding:12px 18px;border-radius:8px;opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:calc(100% - 32px);font-weight:700}
+  #bkToast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#323232;color:#fff;
+    padding:12px 18px;border-radius:6px;opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:calc(100% - 32px)}
   #bkToast.bk-show{opacity:1;transform:translateX(-50%) translateY(0)}
-  @media (prefers-reduced-motion:reduce){#bkToast{transition:none}}
 
-  /* 画像03に合わせた細部（2026-10-29 再調整） */
-  .bk-bar{min-height:64px}
-  .bk-brand{font-size:24px;letter-spacing:.01em}
-  .bk-bar2{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
-  .bk-bar2 .bk-back{margin:0;justify-self:start;color:var(--bk-ink)}
-  .bk-bar-t{font-size:19px;font-weight:800;text-align:center}
-  .bk-h1{font-size:32px}
-  .bk-sub{font-size:17px;font-weight:500}
-  .bk-weeknav .bk-wbtn span{color:var(--bk-ink);font-weight:600}
-  .bk-weeknav .bk-wbtn svg{color:var(--bk-blue)}
-  .bk-dbtn{border-radius:8px}
-  .bk-dbtn span{font-size:14px}
-  .bk-h2{font-size:20px}
-  .bk-slot{border-radius:6px;font-size:19px;font-weight:500;min-height:58px}
-  .bk-when{padding:18px 20px;margin-top:4px}
-  .bk-when .bk-meta{font-size:19px;font-weight:600}
-  .bk-when .bk-right{margin-top:0}
-  .bk-field label{font-size:17px}
-  .bk-badge.bk-req{font-size:12px;padding:2px 8px}
-  .bk-done-mark{width:76px;height:76px}
-  .bk-done-mark svg{width:40px;height:40px}
-  .bk-summary .bk-sumtitle{font-size:19px;margin-bottom:8px}
-  .bk-summary .bk-meta{font-size:17px;font-weight:500}
-  .bk-btn.bk-outline{border-radius:6px}
-  .bk-btn.bk-soft{border-radius:6px;font-weight:700}
-  /* 大きさの調整（2026-10-29）：全体が大きく威圧感があったため一段小さくする */
-  .bk-bar{min-height:54px}
-  .bk-brand{font-size:19px}
-  .bk-bar-t{font-size:16px}
-  .bk-h1{font-size:24px}
-  .bk-sub{font-size:14px;font-weight:600}
-  .bk-h2{font-size:16px}
-  .bk-slot{font-size:16px;font-weight:600;min-height:46px}
-  .bk-when{padding:14px 16px}
-  .bk-when .bk-meta{font-size:16px}
-  .bk-field label{font-size:14px}
-  .bk-done-mark{width:60px;height:60px}
-  .bk-done-mark svg{width:32px;height:32px}
-  .bk-summary .bk-sumtitle{font-size:16px}
-  .bk-summary .bk-meta{font-size:14px;font-weight:600}
-  .bk-dbtn{min-height:54px;padding:6px 0}
-  .bk-dbtn b{font-size:17px}
-  .bk-btn{font-size:15px;padding:11px 18px;min-height:46px}
-  @media (max-width:380px){.bk-h1{font-size:22px}.bk-dbtn b{font-size:16px}.bk-slot{font-size:15px}}
+  @media (max-width:860px){
+    .bk-wrap{margin:0;padding:0}
+    .bk-card{grid-template-columns:1fr;border-radius:0;border-left:0;border-right:0;min-height:100vh}
+    .bk-side{border-right:0;border-bottom:1px solid var(--bk-line);padding:20px 16px}
+    .bk-main{padding:16px}
+    .bk-title{font-size:22px}
+    .bk-weekview{display:none}
+    .bk-daylist{display:block}
+    .bk-mini{margin-top:0}
+    .bk-mini-side{display:none}
+    .bk-mini-main{display:block}
+    .bk-row2{grid-template-columns:1fr}
+    .bk-dialog{max-height:100vh;border-radius:12px 12px 0 0;align-self:flex-end}
+    .bk-scrim{padding:0;align-items:flex-end}
+    .bk-done{margin:0;border-radius:0;border-left:0;border-right:0;min-height:100vh}
+  }
+  @media (min-width:861px){ .bk-mini-main{display:none} }
 </style>
 </head>
 <body>
@@ -206,10 +195,6 @@ const S = {
   picking: false,      // 変更ページで日時を選び直しているか
   busy: false,
   error: '',
-  step: 'pick',        // 予約ページの画面：pick（日時）→ form（入力）→ done（完了）
-  done: null,          // 予約が済んだときの控え
-  loading: false,
-  notice: '',
 };
 
 /* ---------- 小道具 ---------- */
@@ -224,7 +209,6 @@ function todayYmd(){return ymd(new Date());}
 function slotIso(day,time){return new Date(day+'T'+time+':00+09:00').toISOString();}
 function addMin(time,min){var p=time.split(':').map(Number);var t=p[0]*60+p[1]+min;return pad(Math.floor(t/60))+':'+pad(t%60);}
 function dayLabel(day){var d=parseYmd(day);return (d.getMonth()+1)+'月'+d.getDate()+'日('+DOW[d.getDay()]+')';}
-function shortDay(day){var d=parseYmd(day);return (d.getMonth()+1)+'月'+d.getDate()+'日（'+DOW[d.getDay()]+'）';}
 function longDay(day){var d=parseYmd(day);return d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日 '+DOW[d.getDay()]+'曜日';}
 function toast(msg){var t=document.getElementById('bkToast');t.textContent=msg;t.classList.add('bk-show');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('bk-show');},2600);}
 
@@ -250,8 +234,6 @@ const IC = {
   close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-  monitor:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>',
-  link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>',
 };
 
 /* ---------- 枠の読み込み ----------
@@ -297,119 +279,203 @@ async function findNext(fromDay){
   return null;
 }
 
-/* ---------- 描画の共通部品 ---------- */
+/* ---------- 描画：左の欄 ---------- */
 function locationMeta(loc){
   if(!loc)return '';
-  if(loc.type==='meet')return '<div class="bk-meta">'+IC.video+'<div>オンライン（Google Meet）</div></div>';
+  if(loc.type==='meet')return '<div class="bk-meta">'+IC.video+'<div>Google Meet<div class="bk-fine">ビデオ会議の情報は確認メールに記載されます</div></div></div>';
   if(loc.type==='place'&&loc.text)return '<div class="bk-meta">'+IC.pin+'<div>'+esc(loc.text)+'</div></div>';
   if(loc.type==='phone')return '<div class="bk-meta">'+IC.phone+'<div>電話'+(loc.text?'<div class="bk-fine">'+esc(loc.text)+'</div>':'')+'</div></div>';
   return '';
 }
-function locationShort(loc){
-  if(!loc)return '';
-  if(loc.type==='meet')return 'オンライン';
-  if(loc.type==='place')return loc.text||'';
-  if(loc.type==='phone')return loc.text?'電話（'+loc.text+'）':'電話';
-  return '';
+function avatar(staff){
+  var nm=(staff&&staff.nickname)||'';
+  if(staff&&staff.avatar_url)return '<div class="bk-avatar"><img src="'+esc(staff.avatar_url)+'" alt="" referrerpolicy="no-referrer"></div>';
+  return '<div class="bk-avatar">'+esc(nm.slice(0,1)||'?')+'</div>';
 }
-function topBar(right){
-  return '<header class="bk-bar"><span class="bk-brand">OPS 日調</span><span class="bk-bar-r">'+(right||'')+'</span></header>';
+function sideHTML(){
+  var i=S.info;
+  return '<aside class="bk-side">'+
+    avatar(i.staff)+
+    '<div class="bk-host">'+esc(i.staff.nickname)+'</div>'+
+    '<h1 class="bk-title">'+esc(i.title)+'</h1>'+
+    '<div class="bk-meta">'+IC.clock+'<div>'+i.duration+'分の予約</div></div>'+
+    locationMeta(i.location)+
+    (i.description?'<p class="bk-desc">'+esc(i.description)+'</p>':'')+
+    '<div class="bk-mini bk-mini-side">'+miniHTML()+'</div>'+
+  '</aside>';
 }
-function shell(inner,bar){
-  return '<div class="bk-app">'+(bar||topBar(IC.cal+'<span>'+esc((S.info&&S.info.title)||'予約')+'</span>'))+
-    '<div class="bk-body">'+inner+'</div></div>';
-}
-var MON=['月','火','水','木','金','土','日'];
-function monday(d){var x=new Date(d);x.setHours(0,0,0,0);var w=(x.getDay()+6)%7;x.setDate(x.getDate()-w);return x;}
 
-/* ---------- 画面1：日時を選ぶ（予約・日時の変更で共通） ---------- */
-function pickHTML(){
-  var i=S.info;var ws=S.weekStart;var win=i.window;
-  var prevOk=ymd(addDays(ws,-1))>=win.from;
-  var nextOk=ymd(addDays(ws,7))<=win.to;
-  var days='';
-  for(var k=0;k<7;k++){
-    var d=addDays(ws,k);var day=ymd(d);
-    var inW=inWindow(day);
+/* ---------- 描画：月のミニカレンダー ---------- */
+function miniHTML(){
+  var m=S.month;
+  var first=sunday(m);
+  var cells='';
+  for(var k=0;k<42;k++){
+    var d=addDays(first,k);var day=ymd(d);
+    if(d.getMonth()!==m.getMonth()){cells+='<span class="bk-day bk-out"></span>';continue;}
     var has=slotsOf(day).length>0;
-    var cls='bk-dbtn'+(day===S.selDay?' bk-sel':'')+(has?'':' bk-nodate')+(k===5?' bk-sat':'')+(k===6?' bk-sun':'');
-    days+='<button type="button" class="'+cls+'" '+(inW?'':'disabled ')+'aria-pressed="'+(day===S.selDay)+'" aria-label="'+dayLabel(day)+(has?'':' 空きなし')+'" onclick="pickDay(\''+day+'\')">'+
-      '<span>'+MON[k]+'</span><b>'+d.getDate()+'</b></button>';
+    var cls='bk-day'+(has?' bk-has':'')+(day===todayYmd()?' bk-today':'')+(day===S.selDay?' bk-sel':'');
+    cells+=has
+      ?'<button class="'+cls+'" onclick="pickDay(\''+day+'\')" aria-label="'+dayLabel(day)+' 空きあり">'+d.getDate()+'</button>'
+      :'<span class="'+cls+'" aria-hidden="true">'+d.getDate()+'</span>';
   }
-  var sel=S.selDay;var list=sel?slotsOf(sel):[];
-  var slots;
-  if(S.loading)slots='<div class="bk-note">空き状況を確認しています…</div>';
-  else if(S.error)slots='<div class="bk-banner bk-bad">'+esc(S.error)+'</div>';
-  else if(!sel)slots='<div class="bk-note">日付を選んでください。</div>';
-  else if(!list.length)slots='<div class="bk-empty">この日は空きがありません。<br><button type="button" class="bk-link-btn" onclick="jumpNext()">次に空いている日へ移動</button></div>';
-  else slots='<div class="bk-slots">'+list.map(function(t){
-    return '<button type="button" class="bk-slot'+(F.day===sel&&F.time===t?' bk-sel':'')+'" aria-pressed="'+(F.day===sel&&F.time===t)+'" onclick="chooseSlot(\''+sel+'\',\''+t+'\')">'+t+'</button>';}).join('')+'</div>';
-  var chosen=F.day&&F.time&&F.day===S.selDay;
-  var head=MODE==='manage'
-    ?'<button type="button" class="bk-back" onclick="stopPicking()">'+IC.left+'予約の確認に戻る</button><h1 class="bk-h1">新しい日時を選ぶ</h1>'
-    :'<h1 class="bk-h1">'+esc(i.title)+'</h1>'+(locationShort(i.location)?'<p class="bk-sub">'+esc(locationShort(i.location))+'</p>':'')+
-      (i.description?'<p class="bk-desc">'+esc(i.description)+'</p>':'');
-  return shell(head+
-    '<div class="bk-weeknav"><button type="button" class="bk-wbtn" onclick="moveWeek(-1)" '+(prevOk?'':'disabled')+'>'+IC.left+'<span>前の週</span></button>'+
-      '<b>'+ws.getFullYear()+'年'+(ws.getMonth()+1)+'月</b>'+
-      '<button type="button" class="bk-wbtn" onclick="moveWeek(1)" '+(nextOk?'':'disabled')+'><span>次の週</span>'+IC.right+'</button></div>'+
-    '<div class="bk-week" role="group" aria-label="日付">'+days+'</div>'+
-    (sel?'<h2 class="bk-h2">'+(parseYmd(sel).getMonth()+1)+'月'+parseYmd(sel).getDate()+'日 ('+DOW[parseYmd(sel).getDay()]+')</h2>':'')+
-    slots+
-    '<div class="bk-sticky"><button type="button" class="bk-btn bk-pri bk-block" '+(chosen?'':'disabled ')+'onclick="goNext()">'+(MODE==='manage'?'この日時に変更する':'次へ')+'</button></div>',
-    MODE==='manage'?topBar(IC.cal+'<span>予約の変更</span>'):null);
+  var prevOk=ymd(addDays(m,-1))>=S.info.window.from;
+  var nextM=new Date(m.getFullYear(),m.getMonth()+1,1);
+  var nextOk=ymd(nextM)<=S.info.window.to;
+  return '<div class="bk-mini-head"><b>'+m.getFullYear()+'年'+(m.getMonth()+1)+'月</b><span>'+
+      '<button class="bk-icon-btn" onclick="moveMonth(-1)" '+(prevOk?'':'disabled')+' aria-label="前の月">'+IC.left+'</button>'+
+      '<button class="bk-icon-btn" onclick="moveMonth(1)" '+(nextOk?'':'disabled')+' aria-label="次の月">'+IC.right+'</button></span></div>'+
+    '<div class="bk-mini-grid">'+DOW.map(function(w){return '<span class="bk-dow">'+w+'</span>';}).join('')+cells+'</div>';
 }
 
-/* ---------- 画面2：入力と確認 ---------- */
-var F={day:null,time:null,codeSent:false,guest:{},busy:false};
-function field(id,label,mode,html,hint){
-  return '<div class="bk-field"><label for="'+id+'">'+esc(label)+(mode==='required'?'<span class="bk-badge bk-req">必須</span>':'<span class="bk-badge">任意</span>')+'</label>'+html+(hint?'<div class="bk-fine">'+esc(hint)+'</div>':'')+'</div>';
+/* ---------- 描画：週の表示（PC）と、選んだ日の一覧（スマホ） ---------- */
+function weekHTML(){
+  var ws=S.weekStart;var we=addDays(ws,6);
+  var prevOk=ymd(addDays(ws,-1))>=S.info.window.from;
+  var nextOk=ymd(addDays(ws,7))<=S.info.window.to;
+  var rangeLabel=ws.getFullYear()+'年'+(ws.getMonth()+1)+'月'+ws.getDate()+'日～'+
+    (we.getMonth()!==ws.getMonth()?(we.getMonth()+1)+'月':'')+we.getDate()+'日';
+  var any=false;
+  var cols='';
+  for(var k=0;k<7;k++){
+    var d=addDays(ws,k);var day=ymd(d);var list=slotsOf(day);
+    if(list.length)any=true;
+    cols+='<div><div class="bk-col-head'+(day===todayYmd()?' bk-today':'')+'"><div class="bk-dw">'+DOW[d.getDay()]+'</div><div class="bk-dn">'+d.getDate()+'</div></div>'+
+      '<div class="bk-col-body">'+(list.length?list.map(function(t){
+        return '<button class="bk-slot" onclick="chooseSlot(\''+day+'\',\''+t+'\')">'+t+'</button>';
+      }).join(''):'<div class="bk-none">'+(inWindow(day)?'空きなし':'')+'</div>')+'</div></div>';
+  }
+  return '<div class="bk-weekview">'+
+    '<div class="bk-weekbar">'+
+      '<button class="bk-today-btn" onclick="goToday()">今日</button>'+
+      '<button class="bk-icon-btn" onclick="moveWeek(-1)" '+(prevOk?'':'disabled')+' aria-label="前の週">'+IC.left+'</button>'+
+      '<button class="bk-icon-btn" onclick="moveWeek(1)" '+(nextOk?'':'disabled')+' aria-label="次の週">'+IC.right+'</button>'+
+      '<span class="bk-range">'+rangeLabel+'</span></div>'+
+    (S.error?'<div class="bk-banner bk-bad">'+esc(S.error)+'</div>':'')+
+    '<div class="bk-week">'+cols+'</div>'+
+    (!any&&!S.error?'<div class="bk-empty">この週は予約できる時間がありません。<br><button class="bk-link-btn" onclick="jumpNext()">次に空いている日へ移動</button></div>':'')+
+  '</div>';
 }
-function formHTML(){
-  var i=S.info;var f=i.fields||{name:'required',email:'required',affiliation:'off',note:'off'};var g=F.guest||{};
+function dayListHTML(){
+  var day=S.selDay;var list=day?slotsOf(day):[];
+  return '<div class="bk-daylist">'+
+    '<div class="bk-mini bk-mini-main">'+miniHTML()+'</div>'+
+    (S.error?'<div class="bk-banner bk-bad" style="margin-top:12px">'+esc(S.error)+'</div>':'')+
+    (day&&list.length
+      ?'<div class="bk-daylist-head">'+longDay(day)+'</div><div class="bk-daylist-grid">'+list.map(function(t){
+          return '<button class="bk-slot" onclick="chooseSlot(\''+day+'\',\''+t+'\')">'+t+'</button>';}).join('')+'</div>'
+      :(!S.error?'<div class="bk-empty">'+(day?'この日は予約できる時間がありません。':'日付を選んでください。')+
+        '<br><button class="bk-link-btn" onclick="jumpNext()">次に空いている日へ移動</button></div>':''))+
+  '</div>';
+}
+function pickerHTML(head){
+  return '<section class="bk-main">'+head+
+    '<div class="bk-tz">(GMT+09:00) 日本標準時 - 東京</div>'+
+    weekHTML()+dayListHTML()+'</section>';
+}
+
+function render(){
+  var main=document.getElementById('bkMain');
+  if(MODE==='manage'&&!S.picking){main.innerHTML=manageHTML();return;}
+  var head=MODE==='manage'
+    ?'<button class="bk-link-btn" style="margin:-8px 0 8px -12px" onclick="stopPicking()">← 予約の確認に戻る</button><h2 class="bk-h2">新しい日時を選択</h2>'
+    :'<h2 class="bk-h2">予約の時間を選択</h2>';
+  main.innerHTML='<div class="bk-wrap"><div class="bk-card">'+sideHTML()+pickerHTML(head)+'</div>'+
+    '<div class="bk-foot">OPS日調アプリ 予約スケジュール</div></div>';
+}
+
+/* ---------- 操作 ---------- */
+async function showWeekOf(day){
+  S.weekStart=sunday(parseYmd(day));
+  S.month=new Date(S.weekStart.getFullYear(),S.weekStart.getMonth(),1);
+  var dd=parseYmd(day);
+  if(dd.getMonth()!==S.month.getMonth())S.month=new Date(dd.getFullYear(),dd.getMonth(),1);
+  render();
+  await ensureRange(ymd(S.weekStart),7);
+  await ensureRange(ymd(sunday(S.month)),42);
+  render();
+}
+async function moveWeek(n){S.selDay=null;await showWeekOf(ymd(addDays(S.weekStart,7*n)));}
+async function moveMonth(n){
+  S.month=new Date(S.month.getFullYear(),S.month.getMonth()+n,1);
+  render();
+  await ensureRange(ymd(sunday(S.month)),42);
+  // スマホでは月を変えたら、その月の最初の空き日を選んでおく
+  if(!S.selDay||S.selDay.slice(0,7)!==ymd(S.month).slice(0,7)){
+    var first=null;for(var k=0;k<31;k++){var dd=ymd(addDays(S.month,k));if(dd.slice(0,7)!==ymd(S.month).slice(0,7))break;if(slotsOf(dd).length){first=dd;break;}}
+    S.selDay=first;
+  }
+  render();
+}
+async function pickDay(day){S.selDay=day;await showWeekOf(day);}
+async function goToday(){S.selDay=null;await showWeekOf(todayYmd()<S.info.window.from?S.info.window.from:todayYmd());}
+async function jumpNext(){
+  var from=S.selDay&&window.matchMedia('(max-width:860px)').matches?ymd(addDays(parseYmd(S.selDay),1)):ymd(addDays(S.weekStart,7));
+  if(from<S.info.window.from)from=S.info.window.from;
+  var next=await findNext(from);
+  if(!next){toast('この先に予約できる時間はありません');return;}
+  S.selDay=next;await showWeekOf(next);
+}
+
+/* ---------- 予約フォーム ---------- */
+var F={day:null,time:null,codeSent:false};
+function chooseSlot(day,time){
+  F.day=day;F.time=time;
+  if(MODE==='manage')return openRescheduleConfirm();
+  openForm();
+}
+function openDialog(html){document.getElementById('bkDialog').innerHTML=html;document.getElementById('bkScrim').classList.add('bk-open');}
+function closeDialog(){if(S.busy)return;document.getElementById('bkScrim').classList.remove('bk-open');}
+function slotSummary(day,time,title){
+  return '<div class="bk-summary">'+
+    '<div class="bk-meta">'+IC.cal+'<div><b>'+esc(title||S.info.title)+'</b></div></div>'+
+    '<div class="bk-meta">'+IC.clock+'<div>'+longDay(day)+'<br>'+time+'～'+addMin(time,S.info.duration)+'</div></div>'+
+    locationMeta(S.info.location)+'</div>';
+}
+function field(id,label,req,html){
+  return '<div class="bk-field"><label for="'+id+'">'+esc(label)+(req?'<span class="bk-req">*</span>':'')+'</label>'+html+'</div>';
+}
+function openForm(){
+  var i=S.info;
   var q=(i.questions||[]).map(function(x){
-    return field('bkq_'+x.id,x.label,x.required?'required':'optional','<textarea id="bkq_'+x.id+'" maxlength="1000">'+esc((g.answers||{})[x.id]||'')+'</textarea>');
+    return field('bkq_'+x.id,x.label,x.required,'<textarea id="bkq_'+x.id+'" maxlength="1000"></textarea>');
   }).join('');
-  var emailOn=f.email!=='off';
-  var body='<div class="bk-card2 bk-when">'+
-      '<div class="bk-meta">'+IC.cal+'<div>'+shortDay(F.day)+' '+F.time+'</div></div>'+
-      (locationShort(i.location)?'<div class="bk-meta">'+(i.location.type==='meet'?IC.monitor:IC.pin)+'<div>'+esc(locationShort(i.location))+'</div></div>':'')+
-      '<button type="button" class="bk-link-btn bk-right" onclick="backToPick()">日時を変更</button></div>'+
-    '<div class="bk-banner bk-bad" id="bkFormErr" role="alert" style="display:none"></div>'+
-    (f.name!=='off'?field('bkName','お名前',f.name,'<input id="bkName" autocomplete="name" maxlength="80" value="'+esc(g.name||'')+'">'):'')+
-    (emailOn?field('bkEmail','メールアドレス',f.email,
+  openDialog(
+    '<div class="bk-dialog-head"><h3>予約</h3><button class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
+    '<div class="bk-dialog-body">'+slotSummary(F.day,F.time)+
+      '<div class="bk-banner bk-bad" id="bkFormErr" style="display:none"></div>'+
+      '<div class="bk-row2">'+
+        field('bkLast','姓',true,'<input id="bkLast" autocomplete="family-name" maxlength="40">')+
+        field('bkFirst','名',true,'<input id="bkFirst" autocomplete="given-name" maxlength="40">')+
+      '</div>'+
+      field('bkEmail','メールアドレス',true,
         i.verifyEmail
-          ?'<div class="bk-inline"><input id="bkEmail" type="email" autocomplete="email" maxlength="254" value="'+esc(g.email||'')+'"><button type="button" class="bk-btn bk-line" id="bkSendCode" onclick="sendCode()">コードを送信</button></div>'
-          :'<input id="bkEmail" type="email" autocomplete="email" maxlength="254" value="'+esc(g.email||'')+'">',
-        '入力すると、Googleカレンダーから予約の招待が届きます。'):'')+
-    (emailOn&&i.verifyEmail?'<div id="bkCodeBox" style="display:none">'+field('bkCode','確認コード（メールに届いた6桁）','required','<input id="bkCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code">')+'</div>':'')+
-    (f.affiliation!=='off'?field('bkAff','所属',f.affiliation,'<input id="bkAff" maxlength="100" value="'+esc(g.affiliation||'')+'">'):'')+
-    (i.phone!=='off'?field('bkPhone','電話番号',i.phone,'<input id="bkPhone" type="tel" autocomplete="tel" maxlength="30" value="'+esc(g.phone||'')+'">'):'')+
-    (f.note!=='off'?field('bkNote','連絡事項',f.note,'<textarea id="bkNote" maxlength="1000">'+esc(g.note||'')+'</textarea>'):'')+
-    q+
-    '<div class="bk-sticky"><button type="button" class="bk-btn bk-pri bk-block" id="bkSubmit" onclick="submitBooking()">予約を確定する</button>'+
-      '<p class="bk-tz bk-center">この操作で予約が確定します。</p></div>';
-  return shell(body,'<header class="bk-bar bk-bar2"><button type="button" class="bk-back" onclick="backToPick()">'+IC.left+'戻る</button><span class="bk-bar-t">'+esc(i.title)+'</span><span></span></header>');
+          ?'<div class="bk-inline"><input id="bkEmail" type="email" autocomplete="email" maxlength="254"><button class="bk-btn bk-line" id="bkSendCode" onclick="sendCode()">コードを送信</button></div>'
+          :'<input id="bkEmail" type="email" autocomplete="email" maxlength="254">')+
+      (i.verifyEmail?'<div id="bkCodeBox" style="display:none">'+field('bkCode','確認コード（メールに届いた6桁）',true,'<input id="bkCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code">')+'</div>':'')+
+      (i.phone!=='off'?field('bkPhone','電話番号',i.phone==='required','<input id="bkPhone" type="tel" autocomplete="tel" maxlength="30">'):'')+
+      q+
+      '<p class="bk-tz" style="margin:4px 0 0">予約すると、このメールアドレスにGoogleカレンダーの招待が届きます。</p>'+
+    '</div>'+
+    '<div class="bk-dialog-foot"><button class="bk-btn bk-ghost" onclick="closeDialog()">キャンセル</button>'+
+      '<button class="bk-btn bk-pri" id="bkSubmit" onclick="submitBooking()">予約</button></div>');
+  F.codeSent=false;
+  setTimeout(function(){var el=document.getElementById('bkLast');if(el)el.focus();},50);
 }
 function formErr(msg){var e=document.getElementById('bkFormErr');if(!e)return;e.textContent=msg;e.style.display=msg?'block':'none';if(msg)e.scrollIntoView({block:'nearest'});}
 function val(id){var el=document.getElementById(id);return el?el.value.trim():'';}
-function modeOf(k){var f=S.info.fields||{name:'required',email:'required',affiliation:'off',note:'off'};return f[k]||'off';}
 function readForm(){
   var i=S.info;
-  var g={name:val('bkName'),email:val('bkEmail'),affiliation:val('bkAff'),note:val('bkNote'),phone:val('bkPhone'),answers:{}};
-  (i.questions||[]).forEach(function(q){g.answers[q.id]=val('bkq_'+q.id);});
-  F.guest=g; // 戻っても入力が残るよう、確認の前に控えておく
-  if(modeOf('name')==='required'&&!g.name)return {error:'お名前を入力してください'};
-  if(modeOf('email')==='required'&&!g.email)return {error:'メールアドレスを入力してください'};
-  if(modeOf('email')!=='off'&&g.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email))return {error:'メールアドレスを正しく入力してください'};
-  if(modeOf('affiliation')==='required'&&!g.affiliation)return {error:'所属を入力してください'};
-  if(modeOf('note')==='required'&&!g.note)return {error:'連絡事項を入力してください'};
+  var g={last_name:val('bkLast'),first_name:val('bkFirst'),email:val('bkEmail'),phone:val('bkPhone'),answers:{}};
+  if(!g.last_name||!g.first_name)return {error:'姓と名を入力してください'};
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email))return {error:'メールアドレスを正しく入力してください'};
   if(i.phone==='required'&&!g.phone)return {error:'電話番号を入力してください'};
   for(var k=0;k<(i.questions||[]).length;k++){
-    var q=i.questions[k];
-    if(q.required&&!g.answers[q.id])return {error:'「'+q.label+'」に回答してください'};
+    var q=i.questions[k];var v=val('bkq_'+q.id);
+    if(q.required&&!v)return {error:'「'+q.label+'」に回答してください'};
+    g.answers[q.id]=v;
   }
-  if(i.verifyEmail&&modeOf('email')!=='off'&&g.email){
+  if(i.verifyEmail){
     g.code=val('bkCode');
     if(!F.codeSent)return {error:'「コードを送信」を押して、届いた確認コードを入力してください'};
     if(!/^\d{6}$/.test(g.code))return {error:'メールに届いた6桁の確認コードを入力してください'};
@@ -428,173 +494,115 @@ async function sendCode(){
   document.getElementById('bkCode').focus();
   toast(email+' に確認コードを送りました');
 }
-/* 送信中は押せなくする（連打で二重に送らない）。成功するまでは完了画面に進まない */
 async function submitBooking(){
-  if(F.busy)return;
   var f=readForm();
   if(f.error){formErr(f.error);return;}
   var btn=document.getElementById('bkSubmit');
-  F.busy=true;btn.disabled=true;btn.textContent='予約しています…';
-  var body=Object.assign({start:slotIso(F.day,F.time)},f.guest);
-  var r=await api('/api/book/'+TOKEN,{method:'POST',body:body});
-  F.busy=false;
+  btn.disabled=true;btn.textContent='予約しています…';S.busy=true;
+  var r=await api('/api/book/'+TOKEN,{method:'POST',body:Object.assign({start:slotIso(F.day,F.time)},f.guest)});
+  S.busy=false;
   if(!r.ok){
+    btn.disabled=false;btn.textContent='予約';
+    formErr(r.data.error||'予約できませんでした');
     if(r.data.taken){
-      /* 先に別の人が予約した枠。入力はそのまま残して、日時の選び直しへ戻す */
-      F.day=null;F.time=null;S.error='';
-      resetSlots();S.step='pick';S.notice='この時間は予約できなくなりました。別の時間を選んでください。';
-      await ensureRange(ymd(S.weekStart),7);render();return;
+      // 埋まった枠を一覧から消すため、読み直す
+      resetSlots();await ensureRange(ymd(S.weekStart),7);await ensureRange(ymd(sunday(S.month)),42);render();
     }
-    btn.disabled=false;btn.textContent='予約を確定する';
-    formErr(r.data.error||'予約できませんでした。もう一度お試しください');
     return;
   }
-  S.done=r.data.booking;S.step='done';render();window.scrollTo(0,0);
+  closeDialog();
+  showDone(r.data.booking);
 }
 
-/* ---------- 画面3：予約完了 ---------- */
-function summaryCard(b){
-  var loc=b.location||{type:'none'};
-  var place=loc.type==='meet'?'オンライン':locationShort(loc);
-  var st=new Date(b.start);
-  var when=isNaN(st)?b.label:(st.getMonth()+1)+'月'+st.getDate()+'日（'+DOW[st.getDay()]+'）'+pad(st.getHours())+':'+pad(st.getMinutes());
-  return '<div class="bk-card2 bk-summary">'+
-    '<div class="bk-sumtitle">'+esc(b.title)+'</div>'+
-    '<div class="bk-meta">'+IC.cal+'<div>'+esc(when)+'</div></div>'+
-    (place?'<div class="bk-meta">'+(loc.type==='meet'?IC.monitor:IC.pin)+'<div>'+esc(place)+(loc.type==='meet'&&b.meet_url?'<div class="bk-fine"><a href="'+esc(b.meet_url)+'" target="_blank" rel="noopener">'+esc(b.meet_url)+'</a></div>':'')+'</div></div>':'')+
-    (b.name?'<div class="bk-meta">'+IC.person+'<div>'+esc(b.name)+' 様</div></div>':'')+
+/* ---------- 予約の控え ---------- */
+function bookingDetails(b){
+  return '<div class="bk-summary">'+
+    '<div class="bk-meta">'+IC.cal+'<div><b>'+esc(b.title)+'</b></div></div>'+
+    '<div class="bk-meta">'+IC.clock+'<div>'+esc(b.label)+'</div></div>'+
+    (b.staff?'<div class="bk-meta">'+IC.person+'<div>担当：'+esc(b.staff)+'</div></div>':'')+
+    (b.location.type==='meet'
+      ?'<div class="bk-meta">'+IC.video+'<div>'+(b.meet_url?'<a href="'+esc(b.meet_url)+'" target="_blank" rel="noopener">'+esc(b.meet_url)+'</a>':'Google Meet')+'</div></div>'
+      :locationMeta(b.location))+
   '</div>';
 }
-function doneHTML(){
-  var b=S.done;
-  return shell('<div class="bk-done"><div class="bk-done-mark">'+IC.check+'</div><h1 class="bk-h1 bk-center">予約が完了しました</h1></div>'+
-    summaryCard(b)+
-    (b.email?'<p class="bk-fine bk-center">'+esc(b.email)+' にGoogleカレンダーの招待をお送りしました。</p>':'')+
-    '<h2 class="bk-h2">変更・キャンセル用リンク</h2>'+
-    '<p class="bk-sub">このリンクを保存してください。</p>'+
-    '<button type="button" class="bk-btn bk-outline bk-block" onclick="copyManage()">'+IC.link+'管理リンクをコピー</button>'+
-    '<a class="bk-btn bk-soft bk-block" href="'+esc(b.manage_url)+'">予約を変更・キャンセル</a>'+
-    '<p class="bk-tz bk-center">変更・キャンセルは予約の開始時刻まで可能です。</p>');
-}
-async function copyManage(){
-  var url=S.done.manage_url;
-  try{await navigator.clipboard.writeText(url);toast('管理リンクをコピーしました');}
-  catch(e){
-    var t=document.createElement('textarea');t.value=url;document.body.appendChild(t);t.select();
-    var ok=false;try{ok=document.execCommand('copy');}catch(e2){}
-    t.remove();toast(ok?'管理リンクをコピーしました':'コピーできませんでした。リンクを長押ししてコピーしてください');
-  }
+function showDone(b){
+  document.getElementById('bkMain').innerHTML='<div class="bk-done">'+
+    '<div class="bk-done-mark">'+IC.check+'</div>'+
+    '<h2>予約しました</h2>'+
+    '<p class="bk-lead">'+esc(b.email)+' にGoogleカレンダーの招待をお送りしました。</p>'+
+    bookingDetails(b)+
+    '<p style="margin:16px 0 0;font-size:13px;color:var(--bk-sub)">日時の変更やキャンセルは、次のページからできます（招待メールにも記載しています）。</p>'+
+    '<div class="bk-manage-link">'+esc(b.manage_url)+'</div>'+
+    '<div class="bk-actions"><a class="bk-btn bk-pri" style="text-decoration:none" href="'+esc(b.manage_url)+'">予約を確認・変更する</a></div>'+
+  '</div>';
+  window.scrollTo(0,0);
 }
 
-/* ---------- 描画の切り替え ---------- */
-function render(){
-  var main=document.getElementById('bkMain');
-  if(MODE==='manage'&&!S.picking){main.innerHTML=manageHTML();return;}
-  var html=(MODE==='book'&&S.step==='form'&&F.day)?formHTML():(MODE==='book'&&S.step==='done'?doneHTML():pickHTML());
-  main.innerHTML=html;
-  if(S.notice&&S.step==='pick'){var n=document.createElement('div');n.className='bk-banner bk-bad';n.setAttribute('role','alert');n.textContent=S.notice;var b=main.querySelector('.bk-body');if(b)b.insertBefore(n,b.firstChild);S.notice='';}
-}
-
-/* ---------- 操作 ---------- */
-async function showWeekOf(day){
-  S.weekStart=monday(parseYmd(day));
-  S.loading=true;render();
-  await ensureRange(ymd(S.weekStart),14);
-  S.loading=false;render();
-}
-async function moveWeek(n){S.selDay=null;F.day=null;F.time=null;await showWeekOf(ymd(addDays(S.weekStart,7*n)));}
-async function pickDay(day){S.selDay=day;if(F.day!==day){F.day=null;F.time=null;}render();}
-async function jumpNext(){
-  var from=S.selDay?ymd(addDays(parseYmd(S.selDay),1)):ymd(addDays(S.weekStart,7));
-  if(from<S.info.window.from)from=S.info.window.from;
-  var next=await findNext(from);
-  if(!next){toast('この先に予約できる時間はありません');return;}
-  S.selDay=next;await showWeekOf(next);
-}
-function chooseSlot(day,time){F.day=day;F.time=time;render();}
-function goNext(){
-  if(!F.day||!F.time)return;
-  if(MODE==='manage')return openRescheduleConfirm();
-  S.step='form';render();window.scrollTo(0,0);
-  setTimeout(function(){var el=document.getElementById('bkName')||document.getElementById('bkEmail');if(el)el.focus();},60);
-}
-function backToPick(){S.step='pick';render();}
-
-/* ダイアログ（日時変更の確認・キャンセルの確認で使う） */
-function openDialog(html){document.getElementById('bkDialog').innerHTML=html;document.getElementById('bkScrim').classList.add('bk-open');}
-function closeDialog(){if(S.busy)return;document.getElementById('bkScrim').classList.remove('bk-open');}
-function slotSummary(day,time,title){
-  return '<div class="bk-summary2">'+
-    '<div class="bk-meta">'+IC.cal+'<div><b>'+esc(title||S.info.title)+'</b></div></div>'+
-    '<div class="bk-meta">'+IC.clock+'<div>'+longDay(day)+'<br>'+time+'～'+addMin(time,S.info.duration)+'</div></div>'+
-    locationMeta(S.info.location)+'</div>';
-}
-
-/* ---------- 変更・キャンセル（本人専用の管理ページ） ---------- */
+/* ---------- 変更・キャンセル ---------- */
 function manageHTML(){
   var m=S.manage;var b=m.booking;
-  var head;
-  if(b.cancelled)head='<div class="bk-done"><div class="bk-done-mark bk-x">'+IC.x+'</div><h1 class="bk-h1 bk-center">この予約はキャンセルされました</h1><p class="bk-sub bk-center">あらためて予約するときは、担当者から届いた予約ページをお使いください。</p></div>';
-  else if(b.past)head='<div class="bk-done"><h1 class="bk-h1 bk-center">この予約は開始時刻を過ぎました</h1><p class="bk-sub bk-center">開始時刻以降は、変更・キャンセルできません。内容はこのページで確認できます。</p></div>';
-  else head='<h1 class="bk-h1">ご予約の内容</h1>';
+  var status=b.cancelled
+    ?'<div class="bk-done-mark bk-x">'+IC.x+'</div><h2>この予約はキャンセルされました</h2><p class="bk-lead">あらためて予約するときは、担当者から届いた予約ページをお使いください。</p>'
+    :b.past
+      ?'<div class="bk-done-mark">'+IC.check+'</div><h2>この予約は終了しました</h2><p class="bk-lead">開始時刻を過ぎた予約は、変更・キャンセルできません。</p>'
+      :'<div class="bk-done-mark">'+IC.check+'</div><h2>予約が確定しています</h2><p class="bk-lead">'+esc(b.name)+' 様（'+esc(b.email)+'）</p>';
   var actions='';
   if(m.changeable){
-    actions=(m.reschedulable?'<button type="button" class="bk-btn bk-pri bk-block" onclick="startPicking()">日時を変更</button>':
-      '<p class="bk-sub">現在、この予約の日時はこのページから変更できません。キャンセルして担当者にご連絡ください。</p>')+
-      '<button type="button" class="bk-cancel-link" onclick="openCancelConfirm()">予約をキャンセルする</button>'+
-      '<p class="bk-tz bk-center">変更・キャンセルは予約の開始時刻まで可能です。</p>';
+    actions='<div class="bk-actions">'+
+      (m.reschedulable?'<button class="bk-btn bk-pri" onclick="startPicking()">日時を変更</button>':'')+
+      '<button class="bk-btn bk-danger" onclick="openCancelConfirm()">予約をキャンセル</button></div>'+
+      (m.reschedulable?'':'<p style="font-size:13px;color:var(--bk-sub);margin-top:10px">現在、この予約の日時はこのページから変更できません。キャンセルして担当者にご連絡ください。</p>');
   }
-  return shell(head+summaryCard(b)+actions,topBar(IC.cal+'<span>予約の確認</span>'));
+  return '<div class="bk-done">'+status+bookingDetails(b)+actions+'</div><div class="bk-foot">OPS日調アプリ 予約スケジュール</div>';
 }
 async function startPicking(){
-  S.picking=true;resetSlots();S.selDay=null;F.day=null;F.time=null;
+  S.picking=true;resetSlots();S.selDay=null;
   var start=todayYmd()<S.info.window.from?S.info.window.from:todayYmd();
   await showWeekOf(start);
+  // 予約ページと同じく、最初に空いている日を選んでおく
   var first=await findNext(start);
   if(first){S.selDay=first;await showWeekOf(first);}
 }
-function stopPicking(){S.picking=false;F.day=null;F.time=null;render();window.scrollTo(0,0);}
+function stopPicking(){S.picking=false;render();window.scrollTo(0,0);}
 function openRescheduleConfirm(){
   var b=S.manage.booking;
-  openDialog('<div class="bk-dialog-head"><h3>日時を変更しますか？</h3><button type="button" class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
+  openDialog('<div class="bk-dialog-head"><h3>日時を変更</h3><button class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
     '<div class="bk-dialog-body">'+
       '<div class="bk-banner bk-bad" id="bkFormErr" style="display:none"></div>'+
-      '<p class="bk-fine">変更前</p>'+
-      '<div class="bk-summary2" style="text-decoration:line-through;color:var(--bk-sub)">'+esc(b.label)+'</div>'+
-      '<p class="bk-fine">変更後</p>'+
+      '<p style="margin:0 0 6px;color:var(--bk-sub);font-size:12px">変更前</p>'+
+      '<div class="bk-summary" style="text-decoration:line-through;color:var(--bk-sub)">'+esc(b.label)+'</div>'+
+      '<p style="margin:0 0 6px;color:var(--bk-sub);font-size:12px">変更後</p>'+
       slotSummary(F.day,F.time,b.title)+
-      '<p class="bk-tz" style="margin:0">変更が完了するまで、今の予約はそのまま残ります。</p>'+
+      '<p class="bk-tz" style="margin:0">変更すると、Googleカレンダーから更新のお知らせが届きます。</p>'+
     '</div>'+
-    '<div class="bk-dialog-foot"><button type="button" class="bk-btn bk-ghost" onclick="closeDialog()">戻る</button>'+
-      '<button type="button" class="bk-btn bk-pri" id="bkSubmit" onclick="submitReschedule()">この日時に変更</button></div>');
+    '<div class="bk-dialog-foot"><button class="bk-btn bk-ghost" onclick="closeDialog()">戻る</button>'+
+      '<button class="bk-btn bk-pri" id="bkSubmit" onclick="submitReschedule()">この日時に変更</button></div>');
 }
 async function submitReschedule(){
-  if(S.busy)return;
   var btn=document.getElementById('bkSubmit');btn.disabled=true;btn.textContent='変更しています…';S.busy=true;
   var r=await api('/api/book/manage/'+TOKEN,{method:'PATCH',body:{start:slotIso(F.day,F.time)}});
   S.busy=false;
   if(!r.ok){
     btn.disabled=false;btn.textContent='この日時に変更';formErr(r.data.error||'変更できませんでした');
-    if(r.data.taken){F.day=null;F.time=null;resetSlots();await ensureRange(ymd(S.weekStart),14);}
+    if(r.data.taken){resetSlots();await ensureRange(ymd(S.weekStart),7);await ensureRange(ymd(sunday(S.month)),42);render();}
     return;
   }
   closeDialog();
-  S.manage.booking=r.data.booking;S.picking=false;F.day=null;F.time=null;render();window.scrollTo(0,0);
+  S.manage.booking=r.data.booking;S.picking=false;render();window.scrollTo(0,0);
   toast('日時を変更しました');
 }
 function openCancelConfirm(){
   var b=S.manage.booking;
-  openDialog('<div class="bk-dialog-head"><h3>予約をキャンセルしますか？</h3><button type="button" class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
+  openDialog('<div class="bk-dialog-head"><h3>予約をキャンセルしますか？</h3><button class="bk-icon-btn" onclick="closeDialog()" aria-label="閉じる">'+IC.close+'</button></div>'+
     '<div class="bk-dialog-body">'+
       '<div class="bk-banner bk-bad" id="bkFormErr" style="display:none"></div>'+
-      '<div class="bk-summary2">'+esc(b.title)+'<br>'+esc(b.label)+'</div>'+
-      '<p style="margin:0;color:var(--bk-sub);font-size:14px">キャンセルすると元に戻せません。</p>'+
+      '<div class="bk-summary">'+esc(b.title)+'<br>'+esc(b.label)+'</div>'+
+      '<p style="margin:0;color:var(--bk-sub);font-size:13px">キャンセルすると元に戻せません。担当者とあなたに、Googleカレンダーから取り消しのお知らせが届きます。</p>'+
     '</div>'+
-    '<div class="bk-dialog-foot"><button type="button" class="bk-btn bk-ghost" onclick="closeDialog()">戻る</button>'+
-      '<button type="button" class="bk-btn bk-pri" style="background:var(--bk-bad)" id="bkSubmit" onclick="submitCancel()">キャンセルする</button></div>');
+    '<div class="bk-dialog-foot"><button class="bk-btn bk-ghost" onclick="closeDialog()">戻る</button>'+
+      '<button class="bk-btn bk-pri" style="background:var(--bk-bad)" id="bkSubmit" onclick="submitCancel()">キャンセルする</button></div>');
 }
 async function submitCancel(){
-  if(S.busy)return;
   var btn=document.getElementById('bkSubmit');btn.disabled=true;btn.textContent='キャンセルしています…';S.busy=true;
   var r=await api('/api/book/manage/'+TOKEN,{method:'DELETE'});
   S.busy=false;
@@ -619,18 +627,19 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeDialog(
   }
   var r2=await api('/api/book/'+TOKEN);
   if(!r2.ok){showClosed('',r2.data.error||'読み込めませんでした');return;}
-  S.info=r2.data;S.step='pick';
+  S.info=r2.data;
   document.title=S.info.title+' | 予約';
   if(S.info.closed){showClosed(S.info.title,'現在、予約を受け付けていません');return;}
   var start=todayYmd()<S.info.window.from?S.info.window.from:todayYmd();
-  S.weekStart=monday(parseYmd(start));
-  S.loading=true;render();
-  await ensureRange(ymd(S.weekStart),14);
-  S.loading=false;
-  /* 最初に空いている日を選んでおく。今週に1つも無ければ、その空いている週を開く */
+  S.weekStart=sunday(parseYmd(start));S.month=new Date(S.weekStart.getFullYear(),S.weekStart.getMonth(),1);
+  render();
+  await ensureRange(ymd(S.weekStart),7);
+  await ensureRange(ymd(sunday(S.month)),42);
+  // スマホ向けに、最初の空き日を選んでおく（PCでも印として出る）
   var first=await findNext(start);
   if(first){
     S.selDay=first;
+    // 今週に1つも無ければ、最初に空いている週を開く（Googleと同じ）
     if(first>=ymd(addDays(S.weekStart,7))){await showWeekOf(first);return;}
   }
   render();

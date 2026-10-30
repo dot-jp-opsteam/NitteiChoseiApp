@@ -85,20 +85,6 @@ function str(v, max) {
 }
 
 /* 新しく作るときの初期値。Googleの初期値（平日9〜17時・60日先まで・4時間前まで）に合わせている */
-/* 予約者に入力してもらう項目。off＝使わない／optional＝任意／required＝必須。
-   新しく作るページの初期値は「名前だけ必須」。
-   fields を持たない昔のページは、これまでの動き（名前とメールが必須）のまま残す */
-const FIELD_KEYS = ['name', 'email', 'affiliation', 'note'];
-const FIELD_MODES = ['off', 'optional', 'required'];
-const NEW_FIELDS = { name: 'required', email: 'off', affiliation: 'off', note: 'off' };
-const LEGACY_FIELDS = { name: 'required', email: 'required', affiliation: 'off', note: 'off' };
-function normalizeFields(src) {
-  if (!src || typeof src !== 'object') return { ...LEGACY_FIELDS };
-  const out = {};
-  for (const k of FIELD_KEYS) out[k] = FIELD_MODES.includes(src[k]) ? src[k] : NEW_FIELDS[k];
-  return out;
-}
-
 function defaultConfig() {
   const weekday = [{ s: '09:00', e: '17:00' }];
   return {
@@ -118,7 +104,6 @@ function defaultConfig() {
     location: { type: 'meet', text: '' },
     description: '',
     phone: 'off',
-    fields: { ...NEW_FIELDS },
     questions: [],
     verifyEmail: false,
     reminders: [1440, 60],
@@ -197,7 +182,6 @@ function normalizeConfig(input) {
       },
       description: str(src.description, 2000),
       phone: PHONE_MODES.includes(src.phone) ? src.phone : def.phone,
-      fields: normalizeFields(src.fields),
       questions,
       verifyEmail: !!src.verifyEmail,
       reminders,
