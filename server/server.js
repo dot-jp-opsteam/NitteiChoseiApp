@@ -43,6 +43,7 @@ const mail = require('./mail');
 const sharedCalFilter = require('./shared-cal-filter');
 const googleSyncFilter = require('./google-sync-filter');
 const slots = require('./slots');
+const interviewPreferences = require('./interview-preferences');
 const { withStaffLock } = require('./stafflock');
 const push = require('./push');
 const rateLimit = require('./ratelimit');
@@ -368,6 +369,11 @@ async function initDB() {
     'CREATE INDEX IF NOT EXISTS idx_interviews_staff ON interviews(staff_id)',
     'CREATE INDEX IF NOT EXISTS idx_interviews_branch ON interviews(branch_id)',
   ]) await client.execute(ddl);
+
+  // 送信再試行を新規申請や本人編集にしない。鍵はハッシュのみ保存。
+  await client.execute(`CREATE TABLE IF NOT EXISTS interview_submissions (
+    key_hash TEXT PRIMARY KEY, request_hash TEXT NOT NULL, interview_id TEXT NOT NULL
+  )`);
 
   // 既存DBへの追加カラム。既に存在する場合のエラーは無視する
   for (const ddl of [
@@ -3159,21 +3165,41 @@ app.get('/api/apply/:token/slots', limitPublicRead, async (req, res) => {
    画面側（index.html の ivMode / fsSegments）は、これが無ければ古い読み方で表示する */
 const CHOICE_MODE = 'slot';
 
+/* 申請リンクで指定できる面談の長さ（分）。確定時の長さ（30分単位・30〜240分）と同じ範囲 */
+function validRequestDuration(v) {
+  const n = typeof v === 'string' && /^\d{1,3}$/.test(v) ? Number(v) : v;
+  return Number.isInteger(n) && n >= 30 && n <= 240 && n % 30 === 0;
+}
+
 /* 本名だけで面談を申請する。
    アカウントを作らないので、intern_id は空にして名前を data に持たせる */
 app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
-  const { name, staff_id, choices, note, all_day, choice_mode: choiceMode } = req.body || {};
+  const { name, staff_id, choices, note, all_day, choice_mode: choiceMode, duration_min: reqDuration, preference_groups: prefGroups, submission_key: submissionKey } = req.body || {};
   const internName = String(name || '').trim();
   if (!internName) return res.status(400).json({ error: 'お名前を入力してください' });
   if (internName.length > 50) return res.status(400).json({ error: 'お名前が長すぎます' });
+  if (reqDuration !== undefined && !validRequestDuration(reqDuration)) return res.status(400).json({ error: '面談の長さは30分から4時間までの30分単位で指定してください' });
+  if (submissionKey !== undefined && (typeof submissionKey !== 'string' || !/^[a-zA-Z0-9_-]{24,100}$/.test(submissionKey))) return res.status(400).json({ error: '再送キーが不正です' });
+
 
   /* 続いた30分枠は画面上でひとつの希望にまとまるが、送られてくるのは枠のままなので
      件数ではなく枠数で数える。「終日OK」で1日28枠になるため、
      見られる範囲（3週間ぶん）をすべて終日OKにしても通る幅を取ってある。
      そのうえで、際限なく送りつけられないよう上限は設ける */
-  const list = [...new Set((Array.isArray(choices) ? choices : []).filter(Boolean).map(String))];
+  const list = [...new Set((Array.isArray(choices) ? choices : []).filter(Boolean).map(value => { const date=new Date(value); return Number.isFinite(+date)?date.toISOString():String(value); }))];
   if (!list.length) return res.status(400).json({ error: '希望する枠を選んでください' });
   if (list.length > 600) return res.status(400).json({ error: '希望する枠が多すぎます。絞ってください' });
+
+  let preferences;
+  if (prefGroups !== undefined) {
+    try {
+      preferences = interviewPreferences.normalize(prefGroups);
+      const flattened = preferences.flatMap(g => g.slots);
+      const canonical = list.map(v => new Date(v).toISOString());
+      if (new Set(flattened).size !== flattened.length || JSON.stringify(flattened) !== JSON.stringify(canonical) || interviewPreferences.conflicts(preferences).length) throw Error('希望候補が重複しているか、選択した枠と一致しません');
+      if (choiceMode !== CHOICE_MODE) throw Error('希望候補の形式が不正です');
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
 
   /* 「終日OK」で選んだ日（YYYY-MM-DD）。
      途中に埋まった時間があっても希望をひとまとめに見せるために使う。
@@ -3185,13 +3211,23 @@ app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
     const ctx = await applyContextFor(req.params.token, staff_id);
     if (ctx.error) return res.status(ctx.code).json({ error: ctx.error });
 
+    await withStaffLock(ctx.staff.id, async () => {
+    const keyHash = submissionKey ? crypto.createHash('sha256').update(req.params.token + '|' + submissionKey).digest('hex') : null;
+    const requestHash = crypto.createHash('sha256').update(JSON.stringify({ name: internName, staff: ctx.staff.id, choices: list, preferences, allDay, duration: reqDuration, note: String(note || '').trim().slice(0,500), mode: choiceMode })).digest('hex');
+    if (keyHash) {
+      const prior = await client.execute({ sql: 'SELECT request_hash FROM interview_submissions WHERE key_hash = ?', args: [keyHash] });
+      if (prior.rows.length) {
+        if (prior.rows[0].request_hash !== requestHash) return res.status(409).json({ error: '送信済みの申請は変更できません。担当スタッフへご相談ください' });
+        return res.json({ ok: true, staff_nickname: ctx.staff.nickname });
+      }
+    }
     /* 画面を細工されても、埋まっている枠や受付時間外を掴まされないようにする。
        1つでも通らなければ、選び直してもらう */
     const ok = slots.selectableTimes(ctx.availability, ctx.takenMs);
     for (const iso of list) {
       const t = new Date(iso).getTime();
       if (!Number.isFinite(t) || !ok.has(t)) {
-        return res.status(409).json({ error: '選んだ枠が埋まりました。選び直してください' });
+        return res.status(409).json({ error: '選んだ枠が埋まりました。入力は保持しています。選択した日時を確認してください', unavailable_choices: list.filter(value => !ok.has(new Date(value).getTime())) });
       }
     }
 
@@ -3203,15 +3239,25 @@ app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
       branch_id: ctx.branch.id,
       status: 'applied',
       choices: list,
+      ...(preferences ? { preference_groups: preferences } : {}),
       all_day: allDay,
       ...(choiceMode === CHOICE_MODE ? { choice_mode: CHOICE_MODE } : {}),
+      /* リンクで指定された面談の長さ。この申請に固定して保存し、あとで設定が変わっても動かさない。
+         指定なしは保存しない（従来どおり30分として扱う）。明示した不正値は上で拒否する */
+      ...(validRequestDuration(reqDuration) ? { request_duration_min: Number(reqDuration) } : {}),
       // 旧項目にも入れておく（この変更を巻き戻しても申請が読めるようにする保険）
       choice1: list[0], choice2: list[1] || null, choice3: list[2] || null,
       confirmed_datetime: null,
       note: String(note || '').trim().slice(0, 500),
       created_at: new Date().toISOString(),
     };
-    await saveInterview(iv);
+    if (keyHash) {
+      const { id, intern_id, staff_id, branch_id, status, created_at, ...data } = iv;
+      await client.batch([
+        { sql: 'INSERT INTO interviews(id,intern_id,staff_id,branch_id,status,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', args: [id,intern_id,staff_id,branch_id || null,status,JSON.stringify(data),created_at,created_at] },
+        { sql: 'INSERT INTO interview_submissions(key_hash,request_hash,interview_id) VALUES(?,?,?)', args: [keyHash,requestHash,id] },
+      ], 'write');
+    } else await saveInterview(iv);
     await insertNotification({
       type: '面談申請', branch_id: ctx.branch.id,
       ...(!ctx.branch.id?{recipient_id:ctx.staff.id}:{}),
@@ -3225,6 +3271,7 @@ app.post('/api/apply/:token', limitPublicWrite, async (req, res) => {
       url: '/', tag: 'interview',
     }).catch((e) => console.warn('面談申請の通知に失敗しました', e));
     res.json({ ok: true, staff_nickname: ctx.staff.nickname });
+    });
   } catch (e) {
     console.error('面談の申請に失敗しました', e);
     res.status(500).json({ error: '申請できませんでした' });
@@ -3377,7 +3424,7 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '面談を変更する権限がありません' });
   }
-  const { status, confirmed_datetime, duration_min } = req.body || {};
+  const { status, confirmed_datetime, duration_min, allow_overlap, preference_index, custom_time, expected_status } = req.body || {};
   if (!['fixed', 'failed', 'applied'].includes(status)) {
     return res.status(400).json({ error: '指定された状態が不正です' });
   }
@@ -3405,8 +3452,20 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
     if (old.cancellation_pending && status === 'fixed') return res.status(409).json({ error: 'キャンセル処理が途中です。もう一度キャンセルを実行して完了してください' });
     const startMs = new Date(confirmed_datetime || '').getTime();
     if (status === 'fixed' && (!Number.isFinite(startMs) || startMs <= Date.now())) return res.status(400).json({ error: '未来の日時を指定してください' });
-    const newDuration = duration_min !== undefined ? duration_min : (Number(old.duration_min) || 30);
+    const requestedDuration = validRequestDuration(old.request_duration_min) ? Number(old.request_duration_min) : 30;
+    const newDuration = duration_min !== undefined ? duration_min : (old.status === 'applied' ? requestedDuration : (Number(old.duration_min) || 30));
     if (old.status === 'fixed' && status === 'fixed' && startMs === new Date(old.confirmed_datetime).getTime() && newDuration === (Number(old.duration_min) || 30)) return res.json({ ok: true, interview: old });
+    if (expected_status === 'applied' && old.status !== 'applied') return res.status(409).json({ error: 'この申請はすでに処理されています。最新の状態を確認してください', code: 'state_changed' });
+    let confirmedPreference = null;
+    if (status === 'fixed' && old.status === 'applied') {
+      if (newDuration !== requestedDuration) return res.status(400).json({ error: '申請に保存された所要時間で確定してください' });
+      if (custom_time !== true) {
+        const groups = interviewPreferences.groups(old);
+        const index = preference_index === undefined ? groups.findIndex(g => interviewPreferences.fits(g, confirmed_datetime, newDuration)) : preference_index;
+        if (!Number.isInteger(index) || index < 0 || !groups[index] || !interviewPreferences.fits(groups[index], confirmed_datetime, newDuration)) return res.status(400).json({ error: '面談全体が選んだ希望時間帯に収まる開始時刻を選んでください', code: 'outside_preference' });
+        confirmedPreference = index + 1;
+      }
+    }
     if (status === 'fixed') {
       const endMs = startMs + newDuration * 60000;
       const stored = await readDB();
@@ -3418,12 +3477,16 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
         const otherStart = new Date(interview.confirmed_datetime).getTime();
         return startMs < otherStart + (Number(interview.duration_min) || 30) * 60000 && endMs > otherStart;
       });
-      if (blocked || overlaps) return res.status(409).json({ error: 'この時間は面談できません。別の時間を選んでください' });
+      /* 自分の予定・受けられない時間と重なっても、スタッフ本人が承知のうえなら確定できる
+         （allow_overlap）。他の確定済み面談との二重確定だけは、常に断る */
+      if (overlaps) return res.status(409).json({ error: 'この時間は面談できません。別の時間を選んでください' });
+      if (blocked && allow_overlap !== true) return res.status(409).json({ error: '別の予定と重なっています。この日時で確定しますか？', code: 'overlap' });
     }
     const next = {
       ...old, status,
       confirmed_datetime: status === 'fixed' ? new Date(startMs).toISOString() : null,
-      ...(status === 'fixed' && duration_min !== undefined ? { duration_min } : {}),
+      ...(status === 'fixed' ? { duration_min: newDuration } : {}),
+      ...(status === 'fixed' && old.status === 'applied' ? { confirmed_preference: confirmedPreference } : {}),
       ...(old.status === 'fixed' && status === 'fixed' ? { rescheduled_at: new Date().toISOString() } : {}),
       ...(old.status === 'fixed' && status !== 'fixed' ? { cancelled: true, cancelled_by: 'staff', cancelled_at: new Date().toISOString(), previous_confirmed_datetime: old.confirmed_datetime } : {}),
       ...(['fixed', 'applied'].includes(status) ? { cancelled: false } : {}),
@@ -3957,9 +4020,12 @@ const PUBLIC_FILES = {
   '/': 'index.html',
   '/index.html': 'index.html',
   '/style.css': 'style.css',
+  '/design-switch.js': 'design-switch.js',
   '/candidate-ui.js': 'candidate-ui.js',
   '/candidate-ui.css': 'candidate-ui.css',
   '/availability-ui.js': 'availability-ui.js',
+  '/interview-preferences.js': 'server/interview-preferences.js',
+  '/interview-confirm.js': 'interview-confirm.js',
   '/tally-model.js': 'server/tally.js',
   '/tally-ui.js': 'tally-ui.js',
   '/tally.html': 'tally.html',
@@ -4000,6 +4066,23 @@ const PUBLIC_FILES = {
   // Google Search Console のサイト所有権確認用。確認状態を保つため削除しないこと
   '/googlee6411894890471cb.html': 'googlee6411894890471cb.html',
 };
+// 旧版は刷新前の本番（eff2824）の画面を基に、共通APIとの互換性を保つ。
+const LEGACY_PAGES = new Set(['index.html', 'apply.html', 'attendance.html', 'free.html', 'book.html', 'tally.html']);
+const LEGACY_ASSETS = new Set([
+  'style.css', 'tally-model.js', 'tally-ui.js',
+  'demo/apply.mp4', 'demo/apply.webm', 'demo/free.mp4', 'demo/free.webm', 'demo/attend.mp4', 'demo/attend.webm',
+]);
+
+function sendPublicFile(req, res, file) {
+  if (LEGACY_PAGES.has(file)) {
+    // 同じ共有URLで版を選ぶ。CSSやJSはページ内で版ごとのURLを指定する。
+    res.vary('Cookie').set('Cache-Control', 'private, no-store');
+    const latest = (req.headers.cookie || '').split(';').some(cookie => cookie.trim() === 'ops_design_v1=latest');
+    if (!latest) file = 'server/legacy/' + file;
+  }
+  return res.sendFile(path.join(PUBLIC_ROOT, file));
+}
+
 app.get('*', (req, res) => {
   let p;
   try { p = decodeURIComponent(req.path); } catch (e) { p = req.path; }
@@ -4008,35 +4091,38 @@ app.get('*', (req, res) => {
   /* 支部ごとの申請URL。合言葉の正しさはここでは見ず、ページを出してから
      APIで確かめる。ここで弾くと、正しいかどうかがURLを叩くだけで分かってしまう */
   if (/^\/i\/[A-Za-z0-9_-]+\/?$/.test(p)) {
-    return res.sendFile(path.join(PUBLIC_ROOT, 'apply.html'));
+    return sendPublicFile(req, res, 'apply.html');
   }
   if (/^\/a\/[A-Za-z0-9_-]+\/?$/.test(p)) {
-    return res.sendFile(path.join(PUBLIC_ROOT, 'attendance.html'));
+    return sendPublicFile(req, res, 'attendance.html');
   }
   // 日程調整URL。合言葉の正しさは /i/ と同じくAPI側で確かめる
   if (/^\/f\/[A-Za-z0-9_-]+\/?$/.test(p)) {
-    return res.sendFile(path.join(PUBLIC_ROOT, 'free.html'));
+    return sendPublicFile(req, res, 'free.html');
   }
   /* 予約ページ。Googleの予約スケジュールと同じく、ほかのサイトに埋め込めるようにする
      （設定画面の「埋め込みコード」）。押させて困る操作は「予約する」だけで、
      名前とメールアドレスを自分で入れないと進めないので、埋め込みを許しても害は小さい。
      変更・キャンセルのページは合鍵入りなので、埋め込みは許さないまま */
   if (/^\/b\/manage\/[a-f0-9]+\/?$/.test(p)) {
-    return res.sendFile(path.join(PUBLIC_ROOT, 'book.html'));
+    return sendPublicFile(req, res, 'book.html');
   }
   if (/^\/b\/[a-f0-9]+\/?$/.test(p)) {
     res.removeHeader('X-Frame-Options');
     res.set('Content-Security-Policy', 'frame-ancestors *');
-    return res.sendFile(path.join(PUBLIC_ROOT, 'book.html'));
+    return sendPublicFile(req, res, 'book.html');
   }
   if (/^\/t\/(?:[a-f0-9]{32}|manage\/[a-f0-9]{48})\/?$/.test(p)) {
     res.set('Referrer-Policy', 'no-referrer');
-    return res.sendFile(path.join(PUBLIC_ROOT, 'tally.html'));
+    return sendPublicFile(req, res, 'tally.html');
+  }
+  if (p.startsWith('/legacy/') && LEGACY_ASSETS.has(p.slice(8))) {
+    return sendPublicFile(req, res, 'server' + p);
   }
   if (p === '/tally.html') res.set('Referrer-Policy', 'no-referrer');
   const file = PUBLIC_FILES[p];
   if (!file) return res.status(404).type('text/plain; charset=utf-8').send('ページが見つかりません');
-  res.sendFile(path.join(PUBLIC_ROOT, file));
+  return sendPublicFile(req, res, file);
 });
 
 initDB()

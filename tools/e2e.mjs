@@ -93,7 +93,7 @@ async function setupDB(dbPath) {
   }
   const c = createClient({ url: 'file:' + dbPath });
   const now = new Date().toISOString();
-  const exp =new Date(Date.now() + 3600e3).toISOString();
+  const exp =new Date(Date.now() + (process.argv.includes('--browser') ? 86400e3 : 3600e3)).toISOString();
   const oneYearAgo = new Date(Date.now() - 365 * 24 * 3600e3).toISOString();
 
   // server.js の initDB() と同じ形。起動時にCREATE TABLE IF NOT EXISTSされるので最低限だけ先に作る
@@ -169,7 +169,8 @@ async function setupDB(dbPath) {
 
 /* ---------- サーバーの起動と停止 ---------- */
 function startServer(dbPath) {
-  const child = spawn(process.execPath, ['server.js'], {
+  const review = process.argv.includes('--browser');
+  const child = spawn(process.execPath, [...(review ? ['--require',path.join(ROOT,'tools/local-review.cjs')] : []),'server.js'], {
     cwd: path.join(ROOT, 'server'),
     /* 公開ページの回数制限は切っておく。ここでは「100人が同時に申請しても
        取りこぼさないか」を1つのIPから確かめるので、制限が効くと必ず落ちる。
@@ -179,7 +180,8 @@ function startServer(dbPath) {
       TURSO_DATABASE_URL: 'file:' + dbPath,
       TURSO_AUTH_TOKEN: '',
       PUBLIC_WRITE_PER_MIN: '0',
-      PUBLIC_READ_PER_MIN: '0' },
+      PUBLIC_READ_PER_MIN: '0',
+      ...(review ? {PUBLIC_BASE_URL:BASE,GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',TOKEN_ENCRYPTION_KEY:'',SMTP_USER:'',SMTP_PASS:'',SEED_ADMIN_EMAIL:''} : {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const log = [];
@@ -346,6 +348,22 @@ async function createBrowserAttendanceFixture() {
     options: [{ start: at(13), end: at(14) }, { start: at(15), end: at(16) }],
   });
   if (made.status !== 200) throw new Error('画面確認用の公開出欠を作成できませんでした');
+  const invite=await api(TOKENS.staff,'GET','/api/staff/intern-invite-url');
+  const token=new URL(invite.json.url).pathname.split('/').pop();
+  const grid=await api(null,'GET',`/api/apply/${token}/slots?week=1`);
+  const available=(grid.json.grid||[]).map(col=>col.filter(c=>c.state==='ok').map(c=>c.iso)).filter(col=>col.length>=12);
+  if(available.length<2)throw Error('検証用の空き時間が不足しています');
+  const groups=[{slots:available[0].slice(4,12)},{slots:available[0].slice(14,18)},{slots:available[1].slice(4,12)}].filter(g=>g.slots.length);
+  for(const duration of [30,60]){
+    const payload={name:`画面確認 ${duration}分`,choices:groups.flatMap(g=>g.slots),preference_groups:groups,choice_mode:'slot',duration_min:duration};
+    const response=await api(null,'POST',`/api/apply/${token}`,payload);if(response.status!==200)throw Error(JSON.stringify(response.json));
+  }
+  // 応募後に自分の予定が入った例。外部カレンダーへの接続はない。
+  const meeting=await api(null,'POST',`/api/apply/${token}`,{name:'検証用の打ち合わせ',choices:groups[0].slots.slice(2,4),choice_mode:'slot',duration_min:60});
+  if(meeting.status===200){const db=await getDB(TOKENS.staff),iv=db.interviews.find(i=>i.intern_name==='検証用の打ち合わせ');await api(TOKENS.staff,'PATCH','/api/interviews/'+iv.id,{status:'fixed',confirmed_datetime:groups[0].slots[2]});}
+  console.log('STAFF_REVIEW_URL='+BASE+'/__local-review');
+  console.log('APPLY_REVIEW_URL='+invite.json.url+'?d=60');
+  console.log('INTERVIEW_REVIEW_IDS='+JSON.stringify((await getDB(TOKENS.staff)).interviews.filter(i=>String(i.intern_name||'').startsWith('画面確認')).map(i=>({id:i.id,name:i.intern_name}))));
   return made.json.request.public_url;
 }
 
@@ -565,7 +583,7 @@ async function testAttendance() {
   check('公開画面に締切の時刻も返る', publicView.json.request?.due_time, '18:30');
   check('回答前でも結果一覧を見られる', publicView.json.respondents, []);
 
-  const appHtml = (await (await fetch(BASE + '/')).text()).replace(/\r\n/g, '\n');
+  const appHtml = (await (await fetch(BASE + '/', { headers: { Cookie: 'ops_design_v1=latest' } })).text()).replace(/\r\n/g, '\n');
   const serverSource = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
   const styleSource = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
   /* 公開の回答ページ。スタッフが見る出欠確認の画面（openAttendDetail）と
@@ -654,7 +672,10 @@ async function testAttendance() {
      直接開く「候補日を送る」「空き時間を聞く」に分けた。インターン生は受け取るだけなので「日程調整」のまま */
   /* 2026-10-05：予約スケジュールを「面談一覧・時間」の直後に足した */
   check('スタッフの左メニューは「面談一覧・時間」「予約スケジュール」「OPStappy」＋作成フォームを開く2つ',
-    appHtml.includes("{id:'interviews',label:'面談一覧・時間',ic:'list'},\n    {id:'booking',label:'予約スケジュール',ic:'alarm'},\n    {id:'tally',label:'OPStappy',ic:'calendar'},\n    {id:'send',label:'候補日を送る',ic:'calendar-check',run:'openRequestForm',demo:'attend'},\n    {id:'freeform',label:'空き時間を聞く',ic:'clock',run:'openFreeslotForm',demo:'free'}")
+    /* 2026-10-29：「候補日を送る」の新規作成入口を外し、過去の案件を見る「出欠確認」を残した */
+    /* 2026-10-29 再調整：画像01の並び（ホーム・面談・空き時間を聞く・OPStappy・予約スケジュール・出欠確認） */
+    appHtml.includes("{id:'home',label:'ホーム',ic:'home'},\n    {id:'interviews',label:'面談',ic:'users'},\n    {id:'freeform',label:'空き時間を聞く',ic:'calendar',run:'openFreeslotForm',demo:'free'},\n    {id:'tally',label:'OPStappy',ic:'doc'},\n    {id:'booking',label:'予約スケジュール',ic:'calendar'},\n    {id:'requests',label:'出欠確認',ic:'check-sq'}")
+      && !appHtml.includes("label:'候補日を送る'")
       && appHtml.includes("{id:'requests',label:'日程調整',ic:'calendar-check'}")
       && appHtml.includes('<h1 class="page">日程調整</h1>')
       && !appHtml.includes('面談一覧・確定</') && !appHtml.includes("'面談一覧・確定'"), true);
@@ -670,18 +691,19 @@ async function testAttendance() {
       && !appHtml.includes('name="ivHub"') && !appHtml.includes("sec('iv','list','面談'")
       && appHtml.includes("if(tab==='interviews')loadFreeslots();"), true);
   /* 2026-10-09：スタッフ向けの説明書「使い方」を左メニューに足した */
-  check('左メニューに「使い方」があり、説明書の画面が開ける',
-    appHtml.includes(`onclick="sbGo('guide')"`)
+  /* 2026-10-29：左メニュー下段は画像01どおり3つ。「使い方」は「設定」の中から開く */
+  check('「設定」に「使い方」があり、説明書の画面が開ける',
+    appHtml.includes(`onclick="closeSheet();sbGo('guide')"`) && appHtml.includes('onclick="openAppSettings()"')
       && appHtml.includes("if(t==='guide')return viewGuide();")
       && appHtml.includes('<h1 class="page">使い方</h1>'), true);
   /* 2026-10-09：面談申請リンクを目立たせた。ホームに、色の縁の入口とコピーボタン。
      同じ日に「面談一覧・時間」にも置いたが、置かないでほしいとの指示で外した */
   check('面談申請リンクは色の縁の入口で、その場でコピーできる（ホームだけ）',
-    appHtml.includes('<div class="cta ail-card" data-demo="apply">')
-      && appHtml.includes('onclick="copyInternInviteLinkQuick()"')
-      && appHtml.includes('const linkBtn=internInviteCard();')
-      && (appHtml.match(/[^ ]internInviteCard\(\)/g) || []).length === 1
-      && fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8').includes('.ail-card .ail-copy'), true);
+    /* 2026-10-29：所要時間（30分・60分・その他）を選んでコピー。リンクに ?d=分 を付けて渡す */
+    appHtml.includes('<section class="hm-link" data-demo="apply">')
+      && appHtml.includes('onclick="hmCopyApplyLink(this)"')
+      && appHtml.includes("'d='+min")
+      && appHtml.includes('return viewHomeStaff();'), true);
   /* カレンダー連携の入口は左メニューだけ。ホームの入口タイルにもプロフィールにも置かない */
   check('カレンダー連携の入口は左メニューだけにある',
     (appHtml.match(/openGoogleCalendarSettings\(\)"/g) || []).length === 1
@@ -694,10 +716,8 @@ async function testAttendance() {
   /* 3つのフォームは、送った相手の画面が見えず違いが分かりにくい。
      カーソルを乗せると回答の様子の動画（demo/*.mp4）が下に流れる */
   check('3つのフォームの入口にデモ動画のホバー表示が付いている',
-    appHtml.includes('data-demo="${t.demo}"') && appHtml.includes("demo:'attend'") && appHtml.includes("demo:'free'")
-      && appHtml.includes('data-demo="apply" onclick="openInternInviteLink()"')
-      && appHtml.includes("'候補日を送る','候補日を出して都合を聞く',0,false,'attend'")
-      && appHtml.includes("'空き時間を聞く','URLで空いている時間を集める',0,false,'free'")
+    appHtml.includes('data-demo="${t.demo}"') && appHtml.includes("demo:'free'")
+      && appHtml.includes('data-demo="apply"')
       && ['attend', 'free', 'apply'].every((k) => appHtml.includes(`src:'/demo/${k}'`))
       && appHtml.includes('type="video/mp4"') && appHtml.includes('type="video/webm"'), true);
   for (const k of ['attend', 'free', 'apply']) {
@@ -757,12 +777,17 @@ async function testAttendance() {
       && appHtml.includes('.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))'), true);
   /* 入口は「日程を決める」「空き時間を確認」の2つ。
      「タスクを追加」は別のアプリへ移ったので外した（2026-10-05） */
-  check('作成ボタンは「候補日を送る」「空き時間を聞く」で、ホームからもフォームを直接開く',
-    appHtml.includes('onclick="openRequestForm()">${ic(\'calendar\')}候補日を送る</button>')
-      && appHtml.includes('onclick="openFreeslotForm()">${ic(\'clock\')}空き時間を聞く</button>')
-      && appHtml.includes("hex('openRequestForm()','calendar-check','候補日を送る'")
-      && appHtml.includes("hex('openFreeslotForm()','clock','空き時間を聞く'")
+  check('作成の入口は「日程調整を作る」の選択画面と「空き時間を聞く」。候補日を送る入口は無い',
+    appHtml.includes('onclick="openFreeslotForm()">${ic(\'clock\')}空き時間を聞く</button>')
+      && appHtml.includes('onclick="openCreateMenu()">${ic(\'plus\')}日程調整を作る</button>')
+      && !appHtml.includes('onclick="openRequestForm()"') && !appHtml.includes("hex('openRequestForm()'")
       && !appHtml.includes('タスクを追加'), true);
+  /* 2026-10-29：更新履歴。未読の青い点は、端末＋ログインユーザーごとに最新の版を覚えて出し分ける */
+  check('更新履歴は左メニューにあり、既読は端末＋ユーザーごとに保存する',
+    appHtml.includes('onclick="openChangelog()"') && appHtml.includes("'ops_changelog_seen_v1_'+(ME&&ME.id||'')")
+      && appHtml.includes('class="cl-dot"') && appHtml.includes('const CHANGELOG=['), true);
+  check('空き時間を聞くページは回答内容の確認→送信する／修正する→空き時間を送信しました',
+    ['回答内容の確認', '送信する', '修正する', '空き時間を送信しました'].every((t) => fs.readFileSync(path.join(ROOT, 'free.html'), 'utf8').includes(t)), true);
   check('旧「新しく送る」の入口は残っていない',
     appHtml.includes('新しく送る</button>') || appHtml.includes('openSendPicker('), false);
   /* 「参加を確認する」は機能ごと撤去した（2026-08-19）。
@@ -1202,7 +1227,7 @@ async function testCalendarSubscription() {
   check('購読キーの再発行APIは無い', regen.status, 404);
   const feed = await fetch(BASE + '/api/calendar/' + 'x'.repeat(43) + '.ics');
   check('.ics の配信口も無い', feed.status, 404);
-  const appHtml = (await (await fetch(BASE + '/')).text()).replace(/\r\n/g, '\n');
+  const appHtml = (await (await fetch(BASE + '/', { headers: { Cookie: 'ops_design_v1=latest' } })).text()).replace(/\r\n/g, '\n');
   check('プロフィール設定から「カレンダーに登録」を消した',
     appHtml.includes("'カレンダーに登録'") || appHtml.includes('openCalendarSubscriptionSettings'), false);
 }
@@ -1992,9 +2017,10 @@ async function run() {
         && styleCss.includes('.danger-zone{'), true);
 
       /* 面談可能時間帯まわり。同じ画面で言葉が反転していたのを1つに揃えた */
-      check('受けられる時間の用語が統一されている',
+      check('予約できない日程の入力画面にメニューから移動できる',
         appHtml.includes('<h3>面談を受けられる時間</h3>')
-        && appHtml.includes('<h1 class="page">この日は受けられない時間</h1>')
+        && appHtml.includes('<h1 class="page">予約できない日程</h1>')
+        && appHtml.includes('data-tab="avset" onclick="sbGo(\'avset\')" title="予約できない日程"')
         && !appHtml.includes('面談できない時間を登録'), true);
       check('「ホームへ戻る」が二重に出ない',
         appHtml.includes('ホームに戻る'), false);
@@ -2099,6 +2125,23 @@ async function run() {
     const multiIv = (multiView.interviews || []).find((iv) => iv.intern_name === '複数希望 花子');
     check('送った並びのまま希望順が残る', (multiIv?.choices || []).join(','), `${third.iso},${second.iso}`);
 
+    /* 2026-10-29：リンクの ?d=分 を申請に固定して保存する。指定なし・不正値は保存せず、従来どおり30分扱い */
+    const fourth = await firstOpenSlot(staff3Token, 'u_e2e_staff3', [second.iso, third.iso]);
+    const durApply = await api(null, 'POST', `/api/apply/${staff3Token}`,
+      { name: '60分希望 太郎', staff_id: 'u_e2e_staff3', choices: [fourth.iso], duration_min: 60 });
+    check('所要時間つきのリンクから申請できる', durApply.status, 200);
+    const durApply2 = await api(null, 'POST', `/api/apply/${staff3Token}`,
+      { name: '不正時間 花子', staff_id: 'u_e2e_staff3', choices: [fourth.iso], duration_min: 45 });
+    check('明示した不正な所要時間は申請を拒否', durApply2.status, 400);
+    const durApply3 = await api(null, 'POST', `/api/apply/${staff3Token}`,
+      { name: '時間なし 次郎', staff_id: 'u_e2e_staff3', choices: [fourth.iso] });
+    check('所要時間なしの従来リンクでも申請できる', durApply3.status, 200);
+    const durView = await getDB(TOKENS.staff3);
+    const durOf = (n) => (durView.interviews || []).find((iv) => iv.intern_name === n);
+    check('60分指定は申請に固定して保存される', durOf('60分希望 太郎')?.request_duration_min, 60);
+    check('不正な所要時間の申請そのものを保存しない', durOf('不正時間 花子'), undefined);
+    check('指定なしは保存されない', durOf('時間なし 次郎')?.request_duration_min, undefined);
+
     const applied = await api(null, 'POST', `/api/apply/${token1}`,
       { name: '山田 太郎', staff_id: 'u_e2e_staff', choices: [firstOpen.iso], note: 'よろしくお願いします' });
     check('本名だけで面談を申請できる', applied.status, 200);
@@ -2162,6 +2205,34 @@ async function run() {
     check('確定しても本名は残る', fixed.json.interview?.intern_name, '山田 太郎');
 
     // 確定した枠は、次の人には出さない
+    /* 2026-10-29：自分の予定（受けられない時間）と重なる日時は、確認なしでは確定できず、
+       allow_overlap を付ければ確定できる。ほかの確定済み面談との二重確定は常に断る */
+    {
+      const ov = await api(TOKENS.staff, 'POST', `/api/apply/${token1}`,
+        { name: '重なり 花子', staff_id: 'u_e2e_staff', choices: [(await firstOpenSlot(token1, 'u_e2e_staff', [firstOpen.iso])).iso] });
+      const ovIso = (await getDB(TOKENS.staff)).interviews.find((iv) => iv.intern_name === '重なり 花子');
+      check('重なり確認用の申請ができる', ov.status === 200 && !!ovIso, true);
+      const dup = await api(TOKENS.staff, 'PATCH', `/api/interviews/${ovIso.id}`,
+        { status: 'fixed', confirmed_datetime: firstOpen.iso, allow_overlap: true, custom_time: true });
+      check('確定済みの面談との二重確定は、重なり許可でも断る', dup.status, 409);
+      const cur = await getDB(TOKENS.staff);
+      const day = new Date(ovIso.choices[0]);
+      const blockStart = new Date(day.getTime() - 5 * 60000).toISOString();
+      const blockEnd = new Date(day.getTime() + 20 * 60000).toISOString();
+      const nextDb = { ...cur, availability: { ...(cur.availability || {}), u_e2e_staff: { ...((cur.availability || {}).u_e2e_staff || {}), blocks: [{ id: 'ov_block', start: blockStart, end: blockEnd }] } }, _baseUpdatedAt: cur.updatedAt };
+      const put = await api(TOKENS.staff, 'PUT', '/api/db', nextDb);
+      check('自分の受けられない時間を登録できる', put.status, 200);
+      const noAllow = await api(TOKENS.staff, 'PATCH', `/api/interviews/${ovIso.id}`,
+        { status: 'fixed', confirmed_datetime: ovIso.choices[0] });
+      check('予定と重なる日時は、確認なしだと重なりの合図つきで断る', noAllow.status === 409 && noAllow.json.code === 'overlap', true);
+      const allow = await api(TOKENS.staff, 'PATCH', `/api/interviews/${ovIso.id}`,
+        { status: 'fixed', confirmed_datetime: ovIso.choices[0], allow_overlap: true });
+      check('重なりを承知で確定すれば確定できる', allow.status, 200);
+      // 後の検査に影響しないよう、足した不可時間を外す
+      const after = await getDB(TOKENS.staff);
+      const restore = { ...after, availability: { ...(after.availability || {}), u_e2e_staff: { ...((after.availability || {}).u_e2e_staff || {}), blocks: (((after.availability || {}).u_e2e_staff || {}).blocks || []).filter((b) => b.id !== 'ov_block') } }, _baseUpdatedAt: after.updatedAt };
+      check('足した不可時間を外せる', (await api(TOKENS.staff, 'PUT', '/api/db', restore)).status, 200);
+    }
     check('確定済みの枠はもう選べない',
       await slotStillOpen(token1, 'u_e2e_staff', firstOpen.iso), false);
     const retry = await api(null, 'POST', `/api/apply/${token1}`,
@@ -2332,9 +2403,11 @@ async function run() {
       check('担当スタッフの選択欄は無い', freeHtml.includes('担当スタッフ'), false);
       // 空いている時間を知るだけなので、希望順を並べ替える枠は出さない
       check('「選んだ希望日時」の並べ替えは無い', freeHtml.includes('選んだ希望日時'), false);
+      /* 2026-10-29：画像08に合わせ、説明は「空いている時間を選んでください」と表の上の1行、
+         コメントは畳んだ「コメントを追加（任意）」にした */
       check('カレンダーで選ぶ旨の説明がある',
-        freeHtml.includes('下のカレンダーから、<b>空いている時間帯</b>を選択してください。'), true);
-      check('その他（任意）の欄がある', freeHtml.includes('その他（任意）'), true);
+        freeHtml.includes('空いている時間を選んでください') && freeHtml.includes('タップで選択・長押ししてなぞるとまとめて選択'), true);
+      check('コメント（任意）の欄がある', freeHtml.includes('コメントを追加（任意）'), true);
       check('公開APIを叩いている', freeHtml.includes('/api/free/'), true);
     }
 
@@ -2503,6 +2576,26 @@ async function run() {
   }
 }
 
+async function testDesignPreference() {
+  const headers = { Cookie: 'ops_design_v1=latest' };
+  for (const [url, file] of [
+    ['/', 'index.html'], ['/staff', 'index.html'], ['/i/test', 'apply.html'],
+    ['/a/test', 'attendance.html'], ['/f/test', 'free.html'], ['/b/0123', 'book.html'],
+    ['/b/manage/0123', 'book.html'], ['/t/' + '0'.repeat(32), 'tally.html'],
+  ]) {
+    const legacy = await fetch(BASE + url);
+    const latest = await fetch(BASE + url, { headers });
+    check(url + ' 初期表示は旧版', await legacy.text() === fs.readFileSync(path.join(ROOT, 'server/legacy', file), 'utf8'), true);
+    check(url + ' 選択後は最新版', await latest.text() === fs.readFileSync(path.join(ROOT, file), 'utf8'), true);
+    check(url + ' Cookieごとの表示を共有キャッシュに保存しない',
+      [legacy.headers.get('vary'), legacy.headers.get('cache-control')], ['Cookie', 'private, no-store']);
+  }
+  check('未知の設定値は旧版', (await (await fetch(BASE, { headers: { Cookie: 'ops_design_v1=unknown' } })).text()).includes('data-design="legacy"'), true);
+  check('切り替えスクリプトの配信', (await fetch(BASE + '/design-switch.js')).status, 200);
+  check('旧版のCSSは専用URLで配信', (await fetch(BASE + '/legacy/style.css')).status, 200);
+  check('旧版配信も許可リスト外は404', (await fetch(BASE + '/legacy/index.html')).status, 404);
+}
+
 /* ---------- 実行 ---------- */
 const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ops-e2e-')), 'e2e.db');
 DB_PATH = dbPath;
@@ -2515,6 +2608,7 @@ try {
     console.log('BROWSER_URL=' + await createBrowserAttendanceFixture());
     await new Promise((resolve) => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
   } else {
+    await testDesignPreference();
     await testICalendarFormatting();
     await run();
     await testAttendance();

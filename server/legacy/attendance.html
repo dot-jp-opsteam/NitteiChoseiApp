@@ -1,0 +1,332 @@
+<!doctype html>
+<!-- 配色は常にライト。ログインしていない人が開くページなので、アプリ本体の
+     テーマ設定（localStorage）は読まない。apply.html と同じ扱いにしている -->
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#dbe9e7">
+<!-- OS側がダーク設定の端末だと、style.cssが届くまでの一瞬だけ
+     背景が黒く塗られてから切り替わって見える。それを防ぐ -->
+<meta name="color-scheme" content="light">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>出欠確認 | OPS日調</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Noto+Sans+JP:wght@400;700;900&display=swap">
+<!-- アプリ本体と同じスタイルシートを読む。このページ専用のCSSは持たない。
+     見た目をアプリの「受けた依頼」の画面とそろえるため、
+     部品（.sheet / .atl / .attb など）もアプリと同じものを使う -->
+<link rel="stylesheet" href="/legacy/style.css">
+</head>
+<body>
+<!-- アプリのシートの中身をそのまま再現する。ただしこれは重ねて出すシートではなく
+     1枚のページなので、掴みバーと「背景を押して閉じる」は付けない。
+     .atpage-in がボトムシートの制約を打ち消し、スマホでは画面いっぱいに広がる -->
+<div class="atpage">
+  <main class="sheet atpage-in" id="sheet">
+    <p class="page-sub">出欠確認を読み込んでいます…</p>
+  </main>
+</div>
+
+<script>
+'use strict';
+const TOKEN=location.pathname.split('/').filter(Boolean)[1]||'';
+const ATT_MARK={ok:'○',may:'△',no:'×'};
+/* 3状態の言い方はアプリ全体でこれ1組。index.html の ATT_LABEL と必ず同じにすること */
+const ATT_LABEL={ok:'参加',may:'未定',no:'不参加'};
+/* アプリ本体のアイコンは index.html の ICON 辞書にある。
+   このページで使うのは2つだけなので、同じ線画をここへ写している */
+const ICON={
+  back:'<path pathLength="1" d="M19.5 12h-15"/><path pathLength="1" d="m11 5.5-6.5 6.5 6.5 6.5"/>',
+  check:'<circle pathLength="1" cx="12" cy="12" r="9"/><path pathLength="1" d="m7.9 12.3 2.8 2.8 5.5-5.6"/>',
+};
+const ic=(name)=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]||''}</svg>`;
+let DATA=null;     // 公開APIから受け取った中身
+let SAVED=null;    // このブラウザで前に送った回答
+let PICKED={};     // 画面上で選んでいる回答 {候補id:'ok'|'may'|'no'}
+
+const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* 日時は日本時間で読む。アプリ本体は端末の時計で描いているが、
+   このページは海外から開かれることもあるので、時間帯を固定する。
+   国内で見るかぎり、出てくる文字はアプリと同じ */
+function jstParts(iso){
+  const p={};
+  new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric',
+    weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'})
+    .formatToParts(new Date(iso)).forEach(x=>{p[x.type]=x.value;});
+  return p;
+}
+const hm=(iso)=>{const p=jstParts(iso);return `${p.hour}:${p.minute}`;};
+/* 候補1件の見せ方。「9/12(土) 19:00〜21:00」。index.html の fmtSlot と同じ形。
+   end_time が無い候補（終了時刻の入力欄を廃止したあとの新しい候補）は開始だけになる */
+function fmtSlot(o){
+  if(!o)return '';
+  if(o.has_date===false)return `${o.start_time}${o.end_time?'〜'+o.end_time:''}（日程未定）`;
+  const p=jstParts(o.start);
+  const day=`${p.month}/${p.day}(${p.weekday})`;
+  if(o.has_time===false)return day;
+  return `${day} ${hm(o.start)}${o.end_time?'〜'+hm(o.end):''}`;
+}
+const todayYmd=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',
+  year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const nowHm=()=>new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Tokyo',
+  hour:'2-digit',minute:'2-digit'}).format(new Date());
+function dueDateLabel(value,time){
+  const parts=String(value||'').split('-');
+  if(parts.length!==3)return '';
+  return Number(parts[0])+'年'+Number(parts[1])+'月'+Number(parts[2])+'日'+(time?' '+time:'');
+}
+/* 時刻まで決めてある依頼はその時刻で締切。時刻の無い依頼（この欄ができる前に
+   送ったもの）は今までどおり、その日いっぱいは締切前として扱う */
+function dueBlock(r){
+  if(!r.due_date)return '';
+  const today=todayYmd();
+  const past=r.due_time
+    ? (r.due_date===today?nowHm()>r.due_time:r.due_date<today)
+    : r.due_date<today;
+  return `<div class="due-date due-detail${past?' due-overdue':''}">回答の締切：<b>${esc(dueDateLabel(r.due_date,r.due_time))}</b>${past?'<span>締切を過ぎています</span>':''}</div>`;
+}
+function initials(name){return (name||'?').slice(0,1);}
+
+async function call(path,opt){
+  const res=await fetch(path,opt);
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok)throw Object.assign(new Error(json.error||'通信に失敗しました'),{status:res.status});
+  return json;
+}
+function storageKey(){return DATA?`ops_attendance_respondent_${DATA.request.id}`:'';}
+function loadSaved(){
+  try{SAVED=JSON.parse(localStorage.getItem(storageKey())||'null');}catch(e){SAVED=null;}
+  PICKED={};
+  (SAVED&&Array.isArray(SAVED.answers)?SAVED.answers:[]).forEach(a=>{PICKED[a.option_id]=a.response;});
+}
+async function copyShareUrl(){
+  const input=document.getElementById('attUrl');
+  try{
+    await navigator.clipboard.writeText(input.value);
+    toast('URLをコピーしました');
+  }catch(e){
+    // 権限が下りない環境（古い端末など）では選択状態にして手でコピーしてもらう
+    input.focus();input.select();
+    toast('コピーできませんでした。選択された文字をコピーしてください');
+  }
+}
+/* 画面の下に一瞬だけ出す知らせ。アプリの toast と同じ見た目にする */
+let TOAST_T=null;
+function toast(msg){
+  let el=document.getElementById('toast');
+  if(!el){el=document.createElement('div');el.id='toast';document.body.appendChild(el);}
+  el.textContent=msg;el.classList.add('show');
+  clearTimeout(TOAST_T);
+  TOAST_T=setTimeout(()=>el.classList.remove('show'),2600);
+}
+
+/* 候補ごとの集計。誰が何を答えたかも一緒に持つ。
+   index.html の attendTally と同じ形（人の識別が user_id ではなく回答者idになるだけ） */
+function tallyOptions(){
+  const byOpt=new Map();
+  (DATA.request.options||[]).forEach(o=>byOpt.set(o.id,{ok:0,may:0,no:0,who:[]}));
+  (DATA.respondents||[]).forEach(p=>{
+    (p.answers||[]).forEach(a=>{
+      const t=byOpt.get(a.option_id);
+      if(!t||!ATT_MARK[a.response])return;
+      t[a.response]++;
+      t.who.push({name:p.name,response:a.response});
+    });
+  });
+  return byOpt;
+}
+/* ○がいちばん多い候補。同じ数なら全部に付ける（勝手にどれか1つを選ばない）。
+   index.html の attendBest と同じ数え方 */
+function bestOptions(tally){
+  let top=0;
+  (DATA.request.options||[]).forEach(o=>{const t=tally.get(o.id);if(t&&t.ok>top)top=t.ok;});
+  if(!top)return new Set();
+  return new Set((DATA.request.options||[]).filter(o=>tally.get(o.id).ok===top).map(o=>o.id));
+}
+
+function setSheet(html){
+  const s=document.getElementById('sheet');
+  // ページを描き直すときに重ね表示が取り残されないようにする
+  closeOption();
+  s.innerHTML=html;
+  // シートではなくページなので、スクロール位置はウインドウ側にある
+  window.scrollTo(0,0);
+}
+
+/* 出欠の集計と回答欄。index.html の openAttendDetail と同じ並び・同じクラスで組む */
+function render(){
+  const r=DATA.request;
+  const tally=tallyOptions();
+  const best=bestOptions(tally);
+  const opts=r.options||[];
+  const confirmedOpt=r.confirmed?opts.find(o=>o.id===r.confirmed):null;
+  const people=DATA.respondents||[];
+
+  const rows=opts.map(o=>{
+    const t=tally.get(o.id);
+    const isConf=r.confirmed===o.id;
+    const isBest=!r.confirmed&&best.has(o.id);
+    const tag=isConf?'<span class="tag ok">確定</span>'
+      :isBest?'<span class="tag ok">最有力</span>':'';
+    return `<div class="atl ${isConf?'on':''} ${isBest?'best':''}"
+      onclick="openOption('${esc(o.id)}')">
+      <span class="atl-d">${esc(fmtSlot(o))}${tag}</span>
+      ${['ok','may','no'].map(v=>`<span class="atl-c ${v} ${t[v]?'':'zero'}"
+        >${ATT_MARK[v]}<b>${t[v]}</b></span>`).join('')}
+    </div>`;
+  }).join('');
+
+  /* 確定した依頼には答えられない。アプリ側も確定後は回答欄を出さない */
+  const answerBlock=confirmedOpt?'':`
+    <div class="divider" style="margin:18px 0 14px"></div>
+    <label class="fl" for="respondentName">お名前<span class="req">*</span>
+      <span class="fl-sub">アカウント登録は不要です。同じブラウザからは、あとで回答を変更できます</span></label>
+    <input type="text" id="respondentName" maxlength="50" autocomplete="name"
+      value="${esc((SAVED&&SAVED.name)||'')}" placeholder="例：山田 太郎">
+    <label class="fl">あなたの回答<span class="fl-sub">候補ごとに選んでください</span></label>
+    <div class="attkeys">${['ok','may','no'].map(v=>
+      `<span class="attkey v-${v}">${ATT_MARK[v]}<b>${ATT_LABEL[v]}</b></span>`).join('')}</div>
+    <div class="attans" id="attans">${opts.map(o=>`
+      <div class="attrow">
+        <span class="atname">${esc(fmtSlot(o))}</span>
+        <span class="att3">${['ok','may','no'].map(v=>`
+          <button type="button" class="attb v-${v} ${PICKED[o.id]===v?'on':''}"
+            data-op="${esc(o.id)}" data-v="${v}"
+            aria-label="${esc(fmtSlot(o))} は${ATT_LABEL[v]}"
+            onclick="pick('${esc(o.id)}','${v}')">${ATT_MARK[v]}</button>`).join('')}</span>
+      </div>`).join('')}</div>
+    <div class="field-err" id="attErr" role="alert"></div>
+    <button class="btn pri block" style="margin-top:14px" id="attBtn"
+      onclick="submitAnswer()">${SAVED?'回答を更新する':'回答を送る'}</button>`;
+
+  setSheet(`<h3>${esc(r.subject)} <span class="tag" style="background:var(--brand-soft);color:var(--brand-d)">出欠</span></h3>
+    <p class="page-sub" style="margin-top:0">${esc(r.sender_name)}さん ・ 誰でも回答OK</p>
+    ${dueBlock(r)}
+    <label class="fl" style="margin-top:14px">誰でも回答できる共有URL
+      <span class="fl-sub">このURLを知っている人は、ログインせず回答と結果閲覧ができます</span></label>
+    <div class="urlrow">
+      <input id="attUrl" readonly value="${esc(location.href)}" onclick="this.select()">
+      <button class="btn sm" onclick="copyShareUrl()">コピー</button>
+    </div>
+    ${r.body?`<div style="white-space:pre-wrap;font-size:14px;line-height:1.7;margin-top:14px">${esc(r.body)}</div>`:''}
+    ${confirmedOpt?`<div class="hint" style="margin-top:14px">${ic('check')}<span>
+      <b>${esc(fmtSlot(confirmedOpt))}</b> で確定しました。${confirmedOpt.has_date===false?'日程が未定のため、カレンダーには登録していません。':'カレンダーに予定を追加しています。'}</span></div>`:''}
+    <label class="fl" style="margin-top:18px">出欠集計
+      <span class="fl-sub">日程を押すと、誰が何を答えたかが見られます</span></label>
+    <p class="atsum"><b>${people.length}名</b>が回答</p>
+    <div class="atlist">${rows}</div>
+    ${answerBlock}`);
+}
+
+/* 日程1件の回答状況。○△× ごとに名前を並べる。
+   誰があて先かをこのページは知らないので「まだ回答していない人」は出さない。
+   集計の上に重ねて出す。背後の集計が薄暗く透けるので、いま何の内訳を見ているかが
+   分かる。閉じ方は外側を押す・ESC・「出欠集計へ戻る」の3つ */
+function openOption(optId){
+  const r=DATA.request;
+  const o=(r.options||[]).find(x=>x.id===optId);
+  if(!o)return;
+  const who=tallyOptions().get(optId).who;
+  const groups=[
+    ['ok', ATT_MARK.ok,  who.filter(x=>x.response==='ok')],
+    ['may',ATT_MARK.may, who.filter(x=>x.response==='may')],
+    ['no', ATT_MARK.no,  who.filter(x=>x.response==='no')],
+  ];
+  // 0人の区分は見出しごと出さない
+  const blocks=groups.filter(g=>g[2].length).map(([v,ttl,list])=>`
+    <div class="atgrp">
+      <div class="atgh"><span class="atgm ${v}">${ttl}</span><b>${list.length}名</b></div>
+      <div class="atppl">${list.map(x=>`<span class="atp"><span class="av">${esc(initials(x.name))}</span>
+        <span>${esc(x.name)}</span></span>`).join('')}</div>
+    </div>`).join('');
+  setOptionModal(`<button type="button" class="atback" onclick="closeOption()">${ic('back')}出欠集計へ戻る</button>
+    <h3 id="atModalTitle">${esc(fmtSlot(o))} の回答状況</h3>
+    <p class="page-sub" style="margin-top:0">${esc(r.subject)}</p>
+    ${blocks||'<p class="atsum">まだ回答はありません</p>'}`);
+}
+
+/* 回答状況の重ね表示。開くたびに作り、閉じるときに丸ごと捨てる */
+function setOptionModal(html){
+  let m=document.getElementById('atModal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='atModal';
+    m.className='atmodal';
+    m.setAttribute('role','dialog');
+    m.setAttribute('aria-modal','true');
+    m.setAttribute('aria-labelledby','atModalTitle');
+    // カード自身を押したときは閉じない。外側（この入れ物）を押したときだけ閉じる
+    m.addEventListener('click',e=>{if(e.target===m)closeOption();});
+    document.body.appendChild(m);
+  }
+  // 読み上げとキー操作の起点をカードへ移す。戻るボタンに移すと、
+  // マウスで開いただけでも枠が光ってしまうので、カード自身を掴ませる
+  m.innerHTML=`<div class="atmodal-card" tabindex="-1">${html}</div>`;
+  document.body.classList.add('atmodal-lock');
+  m.firstElementChild.focus();
+}
+function closeOption(){
+  const m=document.getElementById('atModal');
+  if(m)m.remove();
+  document.body.classList.remove('atmodal-lock');
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeOption();});
+
+function pick(optId,v){
+  PICKED[optId]=v;
+  // 押した行のボタンだけ塗り替える。画面ごと作り直すと入力中の名前が消える
+  document.querySelectorAll(`#attans .attb[data-op="${CSS.escape(optId)}"]`).forEach(b=>{
+    b.classList.toggle('on',b.dataset.v===v);
+  });
+}
+
+async function submitAnswer(){
+  const err=document.getElementById('attErr');
+  const btn=document.getElementById('attBtn');
+  const input=document.getElementById('respondentName');
+  err.classList.remove('show');
+  const name=input.value.trim();
+  if(!name){err.textContent='お名前を入力してください';err.classList.add('show');input.focus();return;}
+  const answers=[];
+  for(const o of DATA.request.options||[]){
+    if(!PICKED[o.id]){err.textContent='すべての候補に答えてください';err.classList.add('show');return;}
+    answers.push({option_id:o.id,response:PICKED[o.id]});
+  }
+  const label=btn.textContent;
+  btn.disabled=true;btn.textContent='送信中…';
+  try{
+    const out=await call(`/api/attendance/${encodeURIComponent(TOKEN)}/response`,
+      {method:'PUT',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({name,answers,respondent_key:(SAVED&&SAVED.key)||''})});
+    SAVED={key:out.respondent_key,id:out.respondent.id,name,answers};
+    localStorage.setItem(storageKey(),JSON.stringify(SAVED));
+    DATA=await call(`/api/attendance/${encodeURIComponent(TOKEN)}`);
+    render();
+    toast('回答を送りました');
+  }catch(e){
+    err.textContent=e.message;err.classList.add('show');
+    btn.disabled=false;btn.textContent=label;
+  }
+}
+
+async function start(){
+  try{
+    DATA=await call(`/api/attendance/${encodeURIComponent(TOKEN)}`);
+    loadSaved();
+    render();
+  }catch(e){
+    setSheet(`<h3>出欠確認を開けませんでした</h3>
+      <p class="page-sub" style="margin-top:4px">${esc(e.message)}</p>`);
+  }
+}
+start();
+</script>
+</body>
+</html>

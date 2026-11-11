@@ -58,6 +58,13 @@
     padding:1px 6px;border-radius:5px;background:var(--brand-soft);color:var(--brand-d)}
   /* 選択済みの時間は補足ではなく希望日時の本体なので、日付と同じ濃い本文色にする */
   .selsummary .sr .st .stime{font-size:13px;color:var(--ink)}
+  /* 並べ替えは持ち手だけ。本文上の通常スクロールと競合させない。 */
+  .selsummary .sr{touch-action:pan-y;cursor:default}
+  .selsummary .sr .st{flex:1}
+  .ap-rank-handle{flex:none;touch-action:none;cursor:grab;border:0;background:transparent;color:var(--sub);font-size:23px;padding:7px 4px;min-width:28px}
+  .ap-rank-handle:focus-visible{outline:2px solid var(--brand);border-radius:4px}
+  .ap-send-error{color:var(--bad);font-size:13px;overflow-wrap:anywhere}
+  .selsummary .sr.ap-unavailable{border-color:var(--bad)}
 </style>
 </head>
 <body>
@@ -83,6 +90,12 @@
 
 // URLは /i/<合言葉> の形。末尾スラッシュが付いていても拾えるようにする
 var TOKEN = (location.pathname.split('/').filter(Boolean)[1] || '');
+/* リンクで指定された面談の長さ（?d=60 など。分）。画面には出さず、送るときにそのまま添える。
+   明示された値をそのまま送り、許可値かどうかはサーバーで確かめる */
+var REQ_DURATION = (function(){
+  var params=new URLSearchParams(location.search||'');
+  return params.has('d')?params.get('d'):null;
+})();
 
 var APPLY = {
   name: '',          // 入力された本名
@@ -97,6 +110,9 @@ var APPLY = {
   allDay: {},        // 「終日OK」になっている日 {'2026-08-06':true}
   note: '',
   sending: false,
+  pending: null,
+  unavailable: [],
+  sendError: '',
   /* 画面の段階。'form'（書く）→'confirm'（確かめる）→'done'（控えを見る）。
      送ってしまうと取り消せないので、あいだに必ず確認を挟む */
   step: 'form',
@@ -237,7 +253,7 @@ function ic(name,cls){
 function api(path,opts){
   return fetch(path,opts).then(function(r){
     return r.json().catch(function(){return {};}).then(function(body){
-      if(!r.ok)throw new Error(body.error||'通信に失敗しました');
+      if(!r.ok){var error=new Error(body.error||'通信に失敗しました');error.status=r.status;error.unavailable=body.unavailable_choices||[];throw error;}
       return body;
     });
   });
@@ -383,6 +399,12 @@ function goConfirm(){
   }
   if(!APPLY.staff){toast(APPLY.fixedStaff?'担当スタッフの情報を読み直してください':'担当スタッフを選んでください');return;}
   if(!APPLY.sel.length){toast('希望する枠を選んでください');return;}
+  if((APPLY.unavailable||[]).some(function(iso){return APPLY.sel.indexOf(iso)>=0;})){
+    toast('選べなくなった時間を外してから確認してください');
+    var target=document.querySelector('.ap-unavailable');if(target)target.scrollIntoView({block:'center'});
+    return;
+  }
+
   APPLY.step='confirm';
   render();
   window.scrollTo(0,0);
@@ -398,6 +420,7 @@ function viewConfirm(){
       +'<span class="brand">'+esc(sum.branch)+'</span></div>'
     +'<p class="page-sub">まだ送信していません。下の内容でよければ「この内容で申請する」を押してください。</p>'
     +'<div class="card"><div class="cb">'
+      +(APPLY.sendError?'<p class="ap-send-error" role="alert">'+esc(APPLY.sendError)+'</p>':'')
       +summaryCardHTML(sum,AVAIL_NOTE_SELF)
       +'<button class="btn pri block" style="margin-top:22px" id="applybtn"'
         +(APPLY.sending?' disabled':'')+' onclick="submitApply()">'
@@ -601,6 +624,7 @@ function selSummaryBlock(groups){
   return '<div id="selwrap"'+(groups.length?'':' hidden')+'><div class="divider"></div>'
     +'<label class="fl"><span id="sellabel">選んだ希望日時（空いている時間・'+groups.length+'件）</span>'
     +'<span class="fl-sub">上から第1希望です。ドラッグで並べ替えられます</span></label>'
+    +(APPLY.sendError?'<p class="ap-send-error" role="alert">'+esc(APPLY.sendError)+'</p>':'')
     +'<div class="selsummary" id="selsummary">'+selSummaryRows()+'</div>'
     +'<p class="fine" style="margin-top:8px">'+esc(AVAIL_NOTE_SELF)+'</p></div>';
 }
@@ -615,7 +639,7 @@ function syncReq(){
 }
 function setApplyStaff(id){
   if(APPLY.fixedStaff)return;
-  APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];APPLY.grid=null;
+  APPLY.staff=id;APPLY.weekOffset=0;APPLY.sel=[];APPLY.grid=null;APPLY.unavailable=[];APPLY.sendError='';
   syncReq();loadGrid();
 }
 function setApplyWeek(delta){
@@ -850,13 +874,15 @@ function rankCls(n){return 'cn '+rankOnly(n);}
 function selSummaryRows(){
   return applyGroups().map(function(g,i){
     var csv=g.slots.join(',');
-    return '<div class="sr" data-slots="'+esc(csv)+'" onpointerdown="selDragStart(event,this)">'
+    return '<div class="sr'+(g.slots.some(function(iso){return (APPLY.unavailable||[]).indexOf(iso)>=0;})?' ap-unavailable':'')+'" data-slots="'+esc(csv)+'">'
       +'<span class="'+rankCls(i+1)+'">第'+(i+1)+'希望</span>'
       +'<span class="st">'
         +'<span class="sday">'+esc(fmtDay(g.slots[0]))
           +(g.allDay?'<span class="stag">終日OK</span>':'')+'</span>'
         +'<span class="stime">'+esc(fmtRanges(g.slots))+'</span>'
       +'</span>'
+      +'<button type="button" class="ap-rank-handle" aria-label="第'+(i+1)+'希望の並べ替え" title="ドラッグで並べ替え・上下キーでも移動"'
+        +' onpointerdown="selDragStart(event,this.parentElement)" onkeydown="selRankKey(event,'+i+')">⠿</button>'
       +'<span class="x" onpointerdown="event.stopPropagation()"'
         +' onclick="removeSlots(\''+esc(csv)+'\')">×</span>'
     +'</div>';
@@ -864,8 +890,16 @@ function selSummaryRows(){
 }
 /* ---- 一覧をドラッグして希望順を入れ替える ----
    持ち上げた行は複製して指に付いてくるようにし、元の行は薄いまま列に残して
-   入れ替え先を示す。長押しを待たずに始める方式なので、行には CSS で
+   入れ替え先を示す。長押しを待たずに始める方式なので、持ち手には CSS で
    touch-action:none を当ててブラウザ既定の縦スクロールに指を取られないようにしている */
+function selRankKey(e,i){
+  if(e.key!=='ArrowUp'&&e.key!=='ArrowDown')return;
+  e.preventDefault();var groups=applyGroups(),j=i+(e.key==='ArrowUp'?-1:1);
+  if(j<0||j>=groups.length)return;
+  var moved=groups.splice(i,1)[0];groups.splice(j,0,moved);
+  APPLY.sel=groups.reduce(function(acc,g){return acc.concat(g.slots);},[]);
+  refreshApplyLive();var handle=document.querySelectorAll('.ap-rank-handle')[j];if(handle)handle.focus();
+}
 var SELDRAG=null;
 function selDragStart(e,row){
   if(e.button!==undefined&&e.button!==0)return;
@@ -956,7 +990,7 @@ function selDragEnd(){
 /* ---------- 申請 ---------- */
 /* 確認画面の「この内容で申請する」から呼ぶ。ここではじめてサーバーへ送る */
 function submitApply(){
-  if(APPLY.sending)return;
+  if(APPLY.sending||APPLY.step==='done')return;
   var sum=applySummary();
   if(!sum.name||!APPLY.staff||!APPLY.sel.length){
     // 確認画面へ進む時点で確かめてあるので、ふつうはここへ来ない
@@ -971,13 +1005,21 @@ function submitApply(){
   var groups=applyGroups();
   var choices=groups.reduce(function(a,g){return a.concat(g.slots);},[]);
   var allDay=groups.filter(function(g){return g.allDay;}).map(function(g){return g.key;});
-  APPLY.sending=true;render();
+  var payload={name:sum.name,staff_id:APPLY.fixedStaff?undefined:APPLY.staff,choices:choices,
+    preference_groups:groups.map(function(g){return {slots:g.slots};}),
+    all_day:allDay,note:sum.note,choice_mode:'slot',duration_min:REQ_DURATION===null?undefined:REQ_DURATION};
+  var fingerprint=JSON.stringify(payload);
+  if(!APPLY.pending||APPLY.pending.fingerprint!==fingerprint){
+    var bytes=new Uint8Array(24);crypto.getRandomValues(bytes);
+    APPLY.pending={fingerprint:fingerprint,key:Array.from(bytes).map(function(b){return b.toString(16).padStart(2,'0');}).join('')};
+  }
+  payload.submission_key=APPLY.pending.key;
+  APPLY.sendError='';APPLY.sending=true;render();
 
   api('/api/apply/'+encodeURIComponent(TOKEN),{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:sum.name,staff_id:APPLY.fixedStaff?undefined:APPLY.staff,choices:choices,
-      all_day:allDay,note:sum.note,choice_mode:'slot'}),
+    body:JSON.stringify(payload),
   }).then(function(data){
     APPLY.sending=false;
     /* 控えは送った時点の内容で固める。あとから画面を触っても変わらないようにするため。
@@ -990,12 +1032,14 @@ function submitApply(){
     window.scrollTo(0,0);
   }).catch(function(e){
     APPLY.sending=false;
-    /* 枠が埋まった場合は、古い枠を出したままにすると同じ失敗を繰り返す。
-       入力画面へ戻して取り直してから、何が起きたかを伝える */
-    APPLY.sel=[];
-    APPLY.step='form';
-    toast(e.message);
-    loadGrid();
+    APPLY.sendError=e.message||'通信に失敗しました。入力は保持しています。もう一度お試しください';
+    if(e.status===409&&e.unavailable.length){
+      APPLY.unavailable=e.unavailable;
+      APPLY.step='form';
+      loadGrid();
+    }else render();
+    toast(APPLY.sendError);
+
   });
 }
 // 控えに出す「2026/8/10(月) 14:23」

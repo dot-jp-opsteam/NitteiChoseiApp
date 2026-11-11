@@ -17,6 +17,25 @@ export async function runPersonalApplyTests({api,tokens,check}){
   check('担当者IDを送らなくても申請できる',sent.status,200);
   const database=await api(tokens.staff,'GET','/api/db');
   check('面談はURLの所有者に届く',(database.json.interviews||[]).find(item=>item.intern_name==='担当固定の申請検査')?.staff_id,'u_e2e_staff');
+  // 第2回：新しい申請は候補の境界・希望順を明示し、送信再試行を編集にしない。
+  const candidates=(grid.json.grid||[]).flat().filter(cell=>cell.state==='ok');
+  const first=candidates[0].iso,second=candidates.find(cell=>cell.iso!==first).iso;
+  const payload={name:'順位と再送検査',choices:[second,first],choice_mode:'slot',
+    preference_groups:[{slots:[second]},{slots:[first]}],duration_min:60,submission_key:'sol_retry_key_0000000000000001'};
+  for(const value of [0,45,300,'invalid',null])check('明示した不正所要時間を拒否 '+value,(await api(null,'POST',`/api/apply/${token}`,{...payload,duration_min:value})).status,400);
+  check('重複した候補は登録しない',(await api(null,'POST',`/api/apply/${token}`,{...payload,preference_groups:[{slots:[first]},{slots:[first]}]})).status,400);
+  check('候補とchoicesの食い違いを拒否',(await api(null,'POST',`/api/apply/${token}`,{...payload,preference_groups:[{slots:[first]}]})).status,400);
+  const retryResults=await Promise.all(Array.from({length:5},()=>api(null,'POST',`/api/apply/${token}`,payload)));
+  check('同時再送がすべて成功',retryResults.every(r=>r.status===200),true);
+  const after=await api(tokens.staff,'GET','/api/db');
+  const saved=after.json.interviews.filter(iv=>iv.intern_name===payload.name);
+  check('同時再送でも申請は1件',saved.length,1);
+  check('候補ごとの順位をそのまま保持',saved[0]?.preference_groups?.map(g=>g.slots[0]),[second,first]);
+  check('申請に所要時間60分を固定',saved[0]?.request_duration_min,60);
+  check('同じ再送キーで内容を編集できない',(await api(null,'POST',`/api/apply/${token}`,{...payload,name:'書換え不可'})).status,409);
+  check('候補からはみ出す60分は拒否',(await api(tokens.staff,'PATCH','/api/interviews/'+saved[0].id,{status:'fixed',confirmed_datetime:first,preference_index:1,expected_status:'applied'})).status,400);
+  check('他人は確定不可',(await api(tokens.staff3,'PATCH','/api/interviews/'+saved[0].id,{status:'fixed',confirmed_datetime:first,preference_index:1,expected_status:'applied'})).status,403);
+  check('公開本人編集APIを設けない',(await api(null,'PATCH',`/api/apply/${token}`,payload)).status,404);
   const otherToken=String(other.json.url||'').split('/i/')[1];
   const regen=await api(tokens.staff,'POST','/api/staff/intern-invite-url/regenerate');
   check('本人は自分のリンクを再発行できる',regen.status,200);

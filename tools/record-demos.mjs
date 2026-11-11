@@ -351,6 +351,7 @@ try {
     const ctx = await browser.newContext({
       viewport: { width: W, height: H }, deviceScaleFactor: S, locale: 'ja-JP', timezoneId: 'Asia/Tokyo',
     });
+    await ctx.addCookies([{ name: 'ops_design_v1', value: 'latest', url: BASE }]);
     await ctx.addInitScript(CURSOR_JS);
     const page = await ctx.newPage();
     page.on('pageerror', (e) => console.warn(`  ${name}: ページのエラー ${e.message}`));
