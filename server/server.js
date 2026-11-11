@@ -3424,7 +3424,7 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
   if (!['staff', 'branch_admin', 'admin'].includes(actor.role)) {
     return res.status(403).json({ error: '面談を変更する権限がありません' });
   }
-  const { status, confirmed_datetime, duration_min, allow_overlap, preference_index, custom_time, expected_status } = req.body || {};
+  const { status, confirmed_datetime, duration_min, allow_overlap, preference_index, custom_time, expected_status, fixed_30_min } = req.body || {};
   if (!['fixed', 'failed', 'applied'].includes(status)) {
     return res.status(400).json({ error: '指定された状態が不正です' });
   }
@@ -3452,13 +3452,18 @@ app.patch('/api/interviews/:id', requireAuth, async (req, res) => {
     if (old.cancellation_pending && status === 'fixed') return res.status(409).json({ error: 'キャンセル処理が途中です。もう一度キャンセルを実行して完了してください' });
     const startMs = new Date(confirmed_datetime || '').getTime();
     if (status === 'fixed' && (!Number.isFinite(startMs) || startMs <= Date.now())) return res.status(400).json({ error: '未来の日時を指定してください' });
-    const requestedDuration = validRequestDuration(old.request_duration_min) ? Number(old.request_duration_min) : 30;
+    // 最新版の確定画面は希望時間帯から30分を選ぶ。旧版からの確定は従来の所要時間で扱う。
+    const requestedDuration = fixed_30_min === true
+      ? interviewPreferences.durationMin
+      : (validRequestDuration(old.request_duration_min) ? Number(old.request_duration_min) : 30);
     const newDuration = duration_min !== undefined ? duration_min : (old.status === 'applied' ? requestedDuration : (Number(old.duration_min) || 30));
     if (old.status === 'fixed' && status === 'fixed' && startMs === new Date(old.confirmed_datetime).getTime() && newDuration === (Number(old.duration_min) || 30)) return res.json({ ok: true, interview: old });
     if (expected_status === 'applied' && old.status !== 'applied') return res.status(409).json({ error: 'この申請はすでに処理されています。最新の状態を確認してください', code: 'state_changed' });
     let confirmedPreference = null;
     if (status === 'fixed' && old.status === 'applied') {
-      if (newDuration !== requestedDuration) return res.status(400).json({ error: '申請に保存された所要時間で確定してください' });
+      if (newDuration !== requestedDuration) return res.status(400).json({
+        error: fixed_30_min === true ? '面談は30分で確定してください' : '申請に保存された所要時間で確定してください',
+      });
       if (custom_time !== true) {
         const groups = interviewPreferences.groups(old);
         const index = preference_index === undefined ? groups.findIndex(g => interviewPreferences.fits(g, confirmed_datetime, newDuration)) : preference_index;

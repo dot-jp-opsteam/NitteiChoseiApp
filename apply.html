@@ -90,12 +90,6 @@
 
 // URLは /i/<合言葉> の形。末尾スラッシュが付いていても拾えるようにする
 var TOKEN = (location.pathname.split('/').filter(Boolean)[1] || '');
-/* リンクで指定された面談の長さ（?d=60 など。分）。画面には出さず、送るときにそのまま添える。
-   明示された値をそのまま送り、許可値かどうかはサーバーで確かめる */
-var REQ_DURATION = (function(){
-  var params=new URLSearchParams(location.search||'');
-  return params.has('d')?params.get('d'):null;
-})();
 
 var APPLY = {
   name: '',          // 入力された本名
@@ -1007,7 +1001,7 @@ function submitApply(){
   var allDay=groups.filter(function(g){return g.allDay;}).map(function(g){return g.key;});
   var payload={name:sum.name,staff_id:APPLY.fixedStaff?undefined:APPLY.staff,choices:choices,
     preference_groups:groups.map(function(g){return {slots:g.slots};}),
-    all_day:allDay,note:sum.note,choice_mode:'slot',duration_min:REQ_DURATION===null?undefined:REQ_DURATION};
+    all_day:allDay,note:sum.note,choice_mode:'slot'};
   var fingerprint=JSON.stringify(payload);
   if(!APPLY.pending||APPLY.pending.fingerprint!==fingerprint){
     var bytes=new Uint8Array(24);crypto.getRandomValues(bytes);

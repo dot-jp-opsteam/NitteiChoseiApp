@@ -6,13 +6,13 @@ async function json(path,method='GET',body){const r=await fetch(BASE+path,{metho
 export async function runInterviewFinalBrowserTests(browser){
  let checks=0;const ok=(value,message)=>{assert.ok(value,message);checks++;};
  fs.mkdirSync('.superpowers/sol-review',{recursive:true});
- const db=await json('/api/db'),sample=db.interviews.find(i=>i.intern_name==='画面確認 60分');assert.ok(sample);
+ const db=await json('/api/db'),sample=db.interviews.find(i=>i.intern_name==='画面確認 希望時間帯');assert.ok(sample);
  const invite=await json('/api/staff/intern-invite-url');
  for(const width of [1280,320,390,430]){
   const context=await browser.newContext({viewport:{width,height:1100},isMobile:width<500,hasTouch:width<500,timezoneId:'Asia/Tokyo'});
  await context.addCookies([{name:'ops_design_v1',value:'latest',url:BASE}]);
   try{const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
-   await page.goto(BASE+'/__local-review');await page.getByRole('button',{name:'画面確認 60分さんの面談申請を開く',exact:true}).click();
+   await page.goto(BASE+'/__local-review');await page.getByRole('button',{name:'画面確認 希望時間帯さんの面談申請を開く',exact:true}).click();
    await page.locator('.ivc-page').waitFor();await page.locator('#ivc-confirm:not([disabled])').waitFor();
    ok(await page.locator('.ivc-date').count()===2,'日付カード2件');
    ok(await page.locator('.ivc-date').first().locator('.ivc-date-time').count()===2,'同日の希望を2行表示');
@@ -20,7 +20,8 @@ export async function runInterviewFinalBrowserTests(browser){
    await page.locator('.ivc-band[data-index="1"]').press('Enter');
    ok((await page.locator('.ivc-confirm-panel').innerText()).includes('第2希望'),'時間帯の順位を表示');
    const values=await page.locator('#ivc-start option').evaluateAll(list=>list.map(o=>o.value));
-   ok(values.every(s=>new Date(s).getTime()+3600000<=new Date(sample.preference_groups[1].slots.at(-1)).getTime()+1800000),'60分が候補内に収まる');
+   ok(values.length===4&&values.every((slot,index)=>slot===sample.preference_groups[1].slots[index]),'2時間の希望を4つの30分枠から選べる');
+   ok((await page.locator('.ivc-duration').innerText()).includes('30分'),'面談の所要時間は30分');
    await page.locator('#ivc-start').selectOption(values.at(-1));
    ok((await page.locator('#ivc-end').innerText())==='18:00','終了は自動計算');
    await page.locator('.ivc-date').nth(1).click();await page.locator('#ivc-confirm:not([disabled])').waitFor();
@@ -58,7 +59,7 @@ export async function runInterviewFinalBrowserTests(browser){
   let writes=0,lost=true;await page.route('**/api/interviews/'+iv.id,async route=>{writes++;if(lost){lost=false;await route.fetch();await route.abort();}else await route.continue();});
   await page.locator('#ivc-confirm').click();await page.locator('#ivc-save-error').filter({hasText:'通信に失敗'}).waitFor();
   ok((await page.locator('.ivc-confirm-panel').innerText()).includes('第2希望'),'確定失敗でも選択を保持');await page.locator('#ivc-confirm').click();await page.getByText('面談日程を確定しました',{exact:true}).waitFor();
-  const saved=(await json('/api/db')).interviews.find(i=>i.id===iv.id);ok(saved.confirmed_preference===2&&saved.duration_min===60,'確定後にも順位と長さを保持');ok(writes===2,'失敗と再試行の2リクエストだけ');
+  const saved=(await json('/api/db')).interviews.find(i=>i.id===iv.id);ok(saved.confirmed_preference===2&&saved.duration_min===30,'確定後にも順位と30分を保持');ok(writes===2,'失敗と再試行の2リクエストだけ');
   const race=await fetch(BASE+'/api/interviews/'+iv.id,{method:'PATCH',headers,body:JSON.stringify({status:'fixed',confirmed_datetime:sample.choices[0],preference_index:0,expected_status:'applied'})});ok(race.status===409,'処理済みの申請を別日時で上書きしない');
  }finally{await context.close();}
  // 公開申請：現行のカレンダー・順位の持ち手を維持。失敗時も選択を失わない。

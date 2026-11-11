@@ -42,5 +42,5 @@
     });
     return runs.sort(function(a,b){return Math.min.apply(null,a.slots.map(function(s){return first.get(s);}))-Math.min.apply(null,b.slots.map(function(s){return first.get(s);}));});
   }
-  return {normalize:normalize,segments:segments,fits:fits,conflicts:conflicts,groups:groups};
+  return {durationMin:30,normalize:normalize,segments:segments,fits:fits,conflicts:conflicts,groups:groups};
 });

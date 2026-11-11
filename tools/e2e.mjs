@@ -354,15 +354,13 @@ async function createBrowserAttendanceFixture() {
   const available=(grid.json.grid||[]).map(col=>col.filter(c=>c.state==='ok').map(c=>c.iso)).filter(col=>col.length>=12);
   if(available.length<2)throw Error('検証用の空き時間が不足しています');
   const groups=[{slots:available[0].slice(4,12)},{slots:available[0].slice(14,18)},{slots:available[1].slice(4,12)}].filter(g=>g.slots.length);
-  for(const duration of [30,60]){
-    const payload={name:`画面確認 ${duration}分`,choices:groups.flatMap(g=>g.slots),preference_groups:groups,choice_mode:'slot',duration_min:duration};
-    const response=await api(null,'POST',`/api/apply/${token}`,payload);if(response.status!==200)throw Error(JSON.stringify(response.json));
-  }
+  const payload={name:'画面確認 希望時間帯',choices:groups.flatMap(g=>g.slots),preference_groups:groups,choice_mode:'slot'};
+  const response=await api(null,'POST','/api/apply/' + token,payload);if(response.status!==200)throw Error(JSON.stringify(response.json));
   // 応募後に自分の予定が入った例。外部カレンダーへの接続はない。
-  const meeting=await api(null,'POST',`/api/apply/${token}`,{name:'検証用の打ち合わせ',choices:groups[0].slots.slice(2,4),choice_mode:'slot',duration_min:60});
+  const meeting=await api(null,'POST',`/api/apply/${token}`,{name:'検証用の打ち合わせ',choices:groups[0].slots.slice(2,4),choice_mode:'slot'});
   if(meeting.status===200){const db=await getDB(TOKENS.staff),iv=db.interviews.find(i=>i.intern_name==='検証用の打ち合わせ');await api(TOKENS.staff,'PATCH','/api/interviews/'+iv.id,{status:'fixed',confirmed_datetime:groups[0].slots[2]});}
   console.log('STAFF_REVIEW_URL='+BASE+'/__local-review');
-  console.log('APPLY_REVIEW_URL='+invite.json.url+'?d=60');
+  console.log('APPLY_REVIEW_URL='+invite.json.url);
   console.log('INTERVIEW_REVIEW_IDS='+JSON.stringify((await getDB(TOKENS.staff)).interviews.filter(i=>String(i.intern_name||'').startsWith('画面確認')).map(i=>({id:i.id,name:i.intern_name}))));
   return made.json.request.public_url;
 }
@@ -699,10 +697,9 @@ async function testAttendance() {
   /* 2026-10-09：面談申請リンクを目立たせた。ホームに、色の縁の入口とコピーボタン。
      同じ日に「面談一覧・時間」にも置いたが、置かないでほしいとの指示で外した */
   check('面談申請リンクは色の縁の入口で、その場でコピーできる（ホームだけ）',
-    /* 2026-10-29：所要時間（30分・60分・その他）を選んでコピー。リンクに ?d=分 を付けて渡す */
     appHtml.includes('<section class="hm-link" data-demo="apply">')
       && appHtml.includes('onclick="hmCopyApplyLink(this)"')
-      && appHtml.includes("'d='+min")
+      && appHtml.includes('const url=data.url;') && !appHtml.includes('hmSetDur(')
       && appHtml.includes('return viewHomeStaff();'), true);
   /* カレンダー連携の入口は左メニューだけ。ホームの入口タイルにもプロフィールにも置かない */
   check('カレンダー連携の入口は左メニューだけにある',
