@@ -3077,3 +3077,97 @@ body:has(.scrim.open .ivc-page){overflow:hidden}
 
 .ivc-band{display:block}.ivc-band-copy{position:absolute;left:8px;right:3px;text-align:left}.ivc-confirm-panel .btn.pri{background:#075bdb;border-color:#075bdb;color:#fff}.ivc-band-copy>span{font-size:12px}
 @media(max-width:760px){.ivc-band-copy{left:5px}.ivc-band-copy>span{font-size:11px}}
+
+/* スタッフ画面の共通デザイン。公開回答ページはそれぞれの配色を使う。 */
+:root:has(#app){
+  --bg:#121d30; --panel:#192840; --panel2:#22344e; --line:#354963; --line2:#2b3d55;
+  --ink:#edf3fb; --sub:#b5c3d7; --mut:#94a6bf; --disabled:#62748c;
+  --brand:#8ab6ff; --brand-d:#b0ceff; --brand-ink:#b0ceff;
+  --brand-soft:rgba(138,182,255,.13); --brand-lite:#bdd6ff;
+  --line-h:#8ab6ff; --hint-line:#496b9f; --on-fill:#14284b;
+  --glass:rgba(25,40,64,.96); --aurora-op:0; --radius:8px;
+  --shadow:none; --glow:0 0 0 1px var(--brand-soft);
+  --chip:var(--panel2); --chip-ink:var(--sub);
+  --toast-bg:#22344e; --hex-line:#496b9f;
+  --acc1:#8ab6ff; --acc1-ink:#b0ceff; --acc1-soft:#223c60; --acc1-line:#496b9f;
+  --ok:#8ab6ff; --ok-ink:#b0ceff; --ok-soft:#223c60;
+}
+:root[data-theme="light"]:has(#app){
+  --bg:#ffffff; --panel:#ffffff; --panel2:#f5f7fa; --line:#dfe5ee; --line2:#edf0f5;
+  --ink:#14284b; --sub:#52627b; --mut:#66758b; --disabled:#a8b4c5;
+  --brand:#1565d8; --brand-d:#104fae; --brand-ink:#104fae;
+  --brand-soft:#edf3fd; --brand-lite:#d4e4fc;
+  --line-h:#8aafe8; --hint-line:#b9cff0; --on-fill:#ffffff;
+  --glass:rgba(255,255,255,.96); --toast-bg:#14284b; --hex-line:#b9cff0;
+  --acc1:#1565d8; --acc1-ink:#104fae; --acc1-soft:#edf3fd; --acc1-line:#b9cff0;
+  --ok:#3567aa; --ok-ink:#28558e; --ok-soft:#edf3fd;
+  --mock-bg:#f5f7fa; --mock-line:#dfe5ee; --mock-ink:#52627b;
+  --sb-bg:#f7f9fc; --sb-ink:#14284b; --sb-sub:#52627b; --sb-mut:#66758b;
+  --sb-line:#e3e8ef; --sb-hover:#edf3fd; --sb-active-bg:#e7effc;
+  --sb-active-ink:#104fae; --sb-accent:#1565d8;
+}
+:root:has(#app) #sidebar .sb-brand{color:var(--sb-ink)}
+:root:has(#app) .hm{
+  --hm-deep:var(--brand); --hm-deep-ink:var(--on-fill); --hm-navy:var(--ink);
+  --hm-card:var(--panel); --hm-line:var(--line); --hm-mut:var(--sub);
+}
+#app .view{
+  --a:var(--brand); --a-ink:var(--brand-ink); --a-soft:var(--brand-soft); --a-line:var(--hint-line);
+  color:var(--ink); font-size:13px; line-height:1.6;
+}
+#app main .view:not(:has(.hm)){max-width:1180px;margin:0 auto}
+#app main h1.page{
+  color:var(--ink);font-size:22px;font-weight:700;letter-spacing:-.02em;
+  line-height:1.4;margin:16px 0 8px;overflow-wrap:anywhere;
+}
+#app main .page-sub{color:var(--sub);font-size:13px;max-width:80ch;line-height:1.8;margin-bottom:20px}
+#app main .card{
+  border:1px solid var(--line);border-radius:8px;box-shadow:none;background:var(--panel);
+}
+#app main .card::before{display:none}
+#app main .card .ch{border-bottom:1px solid var(--line2)}
+#app main .empty{
+  padding:40px 20px;border:1px dashed var(--line);border-radius:8px;
+  background:var(--panel2);color:var(--sub);margin-top:16px;
+}
+#app main .empty .ei{color:var(--mut);opacity:1}
+#app .hm-stat.s3 .hm-stat-i,#app .hm-badge.ok{background:var(--brand-soft);color:var(--brand-ink)}
+#app .btn{border-radius:6px;font-weight:600;transition:background .2s,border-color .2s}
+#app .btn.pri:hover{box-shadow:none}
+#app .btn.pri::after{display:none}
+#app .btn:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+#app input:focus,#app select:focus,#app textarea:focus{box-shadow:0 0 0 3px var(--brand-soft)}
+#app main .chipfilter{gap:8px}
+#app main .chipfilter button{border-radius:6px;min-height:36px;font-size:13px}
+#app main .chipfilter button.on{
+  color:var(--brand-ink);background:var(--brand-soft);border-color:var(--hint-line);
+}
+#app main .iv-zoneh{background:var(--panel2);color:var(--sub);font-weight:600}
+#app main .rowlist .row{transition:background .2s}
+#app main .rowlist .row:hover{padding-left:16px;background:var(--panel2)}
+#app main .tly-list{background:transparent;padding:0;color:var(--ink);min-width:0}
+#app main .tly-list .tly-actions{justify-content:flex-start;gap:8px;margin:0 0 20px}
+#app main .tly-list .tly-card{
+  margin:0;padding:16px 20px;border:1px solid var(--line);border-radius:8px;
+  box-shadow:none;background:var(--panel);
+}
+#app main .tly-list .tly-list-row{gap:16px;padding:16px 0}
+#app main .tly-list .tly-list-row:first-child{padding-top:0}
+#app main .tly-list .tly-list-row:last-child{border-bottom:0;padding-bottom:0}
+#app main .tly-list-row>div{min-width:0}
+#app main .tly-list-row h3{font-size:15px;font-weight:600;overflow-wrap:anywhere}
+#app main .tly-list-row .tly-muted{font-size:12px;margin:4px 0 0}
+#app main .bkp-toolbar{margin-bottom:20px}
+#app main .avu-page h2{color:var(--ink);font-size:15px;font-weight:600;margin-bottom:12px}
+#app main .viewback{margin-bottom:12px}
+#app main .viewback .btn{color:var(--sub);font-size:12px}
+@media(max-width:760px){
+  #app main h1.page{font-size:20px;margin-top:10px}
+  #app main .page-sub{margin-bottom:16px}
+  #app main .tly-list .tly-card{padding:14px}
+  #app main .tly-list .tly-list-row{flex-wrap:wrap;gap:10px}
+  #app main .tly-list-row>div{flex:1 1 180px}
+  #app main .avu-page .weekpager{gap:6px}
+  #app main .avu-page .weekpager .wm{white-space:nowrap;font-size:13px}
+  #app main .avu-page .weekpager .pg{font-size:11px;padding:5px 6px;gap:3px}
+}

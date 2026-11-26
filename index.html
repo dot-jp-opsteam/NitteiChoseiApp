@@ -6121,7 +6121,7 @@ let TLYLIST=null,TLYERR='',TLYEDIT=null,TLYDETAIL=null,TLYFILTER=null;
 async function tlyJSON(path,opts){const r=await api(path,opts),data=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(data.error||'通信に失敗しました');e.status=r.status;e.code=data.code;throw e;}return data;}
 async function loadTallyBoards(){TLYERR='';try{TLYLIST=(await tlyJSON('/api/tally-boards')).boards;}catch(e){TLYERR=e.message;}if(currentTab==='tally')renderQuiet();}
 function viewTally(){
- const head=`<div class="tly-surface tly-list"><div class="tly-hero"><h1>OPStappy</h1><p>みんなの空き時間を、ひとつの表に。</p><div class="tly-actions"><button class="btn" onclick="openTallyEditor()">${ic('plus')}今すぐ作る</button><button class="btn ghost" onclick="loadTallyBoards()">更新</button></div></div>`;
+ const head=`<div class="tly-list"><h1 class="page">OPStappy</h1><p class="page-sub">みんなの空き時間を、ひとつの表に。</p><div class="tly-actions"><button class="btn pri" onclick="openTallyEditor()">${ic('plus')}今すぐ作る</button><button class="btn" onclick="loadTallyBoards()">${ic('refresh')}更新</button></div>`;
  if(TLYERR)return head+`<div class="tly-status">${esc(TLYERR)}<br><button class="btn" onclick="loadTallyBoards()">再試行</button></div></div>`;
  if(TLYLIST===null)return head+'<div class="tly-card">読み込んでいます…</div></div>';
  if(!TLYLIST.length)return head+'<div class="tly-card"><p>まだイベントがありません。<br>「今すぐ作る」から始めてください。</p></div></div>';
