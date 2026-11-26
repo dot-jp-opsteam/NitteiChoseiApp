@@ -2135,7 +2135,7 @@ function viewHome(){
 
 /* =========================================================
    スタッフのホーム（2026-10-29 刷新。画像 01-home-approved）
-   上＝日付と「日程調整を作る」／3つの件数／左＝進行中の日程調整・右＝今日の予定／下＝面談申請リンク。
+   上＝日付と「日程調整を作る」／面談申請リンク／3つの件数／左＝進行中の日程調整・右＝今日の予定。
    進行中の一覧だけが中で縦スクロールする（件数が多いとき）。今日の予定には独立スクロールを付けない
    ========================================================= */
 let HM_LOADED=false;
@@ -2252,6 +2252,10 @@ function viewHomeStaff(){
     <div class="hm-top"><h2 class="hm-date">${hmDateLabel(now)}</h2>
       <button type="button" class="hm-create" onclick="openCreateMenu()">${ic('plus')}日程調整を作る</button></div>
     <p class="hm-lead">予定を確認して、日程調整を進めましょう。</p>
+    <section class="hm-link" data-demo="apply"><span class="hm-link-i">${ic('link')}</span>
+      <div class="hm-link-t"><b>面談申請リンク</b><small>希望時間帯を受け取り、30分の面談を確定します。</small></div>
+      <button type="button" class="hm-copy" onclick="hmCopyApplyLink(this)">${ic('copy')}リンクをコピー</button>
+    </section>
     ${interviewHomeReminder()}${dueHomeNotice()}
     <div class="hm-stats">
       ${card('s1','clock','確定待ち',pend,"go('interviews')")}
@@ -2264,10 +2268,6 @@ function viewHomeStaff(){
       <section class="hm-panel hm-today"><div class="hm-ph"><h2>今日の予定</h2><button type="button" onclick="setCalFull(true)">すべて見る${ic('chevron')}</button></div>
         ${tl}</section>
     </div>
-    <section class="hm-link" data-demo="apply"><span class="hm-link-i">${ic('link')}</span>
-      <div class="hm-link-t"><b>面談申請リンク</b><small>希望時間帯を受け取り、30分の面談を確定します。</small></div>
-      <button type="button" class="hm-copy" onclick="hmCopyApplyLink(this)">${ic('copy')}リンクをコピー</button>
-    </section>
     </div>
   </div>`;
 }
